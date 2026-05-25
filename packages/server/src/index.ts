@@ -124,6 +124,16 @@ async function handleRequest(request: Request): Promise<Response> {
       return json(ok({ models, providers }))
     }
 
+    if (request.method === "POST" && url.pathname === "/api/provider-api-key") {
+      const body = (await request.json()) as { provider?: string; apiKey?: string }
+      const provider = body.provider?.trim() ?? ""
+      const apiKey = body.apiKey?.trim() ?? ""
+      if (!provider) throw new Error("provider is required")
+      if (!apiKey) throw new Error("apiKey is required")
+      await writeProviderApiKey(provider, apiKey)
+      return json(ok(await readAuthStatus()))
+    }
+
     if (request.method === "POST" && url.pathname === "/api/models/test") {
       const body = (await request.json()) as { modelId?: string }
       const modelId = body.modelId?.trim() ?? ""
@@ -133,6 +143,14 @@ async function handleRequest(request: Request): Promise<Response> {
       const apiKey = await readProviderApiKey(model.provider)
       debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey) })
       return json(ok(await testModelConnection(model, apiKey)))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/models/test-config") {
+      const body = (await request.json()) as { model?: BraincodeModel; apiKey?: string }
+      if (!body.model) throw new Error("model is required")
+      const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderApiKey(body.model.provider) : undefined)
+      debugLog("server", "testing model config", { modelId: body.model.id, provider: body.model.provider, hasApiKey: Boolean(apiKey) })
+      return json(ok(await testModelConnection(body.model, apiKey)))
     }
 
     if (request.method === "PUT" && url.pathname === "/api/models") {

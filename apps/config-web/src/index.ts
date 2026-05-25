@@ -4,24 +4,25 @@ export const configWebHtml = `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BRAIN/CODE · Local AI Control Panel</title>
+    <link rel="icon" href="/resources/logo.png" type="image/png" />
     <style>
       :root {
         color-scheme: light;
-        --bg: oklch(98% 0.005 250);
-        --surface: oklch(100% 0 0);
-        --fg: oklch(22% 0.02 240);
-        --muted: oklch(50% 0.018 240);
-        --border: oklch(90% 0.008 240);
-        --accent: oklch(58% 0.16 145);
-        --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
-        --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
-        --bg-hover: oklch(96% 0.005 250);
-        --danger-fg: oklch(55% 0.2 25);
-        --danger-bg: oklch(95% 0.04 25);
-        --danger-border: oklch(90% 0.04 25);
-        --pre-bg: oklch(15% 0 0);
-        --pre-border: oklch(25% 0 0);
-        --pre-fg: oklch(95% 0 0);
+        --bg: #f5f0e8;
+        --surface: #faf8f4;
+        --fg: #2d2a27;
+        --muted: #6b6560;
+        --border: #c4b8a8;
+        --accent: #458588;
+        --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+        --fg-soft: color-mix(in srgb, var(--fg) 8%, transparent);
+        --bg-hover: #ede8e0;
+        --danger-fg: #9d0006;
+        --danger-bg: color-mix(in srgb, var(--danger-fg) 10%, var(--surface));
+        --danger-border: color-mix(in srgb, var(--danger-fg) 30%, var(--border));
+        --pre-bg: #ede8e0;
+        --pre-border: #d4c8b8;
+        --pre-fg: #1f1d1b;
         --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
         --font-body: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
         --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
@@ -40,6 +41,27 @@ export const configWebHtml = `<!doctype html>
         --gutter: 24px;
         --radius: 4px;
         --radius-lg: 6px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --bg: #1a1d21;
+          --surface: #25292e;
+          --fg: #d4d4d4;
+          --muted: #8a8f96;
+          --border: #3a3f45;
+          --accent: #8be9fd;
+          --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+          --fg-soft: color-mix(in srgb, var(--fg) 8%, transparent);
+          --bg-hover: #2d3238;
+          --danger-fg: #ff5555;
+          --danger-bg: color-mix(in srgb, var(--danger-fg) 15%, var(--surface));
+          --danger-border: color-mix(in srgb, var(--danger-fg) 40%, var(--border));
+          --pre-bg: #1f2327;
+          --pre-border: #3a3f45;
+          --pre-fg: #f8f8f2;
+        }
       }
 
       * { box-sizing: border-box; }
@@ -96,7 +118,7 @@ export const configWebHtml = `<!doctype html>
       }
       h3 { font-size: var(--fs-h3); }
       p { text-wrap: pretty; }
-      main { padding-block: var(--gap-lg); }
+      main { padding-block: 0 var(--gap-lg); }
       section {
         padding-block: var(--gap-lg);
         border-bottom: 1px solid var(--border);
@@ -142,9 +164,9 @@ export const configWebHtml = `<!doctype html>
         font: 500 13px var(--font-body);
         transition: background 0.1s, border-color 0.1s;
       }
-      button:hover { background: var(--bg-hover); border-color: color-mix(in oklch, var(--border) 80%, var(--fg)); }
+      button:hover { background: var(--bg-hover); border-color: color-mix(in srgb, var(--border) 80%, var(--fg)); }
       button.primary { border-color: var(--fg); background: var(--fg); color: var(--surface); }
-      button.primary:hover { background: color-mix(in oklch, var(--fg) 80%, black); }
+      button.primary:hover { background: color-mix(in srgb, var(--fg) 80%, black); }
       button.danger { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger-fg); }
       .poster-copy { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-lead); }
       .language-bar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; font: 12px var(--font-mono); color: var(--muted); }
@@ -177,7 +199,7 @@ export const configWebHtml = `<!doctype html>
       select.enhanced-select { display: none; }
       .combo { position: relative; width: 100%; }
       .combo-input { width: 100%; padding-right: 28px; cursor: pointer; }
-      .combo-list { display: none; position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 220px; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 4px 12px color-mix(in oklch, var(--fg) 10%, transparent); }
+      .combo-list { display: none; position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 220px; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 4px 12px color-mix(in srgb, var(--fg) 10%, transparent); }
       .combo.open .combo-list { display: block; }
       .combo-option { padding: 6px 10px; border-radius: 3px; cursor: pointer; font: 13px/1.3 var(--font-mono); }
       .combo-option:hover, .combo-option.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
@@ -236,7 +258,7 @@ export const configWebHtml = `<!doctype html>
           <p class="muted" data-i18n="modelsHint">Choose models from the provider catalog. The UI stores selected models in ~/.braincode/models.json.</p>
           <div class="panel-grid">
             <form id="model-form" class="card stack">
-              <h3 data-i18n="addModel">Add model</h3>
+              <h3 data-i18n="addFromCatalog">Add from catalog</h3>
               <div class="field"><label for="saved-provider-select" data-i18n="savedProviders">Saved providers</label><select id="saved-provider-select"></select></div>
               <div class="grid">
                 <div class="field"><label for="custom-provider" data-i18n="provider">Provider</label><input id="custom-provider" autocomplete="off" placeholder="openai" /></div>
@@ -246,7 +268,27 @@ export const configWebHtml = `<!doctype html>
               <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
               <div class="field"><label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select></div>
               <div class="field"><label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select></div>
+              <div class="field"><label for="catalog-api-key" data-i18n="apiKey">API key</label><input id="catalog-api-key" type="password" autocomplete="off" placeholder="Optional token saved for the selected provider" /></div>
               <button class="primary" type="submit" data-i18n="addSelectedModel">Add selected model</button>
+            </form>
+            <form id="manual-model-form" class="card stack">
+              <h3 data-i18n="addManualModel">Add custom model manually</h3>
+              <p class="muted" data-i18n="manualModelHint">Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.</p>
+              <div class="grid">
+                <div class="field"><label for="manual-provider" data-i18n="provider">Provider</label><input id="manual-provider" autocomplete="off" placeholder="openrouter" required /></div>
+                <div class="field"><label for="manual-model-id" data-i18n="modelId">Model ID</label><input id="manual-model-id" autocomplete="off" placeholder="anthropic/claude-sonnet-4.5" required /></div>
+                <div class="field"><label for="manual-name" data-i18n="modelName">Name</label><input id="manual-name" autocomplete="off" placeholder="Claude Sonnet 4.5" /></div>
+                <div class="field"><label for="manual-base-url" data-i18n="baseUrl">Base URL</label><input id="manual-base-url" autocomplete="off" placeholder="https://openrouter.ai/api/v1" /></div>
+                <div class="field"><label for="manual-api-key" data-i18n="apiKey">API key</label><input id="manual-api-key" type="password" autocomplete="off" placeholder="Optional token saved for this provider" /></div>
+                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai-responses">openai-responses</option><option value="openai-chat-completions">openai-chat-completions</option><option value="anthropic">anthropic</option><option value="google">google</option></select></div>
+                <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
+                <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
+              </div>
+              <div class="row-between">
+                <button id="test-manual-model" type="button" data-i18n="testConnection">Test connection</button>
+                <button class="primary" type="submit" data-i18n="addManualModelButton">Add custom model</button>
+              </div>
+              <div id="manual-test-result" class="test-result" hidden></div>
             </form>
             <div class="stack"><h3 data-i18n="configuredModels">Configured models</h3><div id="configured-models" class="list"></div></div>
           </div>
@@ -288,40 +330,52 @@ export const configWebHtml = `<!doctype html>
         en: {
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", defaultBrain: "Default brain id", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
-          modelsTitle: "Model selection", modelsHint: "Enter a provider, OpenAI-compatible base URL, and API key, then load /v1/models. Providers are saved in ~/.braincode/models.json; API keys are saved in ~/.braincode/auth.json.", addModel: "Add model", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", configuredModels: "Configured models",
+          modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Tool toggles will appear here when coding tools are implemented.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
-          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok"
+          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok",
+          thinking: "Thinking",
+          roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
+          roleDesc_coding: "Code execution: handles code edits, bug fixes, and verification. Best for strong coding models with stable tool-calling.",
+          roleDesc_research: "Fast retrieval: looks up references, locates code, and gathers facts. Best for fast, cheap, large-context models.",
+          roleDesc_review: "Audit and review: handles code review, risk auditing, and regression hunting. Best for rigorous reasoning and long-context models.",
+          roleDesc_summarize: "Summary and handoff: compresses context, generates handoffs, and consolidates results. Best for cheap, fast models.",
+          roleDesc_fastReply: "Quick reply: handles greetings, short questions, and lightweight responses. Best for the fastest, cheapest model.",
+          roleDesc_oracle: "Deep reasoning: handles complex architecture, hard bugs, and major decisions. Best for the strongest reasoning model, usually xhigh.",
+          roleDesc_librarian: "Large codebase comprehension: reads external repos and broad architecture. Best for long-context, code-savvy models."
         },
         zh: {
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", defaultBrain: "默认 Brain ID", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
-          modelsTitle: "模型选择", modelsHint: "填写 provider、OpenAI-compatible Base URL 和 API key，然后通过 /v1/models 获取模型。Provider 会保存到 ~/.braincode/models.json；API key 会保存到 ~/.braincode/auth.json。", addModel: "添加模型", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", configuredModels: "已配置模型",
+          modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "编码工具实现后，这里会显示工具开关。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
-          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常"
+          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常",
+          thinking: "思考",
+          roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
+          roleDesc_coding: "代码实现：负责改代码、修 bug、跑验证。适合强代码模型，优先稳定和工具调用能力。",
+          roleDesc_research: "快速检索：负责查资料、查代码位置、整理事实。适合速度快、成本低、上下文大的模型。",
+          roleDesc_review: "审查检查：负责 code review、风险审计、找回归。适合严谨推理和长上下文模型。",
+          roleDesc_summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。适合便宜快速模型。",
+          roleDesc_fastReply: "简单回复：负责问候、短问题、轻量响应。适合最快最低成本模型。",
+          roleDesc_oracle: "深度推理：负责复杂架构、疑难 bug、重大决策。适合最强推理模型，通常 xhigh。",
+          roleDesc_librarian: "大型代码库理解：负责外部仓库/大范围架构阅读。适合长上下文和代码理解强的模型。"
         }
       }
 
       const roles = ["routeBrain", "coding", "research", "review", "summarize", "fastReply", "oracle", "librarian"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
-      const roleLabels = { routeBrain: "路由大脑 / Router Brain", coding: "Coding", research: "Research", review: "Review", summarize: "Summarize", fastReply: "Fast reply", oracle: "Oracle", librarian: "Librarian" }
-      const roleDescriptions = {
-        routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
-        coding: "代码实现：负责改代码、修 bug、跑验证。适合强代码模型，优先稳定和工具调用能力。",
-        research: "快速检索：负责查资料、查代码位置、整理事实。适合速度快、成本低、上下文大的模型。",
-        review: "审查检查：负责 code review、风险审计、找回归。适合严谨推理和长上下文模型。",
-        summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。适合便宜快速模型。",
-        fastReply: "简单回复：负责问候、短问题、轻量响应。适合最快最低成本模型。",
-        oracle: "深度推理：负责复杂架构、疑难 bug、重大决策。适合最强推理模型，通常 xhigh。",
-        librarian: "大型代码库理解：负责外部仓库/大范围架构阅读。适合长上下文和代码理解强的模型。"
-      }
+      function roleLabel(role) { return t("roleLabel_" + role) }
+      function roleDescription(role) { return t("roleDesc_" + role) }
       const status = document.querySelector("#status")
       const authStatus = document.querySelector("#auth-status")
       const refresh = document.querySelector("#refresh")
       const language = document.querySelector("#language")
       const settingsForm = document.querySelector("#settings-form")
       const modelForm = document.querySelector("#model-form")
+      const manualModelForm = document.querySelector("#manual-model-form")
       const brainForm = document.querySelector("#brain-form")
       const hostInput = document.querySelector("#host")
       const portInput = document.querySelector("#port")
@@ -334,6 +388,17 @@ export const configWebHtml = `<!doctype html>
       const loadProviderModelsButton = document.querySelector("#load-provider-models")
       const providerSelect = document.querySelector("#provider-select")
       const catalogModelSelect = document.querySelector("#catalog-model-select")
+      const catalogApiKeyInput = document.querySelector("#catalog-api-key")
+      const manualProviderInput = document.querySelector("#manual-provider")
+      const manualModelIdInput = document.querySelector("#manual-model-id")
+      const manualNameInput = document.querySelector("#manual-name")
+      const manualBaseUrlInput = document.querySelector("#manual-base-url")
+      const manualApiKeyInput = document.querySelector("#manual-api-key")
+      const manualApiInput = document.querySelector("#manual-api")
+      const manualContextWindowInput = document.querySelector("#manual-context-window")
+      const manualThinkingInput = document.querySelector("#manual-thinking")
+      const testManualModelButton = document.querySelector("#test-manual-model")
+      const manualTestResult = document.querySelector("#manual-test-result")
       const configuredModels = document.querySelector("#configured-models")
       const brainSelect = document.querySelector("#brain-select")
       const applyAllModel = document.querySelector("#apply-all-model")
@@ -449,6 +514,35 @@ export const configWebHtml = `<!doctype html>
         return provider?.models.find((candidate) => candidate.id === catalogModelSelect.value)
       }
 
+      function normalizeBaseUrl(value) {
+        const trimmed = value.trim().replace(new RegExp("/+$"), "")
+        if (!trimmed) return ""
+        return trimmed.endsWith("/v1") ? trimmed : trimmed + "/v1"
+      }
+
+      function manualModelFromForm() {
+        const provider = manualProviderInput.value.trim()
+        const modelId = manualModelIdInput.value.trim()
+        const name = manualNameInput.value.trim() || modelId
+        const baseUrl = normalizeBaseUrl(manualBaseUrlInput.value)
+        const contextWindow = Number(manualContextWindowInput.value) || 128000
+        return {
+          id: provider + "/" + modelId,
+          provider,
+          modelId,
+          name,
+          api: manualApiInput.value,
+          ...(baseUrl ? { baseUrl } : {}),
+          contextWindow,
+          supportsTools: true,
+          defaultThinkingLevel: manualThinkingInput.value,
+        }
+      }
+
+      function mergeConfiguredModel(model) {
+        return currentModels.models.some((candidate) => candidate.id === model.id) ? currentModels.models : [...currentModels.models, model]
+      }
+
       function renderConfiguredModels() {
         if (currentModels.models.length === 0) { configuredModels.innerHTML = '<div class="item">' + t("none") + '</div>'; return }
         configuredModels.replaceChildren(...currentModels.models.map((model) => {
@@ -495,7 +589,7 @@ export const configWebHtml = `<!doctype html>
           const row = document.createElement("div")
           row.className = "role-row"
           const label = document.createElement("label")
-          label.textContent = roleLabels[role] || role
+          label.textContent = roleLabel(role) || role
           const select = document.createElement("select")
           select.dataset.role = role
           select.replaceChildren(...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
@@ -616,10 +710,38 @@ export const configWebHtml = `<!doctype html>
         }
       }
 
+      async function testManualModel() {
+        const model = manualModelFromForm()
+        if (!model.provider || !model.modelId) return
+        const previous = testManualModelButton.textContent
+        testManualModelButton.disabled = true
+        testManualModelButton.textContent = t("testing") + "..."
+        manualTestResult.hidden = false
+        manualTestResult.className = "test-result"
+        manualTestResult.textContent = t("testing") + " " + model.id + "..."
+        status.textContent = t("testing") + " " + model.id
+        try {
+          const result = await postJson("/api/models/test-config", { model, apiKey: manualApiKeyInput.value.trim() })
+          const message = t("testOk") + ": " + result.message
+          manualTestResult.className = "test-result ok"
+          manualTestResult.textContent = message
+          status.textContent = message
+        } catch (error) {
+          const message = t("failed") + ": " + String(error?.message || error)
+          manualTestResult.className = "test-result fail"
+          manualTestResult.textContent = message
+          showError(error)
+        } finally {
+          testManualModelButton.disabled = false
+          testManualModelButton.textContent = previous
+        }
+      }
+
       refresh.addEventListener("click", () => loadAll().catch(showError))
       language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderBrainRouting(); renderTools() })
       savedProviderSelect.addEventListener("change", applySavedProvider)
       loadProviderModelsButton.addEventListener("click", () => loadProviderModels().catch(showError))
+      testManualModelButton.addEventListener("click", () => testManualModel().catch(showError))
       providerSelect.addEventListener("change", renderCatalogModels)
       brainSelect.addEventListener("change", renderBrainRouting)
       applyAllRoles.addEventListener("click", () => {
@@ -640,9 +762,24 @@ export const configWebHtml = `<!doctype html>
         event.preventDefault()
         const model = selectedCatalogModel()
         if (!model) return
-        const nextModels = currentModels.models.some((candidate) => candidate.id === model.id) ? currentModels.models : [...currentModels.models, model]
         status.textContent = t("saving") + " models..."
-        putJson("/api/models", { ...currentModels, models: nextModels }).then((savedModels) => { currentModels = savedModels; renderSavedProviders(); renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
+        const saveKey = catalogApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: catalogApiKeyInput.value.trim() }) : Promise.resolve(null)
+        saveKey.then((auth) => {
+          if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+          return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
+        }).then((savedModels) => { currentModels = savedModels; catalogApiKeyInput.value = ""; renderSavedProviders(); renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
+      })
+
+      manualModelForm.addEventListener("submit", (event) => {
+        event.preventDefault()
+        const model = manualModelFromForm()
+        if (!model.provider || !model.modelId) return
+        status.textContent = t("saving") + " models..."
+        const saveKey = manualApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: manualApiKeyInput.value.trim() }) : Promise.resolve(null)
+        saveKey.then((auth) => {
+          if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+          return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
+        }).then((savedModels) => { currentModels = savedModels; manualModelForm.reset(); manualContextWindowInput.value = "128000"; manualThinkingInput.value = "medium"; renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
       })
 
       brainForm.addEventListener("submit", (event) => {

@@ -153,11 +153,13 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
 
 async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string): Promise<void> {
   const baseUrl = normalizeOpenAICompatibleBaseUrl(model.baseUrl ?? "")
+  const kimiCoding = isKimiCodingModel(model, baseUrl)
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
+      ...(kimiCoding ? { "user-agent": "claude-code/0.1.0" } : {}),
     },
     body: JSON.stringify({
       model: model.modelId,
@@ -165,8 +167,8 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
         { role: "system", content: "You are testing model connectivity. Reply with exactly: OK" },
         { role: "user", content: "Reply with exactly: OK" },
       ],
-      max_tokens: 8,
-      temperature: 0,
+      max_tokens: kimiCoding ? 32 : 8,
+      temperature: kimiCoding ? 0.6 : 0,
     }),
   })
 
@@ -176,10 +178,17 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
     throw new Error(`Model generation test failed: ${message}`)
   }
 
+  if (kimiCoding) {
+    return
+  }
   const text = body?.choices?.[0]?.message?.content
   if (typeof text !== "string" || !text.trim()) {
     throw new Error("Model generation test returned an empty response")
   }
+}
+
+function isKimiCodingModel(model: BraincodeModel, baseUrl: string): boolean {
+  return baseUrl === "https://api.kimi.com/coding/v1" || model.provider.toLowerCase().includes("kimi") || model.modelId.toLowerCase().includes("kimi-for-coding")
 }
 
 function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
