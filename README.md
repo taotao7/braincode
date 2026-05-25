@@ -1,5 +1,7 @@
 # Braincode
 
+<img width="1774" height="887" alt="ChatGPT Image 2026年5月25日 14_44_11" src="https://github.com/user-attachments/assets/d1d8a807-7438-470f-96a8-e7fc94c45cfe" />
+
 Braincode is a Bun-based monorepo for a coding-first AI agent that can also handle general tasks.
 
 Its main idea is a user-selectable **Brain Model**: a high-level strategy profile that dynamically plans which underlying model, agent role, tools, and context budget should be used for each part of a task.
