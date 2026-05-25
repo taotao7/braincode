@@ -2,6 +2,20 @@
 
 This repository is the `braincode` project: a Bun-based monorepo for building a coding-first AI agent that can also perform general tasks.
 
+Use this file for durable engineering rules. Use the documents under [`docs/`](./docs/) as the source of truth for project architecture, structure, planning, and references.
+
+## Project references
+
+- Main architecture: [`docs/architecture.md`](./docs/architecture.md)
+- Project goals and non-goals: [`docs/project-structure.md#goals`](./docs/project-structure.md#goals) and [`docs/project-structure.md#non-goals-for-the-first-phase`](./docs/project-structure.md#non-goals-for-the-first-phase)
+- Runtime and infrastructure: [`docs/project-structure.md#runtime-and-infrastructure`](./docs/project-structure.md#runtime-and-infrastructure)
+- Planned repository layout: [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout)
+- Package responsibilities: [`docs/project-structure.md#package-responsibilities`](./docs/project-structure.md#package-responsibilities)
+- Milestones: [`docs/project-structure.md#initial-milestones`](./docs/project-structure.md#initial-milestones)
+- External references: [`docs/references.md`](./docs/references.md)
+
+When changing architecture, structure, or planning, update the relevant `docs/` file first or in the same change. Do not let this file become a second copy of the full plan.
+
 ## Runtime and package management
 
 - Use Bun by default.
@@ -22,6 +36,8 @@ This repository is the `braincode` project: a Bun-based monorepo for building a 
 - Do not let UI packages depend on agent internals directly; communicate through protocol/shared types.
 - Do not let agent workers share full conversation history. Use isolated contexts and structured handoff/result messages.
 - Do not fork pi-mono unless there is no viable public API or integration point.
+- Follow the planned layout in [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout) unless a change is intentionally updating the plan.
+- Keep package ownership aligned with [`docs/project-structure.md#package-responsibilities`](./docs/project-structure.md#package-responsibilities).
 
 ## Pi integration direction
 
@@ -44,19 +60,12 @@ This repository is the `braincode` project: a Bun-based monorepo for building a 
 - Secrets belong in `~/.braincode/auth.json` or a future secure credential store, never in committed files.
 - Treat `~/.braincode/auth.json` as sensitive and ensure restrictive permissions when writing it.
 
-## Suggested package boundaries
+## Project structure and planning
 
-- `apps/cli`: CLI entrypoint and command wiring only.
-- `apps/config-web`: browser configuration UI.
-- `packages/config`: config schema, default values, migrations, and `~/.braincode/` persistence.
-- `packages/server`: local Bun server, API routes, WebSocket/SSE endpoints.
-- `packages/brain`: brain model definitions, planning, routing, model selection policies.
-- `packages/agent-runtime`: wrapper around Pi agent runtime and Braincode session execution.
-- `packages/llm`: provider/model registry and Pi AI integration.
-- `packages/context`: context isolation, compaction policy, handoff/result packets.
-- `packages/protocol`: shared message/event/RPC types between CLI, server, UI, and agents.
-- `packages/tools`: tool registry, tool permissions, coding tools, and safe execution policy.
-- `packages/shared`: dependency-light shared types/utilities.
+- Keep the workspace shape aligned with [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout).
+- Keep package responsibilities aligned with [`docs/project-structure.md#package-responsibilities`](./docs/project-structure.md#package-responsibilities).
+- Keep implementation order aligned with [`docs/project-structure.md#initial-milestones`](./docs/project-structure.md#initial-milestones), unless the user explicitly reprioritizes.
+- If code changes reveal that the plan is wrong, update the relevant `docs/` file rather than encoding hidden architectural decisions only in code.
 
 ## Development rules
 
