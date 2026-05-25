@@ -7,11 +7,14 @@ const brain: BrainModel = {
   description: "Test brain",
   planner: { modelId: "planner", thinkingLevel: "medium" },
   roles: {
+    routeBrain: { modelId: "planner", thinkingLevel: "xhigh" },
     coding: { modelId: "coding", thinkingLevel: "medium" },
     research: { modelId: "research", thinkingLevel: "low" },
     review: { modelId: "review", thinkingLevel: "high" },
     summarize: { modelId: "summarize", thinkingLevel: "low" },
     fastReply: { modelId: "fast", thinkingLevel: "minimal" },
+    oracle: { modelId: "oracle", thinkingLevel: "xhigh" },
+    librarian: { modelId: "librarian", thinkingLevel: "high" },
   },
   routing: {
     maxParallelAgents: 2,

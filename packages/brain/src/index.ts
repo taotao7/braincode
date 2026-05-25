@@ -1,6 +1,7 @@
 export type ModelPolicy = {
   modelId: string
   thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+  systemPrompt?: string
 }
 
 export type BraincodeMode = "auto" | "radical"
@@ -11,11 +12,14 @@ export type BrainModel = {
   description: string
   planner: ModelPolicy
   roles: {
+    routeBrain: ModelPolicy
     coding: ModelPolicy
     research: ModelPolicy
     review: ModelPolicy
     summarize: ModelPolicy
     fastReply: ModelPolicy
+    oracle: ModelPolicy
+    librarian: ModelPolicy
   }
   routing: {
     maxParallelAgents: number

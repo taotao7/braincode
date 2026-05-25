@@ -1,5 +1,8 @@
 import {
+  defaultBrains,
+  defaultModels,
   ensureBraincodeHome,
+  readProviderApiKey,
   readAuthStatus,
   readBrains,
   readModels,
@@ -7,6 +10,7 @@ import {
   readTools,
   writeBrains,
   writeModels,
+  writeProviderApiKey,
   writeSettings,
   writeTools,
   type BraincodeBrains,
@@ -15,8 +19,9 @@ import {
   type BraincodeTools,
 } from "@braincode/config"
 import { configWebHtml } from "@braincode/config-web"
+import { listBuiltInModelCatalog, listOpenAICompatibleModels, testModelConnection, type BraincodeModel } from "@braincode/llm"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
-import { DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
+import { debugLog, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
 
 export type ConfigServerOptions = {
   host?: string
@@ -43,6 +48,7 @@ function fail(error: unknown, status = 500): Response {
 
 async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url)
+  debugLog("server", "request", { method: request.method, path: url.pathname })
 
   try {
     if (request.method === "GET" && url.pathname === "/") {
@@ -68,6 +74,10 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "GET" && url.pathname === "/api/brains") {
       const brains = await readBrains()
+      if (brains.brains.length === 0) {
+        await writeBrains(defaultBrains)
+        return json(ok(defaultBrains))
+      }
       return json(ok(brains))
     }
 
@@ -79,7 +89,42 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "GET" && url.pathname === "/api/models") {
       const models = await readModels()
+      if (models.models.length === 0) {
+        await writeModels(defaultModels)
+        return json(ok(defaultModels))
+      }
       return json(ok(models))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/model-catalog") {
+      return json(ok({ providers: listBuiltInModelCatalog() }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/provider-models") {
+      const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string }
+      const provider = body.provider?.trim() ?? ""
+      const apiKey = body.apiKey?.trim() || (provider ? await readProviderApiKey(provider) : undefined)
+      debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, hasApiKey: Boolean(apiKey) })
+      const models = await listOpenAICompatibleModels({ provider, baseUrl: body.baseUrl ?? "", apiKey })
+      const savedModels = await readModels()
+      const providers = [
+        { provider, baseUrl: models[0]?.baseUrl ?? body.baseUrl },
+        ...((savedModels.providers ?? []) as Array<{ provider?: unknown }>).filter((entry) => entry.provider !== provider),
+      ]
+      await writeModels({ ...savedModels, providers })
+      if (body.apiKey?.trim()) await writeProviderApiKey(provider, body.apiKey)
+      return json(ok({ models, providers }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/models/test") {
+      const body = (await request.json()) as { modelId?: string }
+      const modelId = body.modelId?.trim() ?? ""
+      const savedModels = await readModels()
+      const model = (savedModels.models as BraincodeModel[]).find((candidate) => candidate.id === modelId)
+      if (!model) throw new Error(`Unknown configured model id: ${modelId}`)
+      const apiKey = await readProviderApiKey(model.provider)
+      debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey) })
+      return json(ok(await testModelConnection(model, apiKey)))
     }
 
     if (request.method === "PUT" && url.pathname === "/api/models") {
@@ -116,6 +161,7 @@ export async function startConfigServer(options: ConfigServerOptions = {}): Prom
 
   const host = options.host ?? settings.configServer.host ?? DEFAULT_CONFIG_HOST
   const port = options.port ?? settings.configServer.port ?? DEFAULT_CONFIG_PORT
+  debugLog("server", "starting config server", { host, port })
 
   const server = Bun.serve({
     hostname: host,

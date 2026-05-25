@@ -1,8 +1,15 @@
 import { expect, test } from "bun:test"
-import { listBuiltInProviders, toBraincodeModel } from "./index"
+import { listBuiltInModelCatalog, listBuiltInProviders, toBraincodeModel } from "./index"
 
 test("listBuiltInProviders exposes Pi providers", () => {
   expect(listBuiltInProviders()).toContain("anthropic")
+})
+
+test("listBuiltInModelCatalog exposes selectable provider models", () => {
+  const catalog = listBuiltInModelCatalog()
+  const anthropic = catalog.find((entry) => entry.provider === "anthropic")
+
+  expect(anthropic?.models.some((model) => model.modelId === "claude-sonnet-4-5-20250929")).toBe(true)
 })
 
 test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
@@ -24,6 +31,8 @@ test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
     provider: "example-provider",
     modelId: "example-model",
     name: "Example Model",
+    api: "example-api",
+    baseUrl: "https://example.test",
     contextWindow: 1000,
     supportsTools: true,
     defaultThinkingLevel: "off",

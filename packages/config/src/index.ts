@@ -25,6 +25,7 @@ export type BraincodeBrains = {
 
 export type BraincodeModels = {
   models: unknown[]
+  providers?: unknown[]
 }
 
 export type BraincodeTools = {
@@ -69,13 +70,52 @@ export const defaultBrains: BraincodeBrains = {
       id: "default",
       name: "Default Brain",
       description: "Default Braincode routing profile for early development.",
-      planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+      planner: {
+        modelId: "azure-openai-responses/gpt-5.5",
+        thinkingLevel: "xhigh",
+        systemPrompt: "You are Braincode's router brain. Understand the user's intent, choose the right agent role, split work when needed, and coordinate other agents through concise structured instructions.",
+      },
       roles: {
-        coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
-        research: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
-        review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
-        summarize: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
-        fastReply: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
+        routeBrain: {
+          modelId: "azure-openai-responses/gpt-5.5",
+          thinkingLevel: "xhigh",
+          systemPrompt: "You are the router brain. Classify intent, select the best role, and manage agent handoffs without sharing full private context.",
+        },
+        coding: {
+          modelId: "anthropic/claude-sonnet-4-6",
+          thinkingLevel: "medium",
+          systemPrompt: "You are the coding agent. Make small correct code changes, follow project conventions, run focused verification, and report outcomes honestly.",
+        },
+        research: {
+          modelId: "google/gemini-3-flash-preview",
+          thinkingLevel: "low",
+          systemPrompt: "You are the research agent. Find relevant facts quickly, cite concrete sources or files, and return concise actionable findings.",
+        },
+        review: {
+          modelId: "google/gemini-3.1-pro-preview",
+          thinkingLevel: "high",
+          systemPrompt: "You are the review agent. Inspect code for correctness, regressions, security issues, and missing tests. Prioritize concrete findings.",
+        },
+        summarize: {
+          modelId: "google/gemini-3-flash-preview",
+          thinkingLevel: "low",
+          systemPrompt: "You are the summarizer agent. Preserve decisions, changed files, validation results, caveats, and next steps in compact handoff form.",
+        },
+        fastReply: {
+          modelId: "google/gemini-3-flash-preview",
+          thinkingLevel: "minimal",
+          systemPrompt: "You are the fast reply agent. Answer simple questions directly and avoid unnecessary tool use or long explanations.",
+        },
+        oracle: {
+          modelId: "azure-openai-responses/gpt-5.5",
+          thinkingLevel: "xhigh",
+          systemPrompt: "You are the oracle agent. Provide deep reasoning, architecture guidance, debugging plans, and tradeoff analysis for difficult engineering tasks.",
+        },
+        librarian: {
+          modelId: "anthropic/claude-sonnet-4-6",
+          thinkingLevel: "high",
+          systemPrompt: "You are the librarian agent. Understand large or external codebases, trace architecture, and return precise file/function-level explanations.",
+        },
       },
       routing: {
         maxParallelAgents: 2,
@@ -94,13 +134,41 @@ export const defaultBrains: BraincodeBrains = {
 export const defaultModels: BraincodeModels = {
   models: [
     {
-      id: "anthropic/claude-sonnet-4-5-20250929",
+      id: "azure-openai-responses/gpt-5.5",
+      provider: "azure-openai-responses",
+      modelId: "gpt-5.5",
+      name: "GPT-5.5",
+      api: "azure-openai-responses",
+      contextWindow: 272000,
+      supportsTools: true,
+      defaultThinkingLevel: "xhigh",
+    },
+    {
+      id: "anthropic/claude-sonnet-4-6",
       provider: "anthropic",
-      modelId: "claude-sonnet-4-5-20250929",
-      name: "Claude Sonnet 4.5",
+      modelId: "claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6",
       contextWindow: 200000,
       supportsTools: true,
       defaultThinkingLevel: "medium",
+    },
+    {
+      id: "google/gemini-3.1-pro-preview",
+      provider: "google",
+      modelId: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+      contextWindow: 1000000,
+      supportsTools: true,
+      defaultThinkingLevel: "high",
+    },
+    {
+      id: "google/gemini-3-flash-preview",
+      provider: "google",
+      modelId: "gemini-3-flash-preview",
+      name: "Gemini 3 Flash Preview",
+      contextWindow: 1000000,
+      supportsTools: true,
+      defaultThinkingLevel: "low",
     },
   ],
 }
@@ -215,6 +283,18 @@ export async function writeSettings(settings: BraincodeSettings, home = getBrain
 export async function readAuth(home = getBraincodeHome()): Promise<BraincodeAuth> {
   const paths = await ensureBraincodeHome(home)
   return readJsonFile(paths.auth, defaultAuth)
+}
+
+export async function writeProviderApiKey(provider: string, apiKey: string, home = getBraincodeHome()): Promise<void> {
+  const normalizedProvider = provider.trim()
+  if (!normalizedProvider) throw new Error("provider is required")
+  if (!apiKey.trim()) return
+
+  const paths = await ensureBraincodeHome(home)
+  const auth = await readAuth(home)
+  auth.providers[normalizedProvider] = { apiKey: apiKey.trim() }
+  await writeJsonFile(paths.auth, auth)
+  await chmod(paths.auth, 0o600)
 }
 
 export function getProviderApiKey(auth: BraincodeAuth, provider: string): string | undefined {

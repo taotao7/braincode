@@ -28,6 +28,7 @@
         "@braincode/brain": "workspace:*",
         "@braincode/config": "workspace:*",
         "@braincode/llm": "workspace:*",
+        "@braincode/shared": "workspace:*",
         "@earendil-works/pi-agent-core": "^0.75.5",
         "@earendil-works/pi-ai": "^0.75.5",
       },
@@ -50,6 +51,7 @@
     "packages/llm": {
       "name": "@braincode/llm",
       "dependencies": {
+        "@braincode/shared": "workspace:*",
         "@earendil-works/pi-ai": "^0.75.5",
       },
     },
@@ -64,6 +66,7 @@
       "dependencies": {
         "@braincode/config": "workspace:*",
         "@braincode/config-web": "workspace:*",
+        "@braincode/llm": "workspace:*",
         "@braincode/protocol": "workspace:*",
         "@braincode/shared": "workspace:*",
       },

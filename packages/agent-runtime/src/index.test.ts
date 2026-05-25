@@ -59,11 +59,14 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
             description: "Test brain",
             planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
             roles: {
+              routeBrain: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               research: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
               review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
               summarize: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
               fastReply: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
+              oracle: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              librarian: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
             },
             routing: {
               maxParallelAgents: 2,
@@ -92,7 +95,7 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
 test("executePromptFromConfig fails clearly before provider execution when auth is missing", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-auth-test-"))
   try {
-    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("Missing API key for provider 'anthropic'")
+    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("Missing API key for provider 'google'")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

@@ -11,6 +11,7 @@
   "dependencies": {
     "@braincode/config": "workspace:*",
     "@braincode/config-web": "workspace:*",
+    "@braincode/llm": "workspace:*",
     "@braincode/protocol": "workspace:*",
     "@braincode/shared": "workspace:*"
   }
