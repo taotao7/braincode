@@ -52,6 +52,8 @@ bun run braincode -- help
 bun run config
 bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
+bun run braincode -- run "hello"
 ```
 
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.
+Real `run` requires a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.

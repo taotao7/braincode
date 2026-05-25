@@ -92,7 +92,7 @@ Expected commands:
 - `braincode config` — start local configuration server and print/open the URL.
 - `braincode daemon` — future long-running service mode.
 - `braincode run --dry-run <task>` — inspect mode, brain, role, and model selection without making provider calls.
-- `braincode run <task>` — future non-interactive execution.
+- `braincode run <task>` — execute one non-interactive prompt through the configured provider when auth is available.
 
 The CLI should stay thin. It should delegate implementation to packages.
 

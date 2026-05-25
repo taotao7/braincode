@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
-import { ensureBraincodeHome, readAuthStatus, readBrains, readModels, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readModels, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -71,10 +71,26 @@ test("auth status lists configured provider names without returning secrets", as
   await expect(readAuthStatus(home)).resolves.toEqual({ configuredProviders: ["anthropic"] })
 })
 
+test("getProviderApiKey supports string and object auth entries", () => {
+  expect(getProviderApiKey({ providers: { anthropic: "sk-ant" } }, "anthropic")).toBe("sk-ant")
+  expect(getProviderApiKey({ providers: { anthropic: { apiKey: "sk-ant-object" } } }, "anthropic")).toBe("sk-ant-object")
+  expect(getProviderApiKey({ providers: { anthropic: { token: "not-supported" } } }, "anthropic")).toBeUndefined()
+})
+
 test("non-secret config documents must keep their top-level arrays", async () => {
   const home = await makeTempHome()
 
   await expect(writeBrains({} as never, home)).rejects.toThrow("brains.json must contain a brains array")
   await expect(writeModels({} as never, home)).rejects.toThrow("models.json must contain a models array")
   await expect(writeTools({} as never, home)).rejects.toThrow("tools.json must contain a tools array")
+})
+
+test("appendSessionRecord writes jsonl session records", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await appendSessionRecord("test-session", { type: "run_start", prompt: "hello" }, home)
+
+  const text = await Bun.file(join(paths.sessions, "test-session.jsonl")).text()
+  expect(text.trim()).toContain('"type":"run_start"')
 })

@@ -1,7 +1,7 @@
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
 import type { Model } from "@earendil-works/pi-ai"
 import { getModePolicy, selectAgentRole, selectBrain, selectModelPolicy, type AgentRole, type BrainModel, type BraincodeMode, type ModelPolicy } from "@braincode/brain"
-import { defaultBrains, defaultModels, readBrains, readModels, readSettings } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readModels, readProviderApiKey, readSettings } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 
@@ -13,6 +13,7 @@ export type AgentRunRequest = {
 export type AgentRunResult = {
   sessionId: string
   summary: string
+  plan: RuntimePlan
 }
 
 export type RuntimeModelSelection = {
@@ -27,6 +28,7 @@ export type BraincodeAgentRuntimeOptions = {
   model: BraincodeModel
   policy: ModelPolicy
   sessionId?: string
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
 }
 
@@ -77,6 +79,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       tools: [],
       messages: [],
     },
+    getApiKey: options.getApiKey,
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
   })
 
@@ -122,5 +125,53 @@ export async function planRuntimeFromConfig(prompt: string, home?: string): Prom
       contextWindow: selection.piModel.contextWindow,
     },
     toolExecution: settings.mode === "radical" ? "parallel" : "sequential",
+  }
+}
+
+function extractAssistantText(messages: unknown[]): string {
+  const assistantMessages = messages.filter((message) => {
+    return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "assistant"
+  })
+
+  const lastAssistant = assistantMessages.at(-1) as { content?: unknown } | undefined
+  if (!lastAssistant || !Array.isArray(lastAssistant.content)) return ""
+
+  return lastAssistant.content
+    .filter((content): content is { type: "text"; text: string } => {
+      return typeof content === "object" && content !== null && (content as { type?: unknown }).type === "text" && typeof (content as { text?: unknown }).text === "string"
+    })
+    .map((content) => content.text)
+    .join("\n")
+}
+
+export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
+  const plan = await planRuntimeFromConfig(request.prompt, home)
+  const apiKey = await readProviderApiKey(plan.piModel.provider, home)
+
+  if (!apiKey) {
+    throw new Error(`Missing API key for provider '${plan.piModel.provider}'. Add it to ~/.braincode/auth.json under providers.${plan.piModel.provider}.apiKey`)
+  }
+
+  const sessionId = request.sessionId ?? crypto.randomUUID()
+  await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan }, home)
+
+  const runtime = createBraincodeAgentRuntime({
+    mode: plan.mode,
+    systemPrompt: "You are Braincode, a coding-first AI agent. Follow the user's request concisely and safely.",
+    model: plan.model,
+    policy: plan.policy,
+    sessionId,
+    getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
+  })
+
+  try {
+    await runtime.agent.prompt(request.prompt)
+    const summary = extractAssistantText(runtime.agent.state.messages)
+    await appendSessionRecord(sessionId, { type: "run_end", summary }, home)
+    return { sessionId, summary, plan }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await appendSessionRecord(sessionId, { type: "run_error", error: message }, home)
+    throw error
   }
 }

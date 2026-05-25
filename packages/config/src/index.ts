@@ -1,4 +1,4 @@
-import { chmod, mkdir } from "node:fs/promises"
+import { appendFile, chmod, mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { BRAINCODE_HOME_DIR_NAME, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
@@ -33,6 +33,11 @@ export type BraincodeTools = {
 
 export type AuthStatus = {
   configuredProviders: string[]
+}
+
+export type SessionRecord = {
+  type: string
+  [key: string]: unknown
 }
 
 export type BraincodePaths = {
@@ -212,6 +217,21 @@ export async function readAuth(home = getBraincodeHome()): Promise<BraincodeAuth
   return readJsonFile(paths.auth, defaultAuth)
 }
 
+export function getProviderApiKey(auth: BraincodeAuth, provider: string): string | undefined {
+  const value = auth.providers[provider]
+  if (typeof value === "string" && value.trim()) return value
+  if (!value || typeof value !== "object") return undefined
+
+  const record = value as Record<string, unknown>
+  if (typeof record.apiKey === "string" && record.apiKey.trim()) return record.apiKey
+  return undefined
+}
+
+export async function readProviderApiKey(provider: string, home = getBraincodeHome()): Promise<string | undefined> {
+  const auth = await readAuth(home)
+  return getProviderApiKey(auth, provider)
+}
+
 export async function readAuthStatus(home = getBraincodeHome()): Promise<AuthStatus> {
   const auth = await readAuth(home)
   return {
@@ -250,4 +270,14 @@ export async function writeTools(tools: BraincodeTools, home = getBraincodeHome(
   assertDocumentArray(tools, "tools")
   const paths = await ensureBraincodeHome(home)
   await writeJsonFile(paths.tools, tools)
+}
+
+export async function appendSessionRecord(sessionId: string, record: SessionRecord, home = getBraincodeHome()): Promise<void> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(sessionId)) {
+    throw new Error("sessionId may only contain letters, numbers, dots, underscores, and dashes")
+  }
+
+  const paths = await ensureBraincodeHome(home)
+  const line = JSON.stringify({ timestamp: Date.now(), ...record })
+  await appendFile(join(paths.sessions, `${sessionId}.jsonl`), `${line}\n`, "utf8")
 }

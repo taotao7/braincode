@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { planRuntimeFromConfig, selectRuntimeModel } from "./index"
+import { executePromptFromConfig, planRuntimeFromConfig, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -84,6 +84,15 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     expect(plan.role).toBe("review")
     expect(plan.toolExecution).toBe("parallel")
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test("executePromptFromConfig fails clearly before provider execution when auth is missing", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-auth-test-"))
+  try {
+    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("Missing API key for provider 'anthropic'")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

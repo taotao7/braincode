@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { planRuntimeFromConfig } from "@braincode/agent-runtime"
+import { executePromptFromConfig, planRuntimeFromConfig } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 
 function readFlag(args: string[], name: string): string | undefined {
@@ -14,12 +14,12 @@ function printHelp() {
 
 Usage:
   braincode config [--port <port>] [--host <host>]
-  braincode run --dry-run <prompt>
+  braincode run [--dry-run] <prompt>
   braincode help
 
 Commands:
   config   Start the local browser configuration service.
-  run      Plan a task. Real model execution is not enabled yet; use --dry-run.
+  run      Plan or execute a task using the configured brain and model.
   help     Show this help message.
 `)
 }
@@ -47,15 +47,18 @@ async function runTask(args: string[]) {
   const prompt = args.filter((arg) => arg !== "--dry-run").join(" ").trim()
 
   if (!prompt) {
-    throw new Error("Missing prompt. Usage: braincode run --dry-run <prompt>")
+    throw new Error("Missing prompt. Usage: braincode run [--dry-run] <prompt>")
   }
 
-  if (!dryRun) {
-    throw new Error("Real model execution is not implemented yet. Use: braincode run --dry-run <prompt>")
+  if (dryRun) {
+    const plan = await planRuntimeFromConfig(prompt)
+    console.log(JSON.stringify(plan, null, 2))
+    return
   }
 
-  const plan = await planRuntimeFromConfig(prompt)
-  console.log(JSON.stringify(plan, null, 2))
+  const result = await executePromptFromConfig({ prompt })
+  console.log(result.summary)
+  console.error(`\nSession: ${result.sessionId}`)
 }
 
 async function main() {
