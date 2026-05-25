@@ -6,6 +6,10 @@ Le projet réutilise l'infrastructure Pi lorsque cela a du sens, tout en gardant
 
 **Langues** : [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## Philosophie centrale
+
+À l'étape actuelle de l'IA, **une orchestration intelligente des modèles compte plus que n'importe quel modèle pris isolément**. Aucun LLM ne domine sur toutes les dimensions — planification, écriture de code, revue, résumé, réponses rapides et peu coûteuses — et verrouiller un workflow sur un seul modèle gaspille à la fois les capacités et l'argent. Braincode repose sur cette conviction : **exploiter les forces propres à chaque modèle via une orchestration réfléchie est ce qui maximise l'efficacité, la qualité et le rapport coût/bénéfice**. Le Brain Model est l'incarnation concrète de cette philosophie.
+
 ## Pourquoi ce projet
 
 Les agents de codage actuels ne sont pas assez intelligents. Un agent idéal devrait **choisir différents modèles selon les besoins**, car chaque modèle a ses propres points forts — certains sont meilleurs en planification, d'autres en écriture de code, en revue de code, ou en réponses rapides et peu coûteuses. Verrouiller tout le flux de travail sur un seul LLM gaspille à la fois les capacités et l'argent.

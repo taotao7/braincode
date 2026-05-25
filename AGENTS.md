@@ -12,6 +12,7 @@ Use this file for durable engineering rules. Use the documents under [`docs/`](.
 - Planned repository layout: [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout)
 - Package responsibilities: [`docs/project-structure.md#package-responsibilities`](./docs/project-structure.md#package-responsibilities)
 - Milestones: [`docs/project-structure.md#initial-milestones`](./docs/project-structure.md#initial-milestones)
+- Visual style: [`docs/visual-style.md`](./docs/visual-style.md)
 - External references: [`docs/references.md`](./docs/references.md)
 
 When changing architecture, structure, or planning, update the relevant `docs/` file first or in the same change. Do not let this file become a second copy of the full plan.

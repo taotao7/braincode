@@ -10,6 +10,10 @@ The project reuses Pi infrastructure where it makes sense, while keeping Brainco
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## Core philosophy
+
+At the current stage of AI, **smart orchestration of models matters more than any single model**. No individual LLM dominates every dimension — planning, coding, reviewing, summarizing, fast cheap replies — and locking a workflow to one model wastes both capability and money. Braincode is built on the belief that **leveraging each model's strengths through deliberate orchestration delivers the greatest gains in efficiency, quality, and cost**. The Brain Model is the concrete expression of this philosophy.
+
 ## Why this project
 
 Today's coding agents are not smart enough. A strong agent should pick **different models for different needs**, because every model has its own strengths — some are better at planning, some at writing code, some at reviewing, some at fast/cheap replies.
@@ -25,6 +29,7 @@ Braincode has two top-level modes:
 
 - [Architecture](./docs/architecture.md) — main system architecture, Brain Model design, context isolation, Pi integration, local config service.
 - [Project structure and plan](./docs/project-structure.md) — goals, non-goals, workspace layout, package responsibilities, milestones.
+- [Visual style](./docs/visual-style.md) — Brutalist technical poster direction for UI and brand surfaces.
 - [References](./docs/references.md) — Amp and Pi reference material used for design decisions.
 
 ## Current status
