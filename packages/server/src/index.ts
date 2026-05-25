@@ -57,6 +57,14 @@ async function handleRequest(request: Request): Promise<Response> {
       })
     }
 
+    if (request.method === "GET" && url.pathname === "/resources/logo.png") {
+      const logo = Bun.file("resources/logo.png")
+      if (!(await logo.exists())) return json<ApiResult<never>>({ ok: false, error: "Logo not found" }, 404)
+      return new Response(logo, {
+        headers: { "content-type": "image/png" },
+      })
+    }
+
     if (request.method === "GET" && url.pathname === "/api/health") {
       return json<HealthResponse>({ name: "braincode", status: "ok" })
     }

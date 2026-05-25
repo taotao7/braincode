@@ -3,247 +3,281 @@ export const configWebHtml = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Braincode Config</title>
+    <title>BRAIN/CODE · Local AI Control Panel</title>
     <style>
       :root {
         color-scheme: light;
-        --paper: #e8ddc7;
-        --paper-dark: #d6c7aa;
-        --ink: #101010;
-        --red: #9f241f;
-        --red-dark: #6f1714;
-        --muted: #564b3b;
-        --line: 5px;
-        font-family: "Arial Narrow", "Roboto Condensed", "Source Han Sans SC", "Noto Sans CJK SC", Arial, sans-serif;
+        --bg: oklch(98% 0.005 250);
+        --surface: oklch(100% 0 0);
+        --fg: oklch(22% 0.02 240);
+        --muted: oklch(50% 0.018 240);
+        --border: oklch(90% 0.008 240);
+        --accent: oklch(58% 0.16 145);
+        --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+        --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
+        --bg-hover: oklch(96% 0.005 250);
+        --danger-fg: oklch(55% 0.2 25);
+        --danger-bg: oklch(95% 0.04 25);
+        --danger-border: oklch(90% 0.04 25);
+        --pre-bg: oklch(15% 0 0);
+        --pre-border: oklch(25% 0 0);
+        --pre-fg: oklch(95% 0 0);
+        --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-body: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+        --fs-h1: clamp(32px, 5vw, 48px);
+        --fs-h2: 20px;
+        --fs-h3: 16px;
+        --fs-lead: 15px;
+        --fs-body: 14px;
+        --fs-meta: 12px;
+        --gap-xs: 6px;
+        --gap-sm: 10px;
+        --gap-md: 16px;
+        --gap-lg: 24px;
+        --gap-xl: 40px;
+        --container: 1200px;
+        --gutter: 24px;
+        --radius: 4px;
+        --radius-lg: 6px;
       }
 
       * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at 84% 12%, rgba(159, 36, 31, 0.25) 0 12%, transparent 13% 100%),
-          repeating-linear-gradient(112deg, transparent 0 16px, rgba(16, 16, 16, 0.055) 17px 19px),
-          linear-gradient(180deg, var(--paper), var(--paper-dark));
-      }
-      body::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        opacity: 0.28;
-        mix-blend-mode: multiply;
-        background:
-          repeating-radial-gradient(circle at 18% 22%, transparent 0 6px, rgba(16, 16, 16, 0.08) 7px 8px),
-          repeating-linear-gradient(0deg, rgba(16, 16, 16, 0.035) 0 1px, transparent 1px 5px);
+        color: var(--fg);
+        background: var(--bg);
+        font-family: var(--font-body);
+        font-size: var(--fs-body);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
       }
       .page {
-        width: min(1180px, calc(100% - 28px));
-        margin: 18px auto 42px;
-        border: var(--line) solid var(--ink);
-        background: rgba(232, 221, 199, 0.92);
-        box-shadow: 12px 12px 0 var(--ink);
+        min-height: 100vh;
       }
       header {
-        position: relative;
-        display: grid;
-        grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
-        gap: 22px;
-        padding: 28px;
-        border-bottom: var(--line) solid var(--ink);
-        overflow: hidden;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding-block: 16px;
       }
-      header::after {
-        content: "";
-        position: absolute;
-        right: -70px;
-        top: -100px;
-        width: 430px;
-        height: 430px;
-        background:
-          repeating-conic-gradient(from 8deg, var(--red) 0 8deg, transparent 8deg 16deg),
-          radial-gradient(circle, transparent 0 34%, var(--ink) 35% 37%, transparent 38% 100%);
-        opacity: 0.9;
-        z-index: 0;
-      }
-      header > * { position: relative; z-index: 1; }
+      .container { max-width: var(--container); margin-inline: auto; padding-inline: var(--gutter); }
+      .hero-split { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-lg); }
       .kicker {
-        display: inline-block;
-        padding: 6px 10px;
-        background: var(--red);
-        color: var(--paper);
-        border: 3px solid var(--ink);
-        font: 900 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: 0.08em;
+        margin: 0 0 4px;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        transform: rotate(-1deg);
       }
       h1 {
-        margin: 18px 0 10px;
-        font-size: clamp(52px, 9vw, 128px);
-        line-height: 0.82;
-        letter-spacing: -0.08em;
-        text-transform: uppercase;
-        font-weight: 1000;
+        margin: 0;
+        color: var(--fg);
+        font-family: var(--font-mono);
+        font-size: var(--fs-h1);
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
       }
-      h2, h3 { margin: 0 0 14px; text-transform: uppercase; letter-spacing: -0.035em; }
-      h2 { display: inline-block; padding: 4px 10px; color: var(--paper); background: var(--ink); font-size: 24px; }
-      h3 { font-size: 18px; }
-      p { margin: 0 0 14px; }
-      main { padding: 26px; }
+      h2, h3 {
+        margin: 0;
+        color: var(--fg);
+        font-family: var(--font-display);
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      h2 {
+        margin-bottom: var(--gap-md);
+        padding-bottom: var(--gap-sm);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--fs-h2);
+        line-height: 1.2;
+      }
+      h3 { font-size: var(--fs-h3); }
+      p { text-wrap: pretty; }
+      main { padding-block: var(--gap-lg); }
       section {
-        margin: 0 0 26px;
-        padding: 18px;
-        border: var(--line) solid var(--ink);
-        background: rgba(232, 221, 199, 0.82);
-        box-shadow: 7px 7px 0 rgba(16, 16, 16, 0.85);
+        padding-block: var(--gap-lg);
+        border-bottom: 1px solid var(--border);
       }
-      label { display: block; margin: 13px 0 6px; font-weight: 1000; text-transform: uppercase; }
+      label { display: block; margin-bottom: 4px; color: var(--fg); font-size: 13px; font-weight: 500; }
       input, select, textarea {
         width: 100%;
-        max-width: 520px;
-        padding: 11px 12px;
-        border: 4px solid var(--ink);
-        border-radius: 0;
-        background: #f3ead8;
-        color: var(--ink);
-        box-shadow: 4px 4px 0 var(--ink);
-        font: 800 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        outline: none;
+        background: var(--surface);
+        color: var(--fg);
+        font: 13px var(--font-mono);
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      input:focus, select:focus, textarea:focus, .combo-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
       pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      pre { border: 4px solid var(--ink); padding: 14px; overflow: auto; background: #f3ead8; box-shadow: inset 5px 0 0 var(--red); }
+      pre {
+        margin: 0;
+        padding: 16px;
+        overflow: auto;
+        border: 1px solid var(--pre-border);
+        border-radius: var(--radius-lg);
+        background: var(--pre-bg);
+        color: var(--pre-fg);
+        font-size: 12px;
+      }
       button {
-        border: 4px solid var(--ink);
-        border-radius: 0;
-        padding: 10px 15px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         cursor: pointer;
-        color: var(--ink);
-        background: var(--paper);
-        box-shadow: 5px 5px 0 var(--ink);
-        font-weight: 1000;
-        text-transform: uppercase;
+        background: var(--surface);
+        color: var(--fg);
+        font: 500 13px var(--font-body);
+        transition: background 0.1s, border-color 0.1s;
       }
-      button.primary { color: var(--paper); background: var(--red); }
-      button.danger { color: var(--paper); background: var(--ink); }
-      button:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--ink); }
-      .poster-copy { max-width: 680px; font-size: 18px; font-weight: 800; }
-      .language-bar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-bottom: 18px; font: 900 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      .hero-card {
-        min-height: 260px;
-        border: var(--line) solid var(--ink);
-        background:
-          linear-gradient(135deg, transparent 0 42%, var(--red) 43% 55%, transparent 56%),
-          repeating-linear-gradient(90deg, rgba(16, 16, 16, 0.12) 0 4px, transparent 4px 14px),
-          var(--paper-dark);
-        padding: 18px;
-        display: grid;
-        align-content: end;
-        box-shadow: 8px 8px 0 var(--red-dark);
-      }
-      .head { width: 190px; height: 210px; border: 8px solid var(--ink); border-radius: 48% 42% 44% 50%; background: radial-gradient(circle at 58% 31%, var(--red) 0 12px, transparent 13px), linear-gradient(125deg, transparent 0 47%, var(--ink) 48% 51%, transparent 52%), var(--paper); margin-left: auto; position: relative; }
-      .head::before, .head::after { content: ""; position: absolute; background: var(--ink); }
-      .head::before { width: 132px; height: 7px; top: 78px; left: -44px; transform: rotate(-18deg); }
-      .head::after { width: 9px; height: 142px; top: 22px; right: 46px; transform: rotate(28deg); }
-      .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-      .muted { color: var(--muted); font-weight: 800; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
-      .list { display: grid; gap: 10px; }
-      .item { border: 4px solid var(--ink); background: #f3ead8; padding: 10px; box-shadow: 4px 4px 0 var(--ink); font: 800 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      button:hover { background: var(--bg-hover); border-color: color-mix(in oklch, var(--border) 80%, var(--fg)); }
+      button.primary { border-color: var(--fg); background: var(--fg); color: var(--surface); }
+      button.primary:hover { background: color-mix(in oklch, var(--fg) 80%, black); }
+      button.danger { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger-fg); }
+      .poster-copy { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-lead); }
+      .language-bar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; font: 12px var(--font-mono); color: var(--muted); }
+      .logo-card { display: flex; align-items: center; gap: var(--gap-md); }
+      .logo-card::before { content: ""; display: block; width: 1px; height: 40px; background: var(--border); }
+      .logo-card img { width: 40px; height: 40px; border-radius: var(--radius-lg); object-fit: cover; }
+      .row { display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap; }
+      .row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); }
+      .status-section { padding-block: 8px; background: var(--surface); font-family: var(--font-mono); font-size: 12px; }
+      .runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+      .muted { color: var(--muted); font-size: var(--fs-meta); }
+      .status-text { color: var(--accent); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--gap-md); }
+      .panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-lg); }
+      .card { padding: var(--gap-md); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+      .stack { display: flex; flex-direction: column; gap: var(--gap-md); }
+      .field { display: flex; flex-direction: column; gap: 4px; }
+      .list { display: grid; gap: 8px; }
+      .item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 12px; font: 12px/1.45 var(--font-mono); white-space: pre-line; }
       .item-header { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
       .item-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-      .test-result { margin-top: 10px; padding: 8px 10px; border: 3px solid var(--ink); background: rgba(232, 221, 199, 0.8); }
-      .test-result.ok { color: #103b16; box-shadow: inset 5px 0 0 #287a32; }
-      .test-result.fail { color: var(--red-dark); box-shadow: inset 5px 0 0 var(--red); }
-      .role-row { display: grid; grid-template-columns: 145px minmax(0, 1fr) 110px minmax(160px, 0.4fr); gap: 12px; align-items: end; margin-bottom: 12px; }
-      .role-card { display: grid; gap: 10px; margin-bottom: 14px; padding: 12px; border: 4px solid var(--ink); background: rgba(243, 234, 216, 0.65); box-shadow: 4px 4px 0 var(--ink); }
-      .role-note { max-width: 900px; font: 900 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+      .test-result { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-hover); }
+      .test-result.ok { color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+      .test-result.fail { color: var(--danger-fg); box-shadow: inset 4px 0 0 var(--danger-fg); }
+      .routing-toolbar { margin-bottom: var(--gap-md); padding: var(--gap-md); border-radius: var(--radius-lg); background: var(--bg-hover); }
+      #role-models { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap-md); }
+      .role-row { display: grid; gap: var(--gap-sm); margin-bottom: 10px; }
+      .role-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+      .role-note { flex-grow: 1; color: var(--muted); font-size: 12px; }
       select.enhanced-select { display: none; }
-      .combo { position: relative; width: 100%; max-width: 520px; }
-      .combo-input { width: 100%; max-width: 520px; }
-      .combo-list { display: none; position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 8px); max-height: 280px; overflow: auto; border: 4px solid var(--ink); background: #f3ead8; box-shadow: 6px 6px 0 var(--ink); }
+      .combo { position: relative; width: 100%; }
+      .combo-input { width: 100%; padding-right: 28px; cursor: pointer; }
+      .combo-list { display: none; position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 220px; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 4px 12px color-mix(in oklch, var(--fg) 10%, transparent); }
       .combo.open .combo-list { display: block; }
-      .combo-option { padding: 10px 12px; border-bottom: 3px solid var(--ink); cursor: pointer; font: 900 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      .combo-option:last-child { border-bottom: 0; }
-      .combo-option:hover, .combo-option.active { color: var(--paper); background: var(--red); }
-      .combo-empty { padding: 10px 12px; font: 900 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
-      .signal-strip { margin-top: 22px; min-height: 52px; border: 4px solid var(--ink); background: linear-gradient(90deg, var(--ink) 0 12%, transparent 12% 16%, var(--red) 16% 26%, transparent 26% 31%, var(--ink) 31% 34%, transparent 34%), repeating-linear-gradient(90deg, transparent 0 22px, rgba(16, 16, 16, 0.35) 22px 26px); }
-      @media (max-width: 760px) { header { grid-template-columns: 1fr; } header::after { opacity: 0.35; } .language-bar { justify-content: flex-start; } .role-row { grid-template-columns: 1fr; } }
+      .combo-option { padding: 6px 10px; border-radius: 3px; cursor: pointer; font: 13px/1.3 var(--font-mono); }
+      .combo-option:hover, .combo-option.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+      .combo-empty { padding: 6px 10px; color: var(--muted); font: 12px var(--font-mono); }
+      @media (max-width: 900px) { .panel-grid, #role-models { grid-template-columns: 1fr; } .hero-split { align-items: flex-start; flex-direction: column; } .logo-card::before { display: none; } }
     </style>
   </head>
   <body>
     <div class="page">
       <header>
-        <div>
-          <span class="kicker" data-i18n="kicker">LOCAL AI CONTROL PANEL</span>
-          <h1 data-i18n="title">BRAIN<br />CODE</h1>
-          <p class="poster-copy" data-i18n="subtitle">Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.</p>
-          <div class="signal-strip" aria-hidden="true"></div>
-        </div>
-        <div>
-          <div class="language-bar">
-            <span data-i18n="language">LANG</span>
-            <select id="language"><option value="en">EN</option><option value="zh">中文</option></select>
+        <div class="container hero-split">
+          <div>
+            <p class="kicker" data-i18n="kicker">LOCAL AI CONTROL PANEL</p>
+            <h1 data-i18n="title">BRAIN / CODE</h1>
+            <p class="poster-copy" data-i18n="subtitle">Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.</p>
           </div>
-          <div class="hero-card" aria-hidden="true"><div class="head"></div></div>
+          <div class="logo-card">
+            <img src="/resources/logo.png" alt="Braincode logo" />
+            <div class="language-bar">
+              <span data-i18n="language">LANG</span>
+              <select id="language"><option value="en">EN</option><option value="zh">中文</option></select>
+            </div>
+          </div>
         </div>
       </header>
 
       <main>
-        <section>
-          <div class="row"><button id="refresh" data-i18n="refresh">Refresh</button><span id="status" class="muted">Loading...</span></div>
-        </section>
-
-        <section>
-          <h2 data-i18n="settingsTitle">Settings</h2>
-          <form id="settings-form">
-            <div class="grid">
-              <div><label for="host" data-i18n="host">Config server host</label><input id="host" autocomplete="off" /></div>
-              <div><label for="port" data-i18n="port">Config server port</label><input id="port" type="number" min="1" max="65535" /></div>
-              <div><label for="defaultBrainId" data-i18n="defaultBrain">Default brain id</label><select id="defaultBrainId"></select></div>
-              <div><label for="mode" data-i18n="mode">Mode</label><select id="mode"><option value="auto" data-i18n="modeAuto">auto — plan and route agents automatically</option><option value="radical" data-i18n="modeRadical">radical — more aggressive autonomous execution</option></select></div>
-            </div>
-            <p class="muted" data-i18n="restartHint">Changing host or port affects the next config server start.</p>
-            <button class="primary" type="submit" data-i18n="saveSettings">Save settings</button>
-          </form>
-        </section>
-
-        <section>
-          <h2 data-i18n="modelsTitle">Model selection</h2>
-          <p class="muted" data-i18n="modelsHint">Choose models from the provider catalog. The UI stores selected models in ~/.braincode/models.json.</p>
-          <div class="grid">
-            <form id="model-form">
-              <h3 data-i18n="addModel">Add model</h3>
-              <label for="saved-provider-select" data-i18n="savedProviders">Saved providers</label><select id="saved-provider-select"></select>
-              <label for="custom-provider" data-i18n="provider">Provider</label><input id="custom-provider" autocomplete="off" placeholder="openai" />
-              <label for="custom-base-url" data-i18n="baseUrl">Base URL</label><input id="custom-base-url" autocomplete="off" placeholder="https://api.openai.com/v1" />
-              <label for="custom-api-key" data-i18n="apiKey">API key</label><input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-..." />
-              <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
-              <label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select>
-              <label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select>
-              <button class="primary" type="submit" data-i18n="addSelectedModel">Add selected model</button>
-            </form>
-            <div><h3 data-i18n="configuredModels">Configured models</h3><div id="configured-models" class="list"></div></div>
+        <section class="status-section">
+          <div class="container row-between">
+            <div class="row"><button id="refresh" data-i18n="refresh">Refresh</button><span id="status" class="muted status-text">Loading...</span></div>
+            <div class="row muted"><span class="runtime-dot" aria-hidden="true"></span><span data-i18n="runtimeActive">Runtime Active</span></div>
           </div>
         </section>
 
         <section>
-          <h2 data-i18n="brainRoutingTitle">Brain routing</h2>
-          <p class="muted" data-i18n="brainRoutingHint">Select which configured model each agent role should use. No JSON editing required.</p>
-          <form id="brain-form">
-            <label for="brain-select" data-i18n="brain">Brain</label><select id="brain-select"></select>
-            <label for="apply-all-model" data-i18n="applyAllModel">Apply model to all roles</label><select id="apply-all-model"></select>
-            <button id="apply-all-roles" type="button" data-i18n="applyAllRoles">Apply to all roles</button>
-            <div id="role-models"></div>
-            <button class="primary" type="submit" data-i18n="saveBrainRouting">Save brain routing</button>
+          <div class="container stack">
+          <h2 data-i18n="settingsTitle">Settings</h2>
+          <form id="settings-form" class="stack">
+            <div class="grid">
+              <div class="field"><label for="host" data-i18n="host">Config server host</label><input id="host" autocomplete="off" /></div>
+              <div class="field"><label for="port" data-i18n="port">Config server port</label><input id="port" type="number" min="1" max="65535" /></div>
+              <div class="field"><label for="defaultBrainId" data-i18n="defaultBrain">Default brain id</label><select id="defaultBrainId"></select></div>
+              <div class="field"><label for="mode" data-i18n="mode">Mode</label><select id="mode"><option value="auto" data-i18n="modeAuto">auto — plan and route agents automatically</option><option value="radical" data-i18n="modeRadical">radical — more aggressive autonomous execution</option></select></div>
+            </div>
+            <div class="row-between">
+              <p class="muted" data-i18n="restartHint">Changing host or port affects the next config server start.</p>
+              <button class="primary" type="submit" data-i18n="saveSettings">Save settings</button>
+            </div>
           </form>
+          </div>
         </section>
 
         <section>
+          <div class="container stack">
+          <h2 data-i18n="modelsTitle">Model selection</h2>
+          <p class="muted" data-i18n="modelsHint">Choose models from the provider catalog. The UI stores selected models in ~/.braincode/models.json.</p>
+          <div class="panel-grid">
+            <form id="model-form" class="card stack">
+              <h3 data-i18n="addModel">Add model</h3>
+              <div class="field"><label for="saved-provider-select" data-i18n="savedProviders">Saved providers</label><select id="saved-provider-select"></select></div>
+              <div class="grid">
+                <div class="field"><label for="custom-provider" data-i18n="provider">Provider</label><input id="custom-provider" autocomplete="off" placeholder="openai" /></div>
+                <div class="field"><label for="custom-base-url" data-i18n="baseUrl">Base URL</label><input id="custom-base-url" autocomplete="off" placeholder="https://api.openai.com/v1" /></div>
+              </div>
+              <div class="field"><label for="custom-api-key" data-i18n="apiKey">API key</label><input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-..." /></div>
+              <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
+              <div class="field"><label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select></div>
+              <div class="field"><label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select></div>
+              <button class="primary" type="submit" data-i18n="addSelectedModel">Add selected model</button>
+            </form>
+            <div class="stack"><h3 data-i18n="configuredModels">Configured models</h3><div id="configured-models" class="list"></div></div>
+          </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="container stack">
+          <h2 data-i18n="brainRoutingTitle">Brain routing</h2>
+          <p class="muted" data-i18n="brainRoutingHint">Select which configured model each agent role should use. No JSON editing required.</p>
+          <form id="brain-form" class="stack">
+            <div class="routing-toolbar row-between">
+              <div class="field"><label for="brain-select" data-i18n="brain">Brain</label><select id="brain-select"></select></div>
+              <div class="row">
+                <div class="field"><label for="apply-all-model" data-i18n="applyAllModel">Apply model to all roles</label><select id="apply-all-model"></select></div>
+                <button id="apply-all-roles" type="button" data-i18n="applyAllRoles">Apply to all roles</button>
+              </div>
+            </div>
+            <div id="role-models"></div>
+            <button class="primary" type="submit" data-i18n="saveBrainRouting">Save brain routing</button>
+          </form>
+          </div>
+        </section>
+
+        <section>
+          <div class="container stack">
           <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
-          <div class="grid">
-            <div><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Tool toggles will appear here when coding tools are implemented.</p><div id="configured-tools" class="list"></div></div>
-            <div><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
+          <div class="panel-grid">
+            <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Tool toggles will appear here when coding tools are implemented.</p><div id="configured-tools" class="list"></div></div>
+            <div class="stack"><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
+          </div>
           </div>
         </section>
       </main>
@@ -252,7 +286,7 @@ export const configWebHtml = `<!doctype html>
     <script type="module">
       const translations = {
         en: {
-          kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN<br />CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh",
+          kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", defaultBrain: "Default brain id", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Enter a provider, OpenAI-compatible base URL, and API key, then load /v1/models. Providers are saved in ~/.braincode/models.json; API keys are saved in ~/.braincode/auth.json.", addModel: "Add model", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
@@ -260,7 +294,7 @@ export const configWebHtml = `<!doctype html>
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok"
         },
         zh: {
-          kicker: "本地 AI 控制台", title: "脑码<br />控制", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的粗犷主义技术界面。", language: "语言", refresh: "刷新",
+          kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", defaultBrain: "默认 Brain ID", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "填写 provider、OpenAI-compatible Base URL 和 API key，然后通过 /v1/models 获取模型。Provider 会保存到 ~/.braincode/models.json；API key 会保存到 ~/.braincode/auth.json。", addModel: "添加模型", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
