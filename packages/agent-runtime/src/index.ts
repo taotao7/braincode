@@ -110,6 +110,35 @@ export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]
   throw new Error(`Model policy references no usable model. Tried: ${errors.join("; ")}`)
 }
 
+async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<{ selection: RuntimeModelSelection; apiKey: string }> {
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(policy, models, home)
+  if (candidates[0]) return candidates[0]
+  throw new Error("No usable model with API key for policy")
+}
+
+async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<Array<{ selection: RuntimeModelSelection; apiKey: string }>> {
+  const modelIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
+  const errors: string[] = []
+  const candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }> = []
+
+  for (const modelId of modelIds) {
+    try {
+      const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models)
+      const apiKey = await readProviderApiKey(selection.piModel.provider, home)
+      if (!apiKey) {
+        errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
+        continue
+      }
+      candidates.push({ selection, apiKey })
+    } catch (error) {
+      errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  if (candidates.length > 0) return candidates
+  throw new Error(`No usable model with API key for policy. Tried: ${errors.join("; ")}`)
+}
+
 export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOptions): BraincodeAgentRuntime {
   const { piModel } = resolveBuiltInPiModel(options.model)
   const agent = new Agent({
@@ -155,12 +184,7 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
   if (!routerPolicy?.modelId) return undefined
 
   try {
-    const routerSelection = selectRuntimeModel(routerPolicy, models)
-    const apiKey = await readProviderApiKey(routerSelection.piModel.provider, home)
-    if (!apiKey) {
-      debugLog("runtime", "router brain missing api key; falling back to heuristic", { provider: routerSelection.piModel.provider })
-      return undefined
-    }
+    const { selection: routerSelection, apiKey } = await selectRuntimeModelWithApiKey(routerPolicy, models, home)
 
     const runtime = createBraincodeAgentRuntime({
       mode,
@@ -270,32 +294,43 @@ function extractAssistantText(messages: unknown[]): string {
 
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
   const plan = await buildRuntimePlan(request.prompt, home, true)
-  const apiKey = await readProviderApiKey(plan.piModel.provider, home)
-
-  if (!apiKey) {
-    throw new Error(`Missing API key for provider '${plan.piModel.provider}'. Add it to ~/.braincode/auth.json under providers.${plan.piModel.provider}.apiKey`)
-  }
+  const modelDocument = await readModels(home)
+  const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models as BraincodeModel[], home)
 
   const sessionId = request.sessionId ?? crypto.randomUUID()
-  await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan }, home)
 
-  const runtime = createBraincodeAgentRuntime({
-    mode: plan.mode,
-    systemPrompt: roleSystemPrompts[plan.role],
-    model: plan.model,
-    policy: plan.policy,
-    sessionId,
-    getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
-  })
+  let lastError: unknown
+  for (const [attempt, { selection, apiKey }] of candidates.entries()) {
+    plan.model = selection.configured
+    plan.piModel = {
+      provider: selection.piModel.provider,
+      id: selection.piModel.id,
+      name: selection.piModel.name,
+      contextWindow: selection.piModel.contextWindow,
+    }
+    await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, attempt: attempt + 1 }, home)
 
-  try {
-    await runtime.agent.prompt(request.prompt)
-    const summary = extractAssistantText(runtime.agent.state.messages)
-    await appendSessionRecord(sessionId, { type: "run_end", summary }, home)
-    return { sessionId, summary, plan }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    await appendSessionRecord(sessionId, { type: "run_error", error: message }, home)
-    throw error
+    const runtime = createBraincodeAgentRuntime({
+      mode: plan.mode,
+      systemPrompt: roleSystemPrompts[plan.role],
+      model: plan.model,
+      policy: plan.policy,
+      sessionId,
+      getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
+    })
+
+    try {
+      await runtime.agent.prompt(request.prompt)
+      const summary = extractAssistantText(runtime.agent.state.messages)
+      await appendSessionRecord(sessionId, { type: "run_end", summary, attempt: attempt + 1 }, home)
+      return { sessionId, summary, plan }
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }

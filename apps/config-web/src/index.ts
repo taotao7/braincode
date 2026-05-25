@@ -334,10 +334,17 @@ export const configWebHtml = `<!doctype html>
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Tool toggles will appear here when coding tools are implemented.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok",
-          thinking: "Thinking",
-          roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          thinking: "Thinking", fallbackModel: "Fallback model",
+          roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
           roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
           roleDesc_coding: "Code execution: handles code edits, bug fixes, and verification. Best for strong coding models with stable tool-calling.",
+          roleDesc_frontend: "Frontend: UI, browser behavior, CSS, components, accessibility, and user-facing polish.",
+          roleDesc_backend: "Backend: APIs, services, validation, persistence boundaries, and server behavior.",
+          roleDesc_designer: "Designer: UX flows, visual direction, interaction design, and implementable product layout guidance.",
+          roleDesc_dba: "DBA: schema design, migrations, indexes, query plans, data integrity, and database performance.",
+          roleDesc_devops: "DevOps: CI/CD, deployment, containers, infrastructure, observability, and operations.",
+          roleDesc_security: "Security: auth, permissions, secrets, vulnerabilities, threat models, and secure defaults.",
+          roleDesc_qa: "QA: focused tests, edge cases, regression checks, reproducible bugs, and quality strategy.",
           roleDesc_research: "Fast retrieval: looks up references, locates code, and gathers facts. Best for fast, cheap, large-context models.",
           roleDesc_review: "Audit and review: handles code review, risk auditing, and regression hunting. Best for rigorous reasoning and long-context models.",
           roleDesc_summarize: "Summary and handoff: compresses context, generates handoffs, and consolidates results. Best for cheap, fast models.",
@@ -352,10 +359,17 @@ export const configWebHtml = `<!doctype html>
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "编码工具实现后，这里会显示工具开关。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常",
-          thinking: "思考",
-          roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          thinking: "思考", fallbackModel: "备用模型",
+          roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
           roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
           roleDesc_coding: "代码实现：负责改代码、修 bug、跑验证。适合强代码模型，优先稳定和工具调用能力。",
+          roleDesc_frontend: "前端：负责 UI、浏览器行为、CSS、组件、可访问性和用户侧打磨。",
+          roleDesc_backend: "后端：负责 API、服务、校验、持久化边界和服务端行为。",
+          roleDesc_designer: "设计师：负责 UX 流程、视觉方向、交互设计和可落地的产品布局建议。",
+          roleDesc_dba: "DBA：负责表结构、迁移、索引、查询计划、数据完整性和数据库性能。",
+          roleDesc_devops: "DevOps：负责 CI/CD、部署、容器、基础设施、可观测性和运维。",
+          roleDesc_security: "安全：负责认证、权限、密钥、漏洞、威胁建模和安全默认值。",
+          roleDesc_qa: "QA：负责测试计划、边界场景、回归检查、可复现 bug 和质量策略。",
           roleDesc_research: "快速检索：负责查资料、查代码位置、整理事实。适合速度快、成本低、上下文大的模型。",
           roleDesc_review: "审查检查：负责 code review、风险审计、找回归。适合严谨推理和长上下文模型。",
           roleDesc_summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。适合便宜快速模型。",
@@ -365,7 +379,7 @@ export const configWebHtml = `<!doctype html>
         }
       }
 
-      const roles = ["routeBrain", "coding", "research", "review", "summarize", "fastReply", "oracle", "librarian"]
+      const roles = ["routeBrain", "coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
@@ -593,20 +607,27 @@ export const configWebHtml = `<!doctype html>
           const select = document.createElement("select")
           select.dataset.role = role
           select.replaceChildren(...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
-          select.value = policy?.modelId || currentModels.models[0]?.id || ""
+          select.value = policy?.modelId || brain.roles?.coding?.modelId || currentModels.models[0]?.id || ""
+          const fallbackLabel = document.createElement("label")
+          fallbackLabel.textContent = t("fallbackModel")
+          const fallback = document.createElement("select")
+          fallback.dataset.roleFallback = role
+          fallback.replaceChildren(option("", t("none")), ...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
+          fallback.value = policy?.fallbackModelIds?.[0] || ""
           const thinkingLabel = document.createElement("label")
           thinkingLabel.textContent = t("thinking")
           const thinking = document.createElement("select")
           thinking.dataset.roleThinking = role
           thinking.replaceChildren(...thinkingLevels.map((level) => option(level, level)))
           thinking.value = policy?.thinkingLevel || (role === "routeBrain" || role === "oracle" ? "xhigh" : "medium")
-          row.append(label, select, thinkingLabel, thinking)
+          row.append(label, select, fallbackLabel, fallback, thinkingLabel, thinking)
           const note = document.createElement("div")
           note.className = "role-note"
           note.textContent = roleDescription(role) || ""
           card.append(row, note)
           roleModels.append(card)
           enhanceSelect(select)
+          enhanceSelect(fallback)
           enhanceSelect(thinking)
         }
       }
@@ -791,13 +812,15 @@ export const configWebHtml = `<!doctype html>
         for (const select of roleModels.querySelectorAll("select[data-role]")) {
           const role = select.dataset.role
           const thinking = roleModels.querySelector('select[data-role-thinking="' + role + '"]')
+          const fallback = roleModels.querySelector('select[data-role-fallback="' + role + '"]')
           const previous = nextBrain.roles[role] || { thinkingLevel: role === "routeBrain" || role === "oracle" ? "xhigh" : "medium" }
           const thinkingLevel = thinking?.value || previous.thinkingLevel || "medium"
+          const fallbackModelIds = fallback?.value ? [fallback.value] : []
           const { systemPrompt: _roleSystemPrompt, ...previousWithoutPrompt } = previous
-          nextBrain.roles[role] = { ...previousWithoutPrompt, modelId: select.value, thinkingLevel }
+          nextBrain.roles[role] = { ...previousWithoutPrompt, modelId: select.value, fallbackModelIds, thinkingLevel }
           if (role === "routeBrain") {
             const { systemPrompt: _plannerSystemPrompt, ...plannerWithoutPrompt } = nextBrain.planner || previous
-            nextBrain.planner = { ...plannerWithoutPrompt, modelId: select.value, thinkingLevel }
+            nextBrain.planner = { ...plannerWithoutPrompt, modelId: select.value, fallbackModelIds, thinkingLevel }
           }
         }
         const nextBrains = currentBrains.brains.map((candidate) => candidate.id === nextBrain.id ? nextBrain : candidate)

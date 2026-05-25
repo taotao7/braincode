@@ -9,6 +9,13 @@ const brain: BrainModel = {
   roles: {
     routeBrain: { modelId: "planner", thinkingLevel: "xhigh" },
     coding: { modelId: "coding", thinkingLevel: "medium" },
+    frontend: { modelId: "frontend", thinkingLevel: "medium" },
+    backend: { modelId: "backend", thinkingLevel: "medium" },
+    designer: { modelId: "designer", thinkingLevel: "medium" },
+    dba: { modelId: "dba", thinkingLevel: "high" },
+    devops: { modelId: "devops", thinkingLevel: "medium" },
+    security: { modelId: "security", thinkingLevel: "high" },
+    qa: { modelId: "qa", thinkingLevel: "low" },
     research: { modelId: "research", thinkingLevel: "low" },
     review: { modelId: "review", thinkingLevel: "high" },
     summarize: { modelId: "summarize", thinkingLevel: "low" },
@@ -38,6 +45,8 @@ test("selectAgentRole uses simple intent heuristics", () => {
   expect(selectAgentRole("review this patch")).toBe("review")
   expect(selectAgentRole("summarize the work")).toBe("summarize")
   expect(selectAgentRole("research pi agent runtime")).toBe("research")
+  expect(selectAgentRole("fix the frontend layout")).toBe("frontend")
+  expect(selectAgentRole("optimize this SQL migration")).toBe("dba")
   expect(selectAgentRole("hello")).toBe("fastReply")
   expect(selectAgentRole("implement the feature")).toBe("coding")
 })

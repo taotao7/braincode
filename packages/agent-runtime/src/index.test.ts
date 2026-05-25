@@ -20,7 +20,25 @@ test("selectRuntimeModel rejects unknown configured model ids before runtime exe
         },
       ],
     ),
-  ).toThrow("Model policy references unknown model id: missing")
+  ).toThrow("Model policy references no usable model")
+})
+
+test("selectRuntimeModel falls back when the primary model is unavailable", () => {
+  const selection = selectRuntimeModel(
+    { modelId: "missing", fallbackModelIds: ["known"], thinkingLevel: "low" },
+    [
+      {
+        id: "known",
+        provider: "anthropic",
+        modelId: "claude-sonnet-4-5-20250929",
+        name: "Claude Sonnet 4.5",
+        contextWindow: 200000,
+        supportsTools: true,
+      },
+    ],
+  )
+
+  expect(selection.configured.id).toBe("known")
 })
 
 test("planRuntimeFromConfig loads settings, brain, and model without executing a provider call", async () => {
@@ -95,7 +113,7 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
 test("executePromptFromConfig fails clearly before provider execution when auth is missing", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-auth-test-"))
   try {
-    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("Missing API key for provider 'google'")
+    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("No usable model with API key")
   } finally {
     await rm(home, { recursive: true, force: true })
   }
