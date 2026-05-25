@@ -25,6 +25,16 @@ Braincode has two top-level modes:
 - [Project structure and plan](./docs/project-structure.md) — goals, non-goals, workspace layout, package responsibilities, milestones.
 - [References](./docs/references.md) — Amp and Pi reference material used for design decisions.
 
+## Current status
+
+- Bun workspace and package skeleton are in place.
+- `braincode config` starts a local configuration service backed by `~/.braincode/`.
+- The config UI can edit settings, execution mode, brains, models, and tools; auth currently exposes status only and does not display secrets.
+- Pi adapter boundaries are started:
+  - `packages/llm` maps Braincode model config to Pi model objects.
+  - `packages/agent-runtime` creates Pi-backed runtime instances from mode, model policy, and system prompt.
+- Real model execution, Brain Model routing, and multi-agent orchestration are planned next.
+
 ## Current development commands
 
 ```sh
