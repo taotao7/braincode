@@ -1,6 +1,7 @@
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
 import type { Model } from "@earendil-works/pi-ai"
-import type { BraincodeMode, ModelPolicy } from "@braincode/brain"
+import { getModePolicy, selectAgentRole, selectBrain, selectModelPolicy, type AgentRole, type BrainModel, type BraincodeMode, type ModelPolicy } from "@braincode/brain"
+import { defaultBrains, defaultModels, readBrains, readModels, readSettings } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 
@@ -32,6 +33,22 @@ export type BraincodeAgentRuntimeOptions = {
 export type BraincodeAgentRuntime = {
   agent: Agent
   selection: RuntimeModelSelection
+}
+
+export type RuntimePlan = {
+  mode: BraincodeMode
+  modeDescription: string
+  brain: Pick<BrainModel, "id" | "name" | "description">
+  role: AgentRole
+  model: BraincodeModel
+  policy: ModelPolicy
+  piModel: {
+    provider: string
+    id: string
+    name: string
+    contextWindow: number
+  }
+  toolExecution: "sequential" | "parallel"
 }
 
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]): RuntimeModelSelection {
@@ -74,5 +91,36 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       configured: options.model,
       piModel,
     },
+  }
+}
+
+export async function planRuntimeFromConfig(prompt: string, home?: string): Promise<RuntimePlan> {
+  const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
+  const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
+  const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
+  const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
+  const role = selectAgentRole(prompt)
+  const policy = selectModelPolicy(brain, role)
+  const selection = selectRuntimeModel(policy, models as BraincodeModel[])
+  const modePolicy = getModePolicy(settings.mode)
+
+  return {
+    mode: settings.mode,
+    modeDescription: modePolicy.description,
+    brain: {
+      id: brain.id,
+      name: brain.name,
+      description: brain.description,
+    },
+    role,
+    model: selection.configured,
+    policy,
+    piModel: {
+      provider: selection.piModel.provider,
+      id: selection.piModel.id,
+      name: selection.piModel.name,
+      contextWindow: selection.piModel.contextWindow,
+    },
+    toolExecution: settings.mode === "radical" ? "parallel" : "sequential",
   }
 }

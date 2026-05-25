@@ -15,6 +15,7 @@
         "braincode": "./src/index.ts",
       },
       "dependencies": {
+        "@braincode/agent-runtime": "workspace:*",
         "@braincode/server": "workspace:*",
       },
     },
@@ -25,6 +26,7 @@
       "name": "@braincode/agent-runtime",
       "dependencies": {
         "@braincode/brain": "workspace:*",
+        "@braincode/config": "workspace:*",
         "@braincode/llm": "workspace:*",
         "@earendil-works/pi-agent-core": "^0.75.5",
         "@earendil-works/pi-ai": "^0.75.5",

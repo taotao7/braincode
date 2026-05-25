@@ -58,8 +58,47 @@ export const defaultSettings: BraincodeSettings = {
 }
 
 export const defaultAuth: BraincodeAuth = { providers: {} }
-export const defaultBrains: BraincodeBrains = { brains: [] }
-export const defaultModels: BraincodeModels = { models: [] }
+export const defaultBrains: BraincodeBrains = {
+  brains: [
+    {
+      id: "default",
+      name: "Default Brain",
+      description: "Default Braincode routing profile for early development.",
+      planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+      roles: {
+        coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+        research: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+        review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+        summarize: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+        fastReply: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
+      },
+      routing: {
+        maxParallelAgents: 2,
+        preferCheapModelForSimpleTasks: true,
+        escalateOnUncertainty: true,
+        requireReviewForFileEdits: true,
+      },
+      context: {
+        maxInputTokens: 120000,
+        compaction: "auto",
+        isolation: "strict",
+      },
+    },
+  ],
+}
+export const defaultModels: BraincodeModels = {
+  models: [
+    {
+      id: "anthropic/claude-sonnet-4-5-20250929",
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5-20250929",
+      name: "Claude Sonnet 4.5",
+      contextWindow: 200000,
+      supportsTools: true,
+      defaultThinkingLevel: "medium",
+    },
+  ],
+}
 export const defaultTools: BraincodeTools = { tools: [] }
 
 export function getBraincodeHome(): string {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { planRuntimeFromConfig } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 
 function readFlag(args: string[], name: string): string | undefined {
@@ -13,10 +14,12 @@ function printHelp() {
 
 Usage:
   braincode config [--port <port>] [--host <host>]
+  braincode run --dry-run <prompt>
   braincode help
 
 Commands:
   config   Start the local browser configuration service.
+  run      Plan a task. Real model execution is not enabled yet; use --dry-run.
   help     Show this help message.
 `)
 }
@@ -39,6 +42,22 @@ async function runConfig(args: string[]) {
   await new Promise<void>(() => {})
 }
 
+async function runTask(args: string[]) {
+  const dryRun = args.includes("--dry-run")
+  const prompt = args.filter((arg) => arg !== "--dry-run").join(" ").trim()
+
+  if (!prompt) {
+    throw new Error("Missing prompt. Usage: braincode run --dry-run <prompt>")
+  }
+
+  if (!dryRun) {
+    throw new Error("Real model execution is not implemented yet. Use: braincode run --dry-run <prompt>")
+  }
+
+  const plan = await planRuntimeFromConfig(prompt)
+  console.log(JSON.stringify(plan, null, 2))
+}
+
 async function main() {
   const args = process.argv.slice(2)
   const command = args[0] ?? "help"
@@ -46,6 +65,9 @@ async function main() {
   switch (command) {
     case "config":
       await runConfig(args.slice(1))
+      break
+    case "run":
+      await runTask(args.slice(1))
       break
     case "help":
     case "--help":

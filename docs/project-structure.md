@@ -91,6 +91,7 @@ Expected commands:
 - `braincode` — start interactive/default mode.
 - `braincode config` — start local configuration server and print/open the URL.
 - `braincode daemon` — future long-running service mode.
+- `braincode run --dry-run <task>` — inspect mode, brain, role, and model selection without making provider calls.
 - `braincode run <task>` — future non-interactive execution.
 
 The CLI should stay thin. It should delegate implementation to packages.
