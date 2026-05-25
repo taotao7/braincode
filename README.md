@@ -4,6 +4,14 @@ Braincode is a Bun-based monorepo for a coding-first AI agent that can also hand
 
 The project is designed to reuse Pi infrastructure where it makes sense, while keeping Braincode's product-specific orchestration separate.
 
+**Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
+
+## Why this project
+
+Today's coding agents are not smart enough. A perfect agent should pick **different models for different needs**, because every model has its own strengths — some are better at planning, some at writing code, some at reviewing, some at fast/cheap replies. Locking the whole workflow to one LLM wastes capability and money.
+
+Braincode is built around this idea: instead of choosing one model for everything, the user picks a **Brain Model** — a routing policy that dispatches each sub-task (planning, coding, research, review, summarization, quick replies) to the model best suited for it.
+
 ## Goals
 
 - Build a coding agent that can also perform research, review, planning, summarization, and automation tasks.
