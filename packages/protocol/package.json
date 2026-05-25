@@ -1,0 +1,14 @@
+{
+  "name": "@braincode/protocol",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bunx tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@braincode/config": "workspace:*"
+  }
+}

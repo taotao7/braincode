@@ -1,0 +1,19 @@
+{
+  "name": "braincode",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "braincode": "bun run apps/cli/src/index.ts",
+    "config": "bun run apps/cli/src/index.ts config",
+    "check": "bunx tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}

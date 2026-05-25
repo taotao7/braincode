@@ -1,0 +1,17 @@
+{
+  "name": "@braincode/server",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bunx tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@braincode/config": "workspace:*",
+    "@braincode/config-web": "workspace:*",
+    "@braincode/protocol": "workspace:*",
+    "@braincode/shared": "workspace:*"
+  }
+}

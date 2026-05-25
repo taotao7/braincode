@@ -1,0 +1,50 @@
+import { mkdtemp, rm, stat } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { afterEach, expect, test } from "bun:test"
+import { ensureBraincodeHome, readSettings, writeSettings } from "./index"
+
+const tempHomes: string[] = []
+
+async function makeTempHome() {
+  const home = await mkdtemp(join(tmpdir(), "braincode-config-test-"))
+  tempHomes.push(home)
+  return home
+}
+
+afterEach(async () => {
+  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
+})
+
+test("ensureBraincodeHome creates config files and directories", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await expect(Bun.file(paths.settings).exists()).resolves.toBe(true)
+  await expect(Bun.file(paths.auth).exists()).resolves.toBe(true)
+  await expect(Bun.file(paths.brains).exists()).resolves.toBe(true)
+  await expect(Bun.file(paths.models).exists()).resolves.toBe(true)
+  await expect(Bun.file(paths.tools).exists()).resolves.toBe(true)
+
+  expect((await stat(paths.sessions)).isDirectory()).toBe(true)
+  expect((await stat(paths.logs)).isDirectory()).toBe(true)
+  expect((await stat(paths.cache)).isDirectory()).toBe(true)
+})
+
+test("settings can be read and written from an explicit home", async () => {
+  const home = await makeTempHome()
+  const settings = await readSettings(home)
+
+  const nextSettings = {
+    ...settings,
+    configServer: {
+      ...settings.configServer,
+      port: 18080,
+    },
+    defaultBrainId: "local-test",
+  }
+
+  await writeSettings(nextSettings, home)
+
+  await expect(readSettings(home)).resolves.toEqual(nextSettings)
+})
