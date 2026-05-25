@@ -595,7 +595,7 @@ export const configWebHtml = `<!doctype html>
           select.replaceChildren(...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
           select.value = policy?.modelId || currentModels.models[0]?.id || ""
           const thinkingLabel = document.createElement("label")
-          thinkingLabel.textContent = "Thinking"
+          thinkingLabel.textContent = t("thinking")
           const thinking = document.createElement("select")
           thinking.dataset.roleThinking = role
           thinking.replaceChildren(...thinkingLevels.map((level) => option(level, level)))
@@ -603,7 +603,7 @@ export const configWebHtml = `<!doctype html>
           row.append(label, select, thinkingLabel, thinking)
           const note = document.createElement("div")
           note.className = "role-note"
-          note.textContent = roleDescriptions[role] || ""
+          note.textContent = roleDescription(role) || ""
           card.append(row, note)
           roleModels.append(card)
           enhanceSelect(select)

@@ -68,6 +68,13 @@ type RouterDecision = {
 const roleSystemPrompts: Record<AgentRole, string> = {
   routeBrain: "You are Braincode's router brain. Classify user intent, choose the best specialized role, and return compact structured routing decisions. Do not solve the task yourself unless routing is impossible.",
   coding: "You are Braincode's coding agent. Make small correct code changes, follow repository conventions, run focused verification, and report outcomes honestly.",
+  frontend: "You are Braincode's frontend agent. Build accessible UI, component behavior, browser interactions, styling, and user-facing polish while matching the product's visual language.",
+  backend: "You are Braincode's backend agent. Design and implement APIs, services, persistence boundaries, validation, error handling, and operationally safe server behavior.",
+  designer: "You are Braincode's design agent. Produce practical UX flows, information architecture, visual direction, layout critique, and interaction guidance that engineers can implement.",
+  dba: "You are Braincode's DBA agent. Review schema design, migrations, indexes, query plans, data integrity, backup/restore risk, and database performance.",
+  devops: "You are Braincode's DevOps agent. Handle CI/CD, deployment, containers, local environment, observability, infrastructure risk, and operational runbooks.",
+  security: "You are Braincode's security agent. Analyze auth, permissions, secrets, injection, supply chain, threat models, and secure-by-default implementation details.",
+  qa: "You are Braincode's QA agent. Plan focused tests, edge cases, regression checks, reproducible bug reports, and practical verification strategy.",
   research: "You are Braincode's research agent. Find relevant facts quickly, cite concrete files or sources, and return concise actionable findings.",
   review: "You are Braincode's review agent. Inspect code for correctness, regressions, security issues, and missing tests. Prioritize concrete findings.",
   summarize: "You are Braincode's summarizer agent. Preserve decisions, changed files, validation results, caveats, and next steps in compact handoff form.",
@@ -77,19 +84,30 @@ const roleSystemPrompts: Record<AgentRole, string> = {
 }
 
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]): RuntimeModelSelection {
-  debugLog("runtime", "selecting runtime model", { modelId: policy.modelId, configuredModelCount: models.length })
-  const configured = models.find((model) => model.id === policy.modelId)
-  if (!configured) {
-    throw new Error(`Model policy references unknown model id: ${policy.modelId}`)
+  const modelIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
+  const errors: string[] = []
+  debugLog("runtime", "selecting runtime model", { modelIds, configuredModelCount: models.length })
+
+  for (const modelId of modelIds) {
+    const configured = models.find((model) => model.id === modelId)
+    if (!configured) {
+      errors.push(`${modelId}: not configured`)
+      continue
+    }
+
+    try {
+      const { piModel } = resolveBuiltInPiModel(configured)
+      return {
+        requested: policy,
+        configured,
+        piModel,
+      }
+    } catch (error) {
+      errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
-  const { piModel } = resolveBuiltInPiModel(configured)
-
-  return {
-    requested: policy,
-    configured,
-    piModel,
-  }
+  throw new Error(`Model policy references no usable model. Tried: ${errors.join("; ")}`)
 }
 
 export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOptions): BraincodeAgentRuntime {
@@ -122,7 +140,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
 }
 
 function isAgentRole(value: unknown): value is AgentRole {
-  return value === "coding" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "routeBrain"
+  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "routeBrain"
 }
 
 function extractJsonObject(text: string): unknown {
@@ -156,6 +174,13 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
 
 Allowed roles:
 - coding: implement or modify code
+- frontend: UI, browser behavior, CSS, components, and user-facing product polish
+- backend: APIs, services, validation, persistence boundaries, and server behavior
+- designer: UX flows, visual direction, interaction design, and product layout
+- dba: database schema, migrations, indexes, query plans, and data integrity
+- devops: CI/CD, deployment, containers, infrastructure, and operations
+- security: auth, permissions, secrets, vulnerabilities, and threat modeling
+- qa: tests, regression checks, quality strategy, and reproducible bugs
 - research: find information or inspect code/docs
 - review: review, audit, check, or find bugs
 - summarize: summarize or create handoff context
@@ -164,7 +189,7 @@ Allowed roles:
 - librarian: external/large-codebase understanding
 
 Return only JSON in this shape:
-{"role":"coding|research|review|summarize|fastReply|oracle|librarian","confidence":0.0,"reason":"short reason"}
+{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian","confidence":0.0,"reason":"short reason"}
 
 User prompt:
 ${prompt}`)
