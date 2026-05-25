@@ -167,6 +167,12 @@ Braincode owns:
 - project/user configuration storage;
 - coding workflow product behavior.
 
+The adapter boundary is:
+
+- `packages/llm` converts Braincode model configuration into Pi model objects.
+- `packages/agent-runtime` creates Pi-backed agent runtime instances from Braincode mode, selected model policy, and system prompt.
+- Higher-level orchestration should depend on Braincode package interfaces, not Pi package internals directly.
+
 ## Local configuration architecture
 
 Users configure Braincode through a local browser UI.

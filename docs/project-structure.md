@@ -230,6 +230,12 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 - Load model and credentials from `~/.braincode/`.
 - Persist session JSONL.
 
+MVP-2 starts by establishing the adapter boundary:
+
+- `packages/llm` maps Braincode model config to Pi model objects.
+- `packages/agent-runtime` creates Pi-backed agent runtime instances from Braincode mode, model policy, and system prompt.
+- Real provider execution is added after model/auth configuration is reliable.
+
 ### MVP-3: Brain Model routing
 
 - Load `brains.json`.

@@ -24,7 +24,10 @@
     "packages/agent-runtime": {
       "name": "@braincode/agent-runtime",
       "dependencies": {
+        "@braincode/brain": "workspace:*",
+        "@braincode/llm": "workspace:*",
         "@earendil-works/pi-agent-core": "^0.75.5",
+        "@earendil-works/pi-ai": "^0.75.5",
       },
     },
     "packages/brain": {
@@ -44,6 +47,9 @@
     },
     "packages/llm": {
       "name": "@braincode/llm",
+      "dependencies": {
+        "@earendil-works/pi-ai": "^0.75.5",
+      },
     },
     "packages/protocol": {
       "name": "@braincode/protocol",
