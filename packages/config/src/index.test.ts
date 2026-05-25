@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
-import { ensureBraincodeHome, readSettings, writeSettings } from "./index"
+import { ensureBraincodeHome, readAuthStatus, readBrains, readModels, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -37,6 +37,7 @@ test("settings can be read and written from an explicit home", async () => {
 
   const nextSettings = {
     ...settings,
+    mode: "radical" as const,
     configServer: {
       ...settings.configServer,
       port: 18080,
@@ -47,4 +48,33 @@ test("settings can be read and written from an explicit home", async () => {
   await writeSettings(nextSettings, home)
 
   await expect(readSettings(home)).resolves.toEqual(nextSettings)
+})
+
+test("non-secret config documents can be read and written from an explicit home", async () => {
+  const home = await makeTempHome()
+
+  await writeBrains({ brains: [{ id: "default" }] }, home)
+  await writeModels({ models: [{ id: "fast" }] }, home)
+  await writeTools({ tools: [{ name: "read" }] }, home)
+
+  await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "default" }] })
+  await expect(readModels(home)).resolves.toEqual({ models: [{ id: "fast" }] })
+  await expect(readTools(home)).resolves.toEqual({ tools: [{ name: "read" }] })
+})
+
+test("auth status lists configured provider names without returning secrets", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(paths.auth, JSON.stringify({ providers: { anthropic: { apiKey: "secret" } } }))
+
+  await expect(readAuthStatus(home)).resolves.toEqual({ configuredProviders: ["anthropic"] })
+})
+
+test("non-secret config documents must keep their top-level arrays", async () => {
+  const home = await makeTempHome()
+
+  await expect(writeBrains({} as never, home)).rejects.toThrow("brains.json must contain a brains array")
+  await expect(writeModels({} as never, home)).rejects.toThrow("models.json must contain a models array")
+  await expect(writeTools({} as never, home)).rejects.toThrow("tools.json must contain a tools array")
 })

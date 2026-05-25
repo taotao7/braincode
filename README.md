@@ -14,6 +14,11 @@ Today's coding agents are not smart enough. A strong agent should pick **differe
 
 Braincode is built around this idea: instead of choosing one model for everything, the user picks a **Brain Model** that dispatches each sub-task to the model best suited for it.
 
+Braincode has two top-level modes:
+
+- `auto` — the main mode, automatically plans by intent and routes work to different agents/models.
+- `radical` — a more aggressive autonomous mode for users who want faster, broader execution.
+
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — main system architecture, Brain Model design, context isolation, Pi integration, local config service.

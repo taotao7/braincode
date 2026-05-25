@@ -6,6 +6,7 @@ This document is the source of truth for the planned workspace layout, package o
 
 - Build a coding agent that can also perform research, review, planning, summarization, and automation tasks.
 - Let users select a Brain Model instead of manually selecting one LLM for everything.
+- Support two top-level execution modes: `auto` and `radical`.
 - Dynamically route work to different models based on role, cost, latency, context size, and risk.
 - Isolate context between agents and exchange only structured handoff/result messages.
 - Provide a local configuration service that users open in the browser.
@@ -123,6 +124,7 @@ Responsibilities:
 - Resolve the Braincode home directory.
 - Create missing directories/files safely.
 - Load and validate settings.
+- Store the selected execution mode, initially `auto` or `radical`.
 - Write settings atomically where practical.
 - Keep secrets separate from normal settings.
 - Apply future config migrations.
@@ -140,10 +142,11 @@ Responsibilities:
 
 ### `packages/brain`
 
-Owns Brain Model definitions, planning, routing, and model selection policies.
+Owns execution mode policy, Brain Model definitions, planning, routing, and model selection policies.
 
 Responsibilities:
 
+- Apply the selected top-level mode: `auto` or `radical`.
 - Classify tasks.
 - Select agent roles.
 - Select model policies.

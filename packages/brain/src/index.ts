@@ -3,6 +3,8 @@ export type ModelPolicy = {
   thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
 }
 
+export type BraincodeMode = "auto" | "radical"
+
 export type BrainModel = {
   id: string
   name: string
@@ -29,3 +31,9 @@ export type BrainModel = {
 }
 
 export type AgentRole = keyof BrainModel["roles"]
+
+export type ModePolicy = {
+  mode: BraincodeMode
+  description: string
+  requiresExplicitApprovalForRiskyActions: boolean
+}

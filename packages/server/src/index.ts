@@ -1,4 +1,19 @@
-import { ensureBraincodeHome, readSettings, writeSettings, type BraincodeSettings } from "@braincode/config"
+import {
+  ensureBraincodeHome,
+  readAuthStatus,
+  readBrains,
+  readModels,
+  readSettings,
+  readTools,
+  writeBrains,
+  writeModels,
+  writeSettings,
+  writeTools,
+  type BraincodeBrains,
+  type BraincodeModels,
+  type BraincodeSettings,
+  type BraincodeTools,
+} from "@braincode/config"
 import { configWebHtml } from "@braincode/config-web"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
 import { DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
@@ -49,6 +64,44 @@ async function handleRequest(request: Request): Promise<Response> {
       const settings = (await request.json()) as BraincodeSettings
       await writeSettings(settings)
       return json(ok(settings))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/brains") {
+      const brains = await readBrains()
+      return json(ok(brains))
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/brains") {
+      const brains = (await request.json()) as BraincodeBrains
+      await writeBrains(brains)
+      return json(ok(brains))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/models") {
+      const models = await readModels()
+      return json(ok(models))
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/models") {
+      const models = (await request.json()) as BraincodeModels
+      await writeModels(models)
+      return json(ok(models))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/tools") {
+      const tools = await readTools()
+      return json(ok(tools))
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/tools") {
+      const tools = (await request.json()) as BraincodeTools
+      await writeTools(tools)
+      return json(ok(tools))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/auth/status") {
+      const authStatus = await readAuthStatus()
+      return json(ok(authStatus))
     }
 
     return json<ApiResult<never>>({ ok: false, error: "Not found" }, 404)

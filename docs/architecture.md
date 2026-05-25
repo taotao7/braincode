@@ -49,6 +49,28 @@ User task
   -> final answer or code change
 ```
 
+## Execution modes
+
+Braincode has two top-level execution modes.
+
+### `auto`
+
+`auto` is the default and primary product mode. In this mode Braincode interprets the user's intent, plans the work, selects suitable agent roles, chooses model policies through the selected Brain Model, and dispatches isolated worker agents when useful.
+
+Use `auto` for normal coding-agent behavior:
+
+- classify the task before acting;
+- choose cheap/fast models for simple work;
+- use stronger models for planning, risky coding, or review;
+- spawn separate agents for research, coding, summarization, or review when needed;
+- keep context isolated and merge only structured results.
+
+### `radical`
+
+`radical` is the more aggressive mode. It should still respect safety and tool permission boundaries, but it may plan more broadly, use stronger models sooner, spawn more workers, and pursue implementation with less back-and-forth when the user intent is clear.
+
+Use `radical` for users who prefer higher autonomy and faster end-to-end execution. Risky actions should still go through the tool permission system and explicit approval policy where required.
+
 ## Brain Model
 
 A Brain Model is a routing and execution policy. It is not a single provider model.
@@ -138,6 +160,7 @@ Use:
 Braincode owns:
 
 - brain model schema and routing policy;
+- top-level execution modes: `auto` and `radical`;
 - multi-agent orchestration;
 - context isolation and handoff protocol;
 - local configuration server;
