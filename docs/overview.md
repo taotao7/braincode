@@ -1,5 +1,7 @@
 # Braincode Overview
 
+**Languages**: [English](./overview.md) · [中文](./overview.zh.md) · [Français](./overview.fr.md)
+
 This is the high-level map of the Braincode codebase. Read this first; the deeper subjects each have their own document:
 
 - [Architecture](./architecture.md) — design intent, modes, Pi integration, configuration layout.

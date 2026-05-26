@@ -49,6 +49,8 @@ const COMMANDS: CommandDefinition[] = [
   { name: "hooks", label: "/hooks", hint: "Interactive hooks control panel" },
   { name: "sessions", label: "/sessions", hint: "Browse recent sessions" },
   { name: "resume", label: "/resume", hint: "Resume a session by id", insert: "/resume " },
+  { name: "new", label: "/new", hint: "Start a fresh session (clears transcript)" },
+  { name: "handoff", label: "/handoff", hint: "Fork a new session, carrying a brief of the current one", insert: "/handoff " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
   { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
   { name: "skill", label: "/skill", hint: "List project skills (.agents/skill)" },
@@ -293,6 +295,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true
       case "resume":
         void resumeSession(argument)
+        return true
+      case "new":
+        startNewSession()
+        return true
+      case "handoff":
+      case "fork":
+        void performHandoff(argument)
         return true
       case "brain":
         void showBrainPanel(argument)
@@ -588,6 +597,101 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     ])
     setSessionPanel(null)
     flash(`Now writing to session ${target.sessionId.slice(0, 8)}`)
+  }
+
+  function resetSurfaces() {
+    queueRef.current = []
+    bumpQueue()
+    setMcpPanel(null)
+    setHookPanel(null)
+    setSessionPanel(null)
+    setBrainPanel(null)
+    setOverlay(null)
+  }
+
+  function startNewSession() {
+    if (running) {
+      appendItem({ kind: "error", text: "Cannot start a new session while a task is running." })
+      return
+    }
+    const newId = crypto.randomUUID()
+    setSessionId(newId)
+    resetSurfaces()
+    setItems([
+      { id: crypto.randomUUID(), kind: "status", text: `New session ${newId.slice(0, 8)}` },
+    ])
+    applyDraftChange("")
+    flash("New session")
+  }
+
+  async function performHandoff(argument: string) {
+    if (running) {
+      appendItem({ kind: "error", text: "Cannot hand off while a task is running." })
+      return
+    }
+    if (items.length === 0) {
+      appendItem({ kind: "error", text: "Nothing to hand off yet — current session is empty." })
+      return
+    }
+
+    const previousId = sessionId
+    const focus = argument.trim()
+    const summarizePrompt = [
+      "You are producing a handoff brief so the next agent can continue this session.",
+      "Read the prior turns of this session and output a concise brief covering:",
+      "  1. The user's overall goal.",
+      "  2. Key actions, decisions, and findings so far.",
+      "  3. Current state / progress.",
+      "  4. What remains to be done or any open questions.",
+      "Format as short bullet points. Do not narrate that you are summarizing — output only the brief.",
+      focus ? `\nExtra focus requested by the user: ${focus}` : "",
+    ].filter(Boolean).join("\n")
+
+    const statusId = crypto.randomUUID()
+    setItems((previous) => [
+      ...previous,
+      { id: crypto.randomUUID(), kind: "user", text: focus ? `/handoff ${focus}` : "/handoff" },
+      { id: statusId, kind: "status", text: "Summarizing this session for handoff..." },
+    ])
+    applyDraftChange("")
+    setRunning(true)
+
+    let summary = ""
+    try {
+      const result = await executePromptFromConfig({
+        prompt: summarizePrompt,
+        sessionId: previousId,
+        projectRoot,
+      })
+      summary = (result.summary ?? "").trim()
+    } catch (error) {
+      setItems((previous) => [
+        ...previous.filter((item) => item.id !== statusId),
+        { id: crypto.randomUUID(), kind: "error", text: `Handoff summarization failed: ${humanizeRuntimeError(error)}` },
+      ])
+      setRunning(false)
+      return
+    }
+    setRunning(false)
+
+    if (!summary) {
+      setItems((previous) => [
+        ...previous.filter((item) => item.id !== statusId),
+        { id: crypto.randomUUID(), kind: "error", text: "Summarization returned no text — aborting handoff." },
+      ])
+      return
+    }
+
+    const newId = crypto.randomUUID()
+    setSessionId(newId)
+    resetSurfaces()
+    setItems([
+      { id: crypto.randomUUID(), kind: "status", text: `Handoff ${previousId.slice(0, 8)} → ${newId.slice(0, 8)}` },
+      { id: crypto.randomUUID(), kind: "panel", text: `Handoff brief (from prior session)\n\n${summary}` },
+    ])
+    const draftSeed = focus ? `@@${previousId} ${focus}` : `@@${previousId} `
+    applyDraftChange(draftSeed)
+    flash("Handoff ready — edit and submit to continue")
   }
 
   async function showBrainPanel(argument: string) {

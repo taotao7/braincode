@@ -195,6 +195,8 @@ export const configWebHtml = `<!doctype html>
       #role-models { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap-md); }
       .role-row { display: grid; gap: var(--gap-sm); margin-bottom: 10px; }
       .role-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+      .role-card--full { grid-column: 1 / -1; border-style: dashed; }
+      .role-card-title { margin: 0; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
       .role-note { flex-grow: 1; color: var(--muted); font-size: 12px; }
       .role-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
       select.enhanced-select { display: none; }
@@ -280,7 +282,7 @@ export const configWebHtml = `<!doctype html>
                 <div class="field"><label for="manual-name" data-i18n="modelName">Name</label><input id="manual-name" autocomplete="off" placeholder="Claude Sonnet 4.5" /></div>
                 <div class="field"><label for="manual-base-url" data-i18n="baseUrl">Base URL</label><input id="manual-base-url" autocomplete="off" placeholder="https://openrouter.ai/api/v1" /></div>
                 <div class="field"><label for="manual-api-key" data-i18n="apiKey">API key</label><input id="manual-api-key" type="password" autocomplete="off" placeholder="Optional token saved for this provider" /></div>
-                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai-responses">openai-responses</option><option value="openai-chat-completions">openai-chat-completions</option><option value="anthropic">anthropic</option><option value="google">google</option></select></div>
+                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai-responses">openai-responses</option><option value="openai-completions">openai-completions</option><option value="anthropic">anthropic</option><option value="google">google</option></select></div>
                 <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
                 <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
               </div>
@@ -335,6 +337,7 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations",
           thinking: "Thinking", fallbackModel: "Fallback model",
+          petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
           roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
           roleDesc_coding: "Code execution: handles code edits, bug fixes, and verification. Best for strong coding models with stable tool-calling.",
@@ -362,6 +365,7 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认",
           thinking: "思考", fallbackModel: "备用模型",
+          petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
           roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
           roleDesc_coding: "代码实现：负责改代码、修 bug、跑验证。适合强代码模型，优先稳定和工具调用能力。",
@@ -600,7 +604,13 @@ export const configWebHtml = `<!doctype html>
         for (const role of roles) {
           const policy = role === "routeBrain" ? (brain.planner || brain.roles?.routeBrain) : brain.roles?.[role]
           const card = document.createElement("div")
-          card.className = "role-card"
+          card.className = role === "pet" ? "role-card role-card--full" : "role-card"
+          if (role === "pet") {
+            const title = document.createElement("p")
+            title.className = "role-card-title"
+            title.textContent = t("petCardTitle")
+            card.append(title)
+          }
           const row = document.createElement("div")
           row.className = "role-row"
           const label = document.createElement("label")

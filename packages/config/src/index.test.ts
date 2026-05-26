@@ -167,6 +167,31 @@ test("non-secret config documents can be read and written from an explicit home"
   expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(false)
 })
 
+test("readModels migrates legacy OpenAI chat completions API ids", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(
+    paths.models,
+    JSON.stringify({
+      models: [
+        {
+          id: "proxy/gemini",
+          provider: "proxy",
+          modelId: "gemini",
+          api: "openai-chat-completions",
+        },
+      ],
+    }),
+  )
+
+  const models = await readModels(home)
+  expect((models.models[0] as { api?: string }).api).toBe("openai-completions")
+
+  const stored = JSON.parse(await Bun.file(paths.models).text()) as { models: Array<{ api?: string }> }
+  expect(stored.models[0]?.api).toBe("openai-completions")
+})
+
 test("auth status lists configured provider names without returning secrets", async () => {
   const home = await makeTempHome()
   const paths = await ensureBraincodeHome(home)

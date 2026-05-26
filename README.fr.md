@@ -41,6 +41,16 @@ Braincode propose actuellement deux modes de haut niveau :
 - Ne pas concevoir un système de plugins complexe avant que le runtime d'agent de base ne fonctionne.
 - Ne pas stocker les secrets utilisateur ou les paramètres locaux dans le dépôt.
 
+## Documentation
+
+- [Vue d'ensemble](./docs/overview.fr.md) — carte de haut niveau des couches, paquets et flux d'une requête de bout en bout. Commencez ici.
+- [Architecture](./docs/architecture.md) — architecture principale, conception du Brain Model, isolation du contexte, intégration Pi, service de configuration local (anglais uniquement).
+- [Gestion du contexte](./docs/context-management.fr.md) — isolation Brain / worker, packets handoff / result, références de prompt, JSONL de session.
+- [Communication entre agents](./docs/agent-communication.fr.md) — cycle de vie des workers, routage, hooks, événements runtime, exécutions multi-agents.
+- [Project structure and plan](./docs/project-structure.md) — disposition du workspace, responsabilités des paquets, jalons (anglais uniquement).
+- [Visual style](./docs/visual-style.md) — direction UI / marque (anglais uniquement).
+- [References](./docs/references.md) — matériaux de référence Amp / Pi utilisés pour les décisions de conception (anglais uniquement).
+
 ## Pour aller plus loin
 
 La TUI actuelle prend en charge `/help` pour afficher les commandes et `/plan <tâche>` pour prévisualiser le routage Brain Model sans appel provider. Elle n'offre volontairement aucune commande de changement direct de modèle ; la configuration des modèles et providers appartient à `braincode config`.

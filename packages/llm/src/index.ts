@@ -1,5 +1,5 @@
 import { completeSimple, getModel, getModels, getProviders, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai"
-import { debugLog } from "@braincode/shared"
+import { debugLog, normalizeModelApi } from "@braincode/shared"
 
 export type BraincodeModel = {
   id: string
@@ -49,11 +49,12 @@ export function listBuiltInModelCatalog(): ModelCatalogProvider[] {
 
 export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
   if (model.baseUrl) {
+    const api = normalizeModelApi(model.api)
     debugLog("llm", "resolving OpenAI-compatible model", {
       provider: model.provider,
       modelId: model.modelId,
       baseUrl: model.baseUrl,
-      api: model.api ?? "openai-responses",
+      api: api ?? "openai-responses",
     })
     return {
       braincodeModel: model,
@@ -208,10 +209,11 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
 }
 
 function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
+  const api = normalizeModelApi(model.api)
   return {
     id: model.modelId,
     name: model.name,
-    api: model.api ?? "openai-responses",
+    api: api ?? "openai-responses",
     provider: model.provider as never,
     baseUrl: model.baseUrl ?? "",
     reasoning: model.defaultThinkingLevel !== "off",
@@ -315,7 +317,7 @@ export function toBraincodeModel(model: Model<Api>): BraincodeModel {
     provider: model.provider,
     modelId: model.id,
     name: model.name,
-    api: model.api,
+    api: normalizeModelApi(model.api) as Api,
     baseUrl: model.baseUrl || undefined,
     contextWindow: model.contextWindow,
     supportsTools: true,

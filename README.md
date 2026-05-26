@@ -27,7 +27,10 @@ Braincode has two top-level modes:
 
 ## Documentation
 
+- [Overview](./docs/overview.md) — high-level map of layers, packages, and end-to-end request flow. Start here.
 - [Architecture](./docs/architecture.md) — main system architecture, Brain Model design, context isolation, Pi integration, local config service.
+- [Context management](./docs/context-management.md) — Brain/worker isolation, handoff/result packets, prompt references, session JSONL.
+- [Agent communication](./docs/agent-communication.md) — worker lifecycle, routing, hooks, runtime events, multi-agent runs.
 - [Project structure and plan](./docs/project-structure.md) — goals, non-goals, workspace layout, package responsibilities, milestones.
 - [Visual style](./docs/visual-style.md) — Brutalist technical poster direction for UI and brand surfaces.
 - [References](./docs/references.md) — Amp and Pi reference material used for design decisions.

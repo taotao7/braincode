@@ -6,6 +6,7 @@ import {
   BRAINCODE_HOME_DIR_NAME,
   DEFAULT_CONFIG_HOST,
   DEFAULT_CONFIG_PORT,
+  normalizeModelApi,
 } from "@braincode/shared";
 import {
   createDefaultToolConfiguration,
@@ -1245,7 +1246,11 @@ export async function readModels(
   home = getBraincodeHome(),
 ): Promise<BraincodeModels> {
   const paths = await ensureBraincodeHome(home);
-  return readJsonFile(paths.models, defaultModels);
+  const models = await readJsonFile(paths.models, defaultModels);
+  if (migrateModels(models)) {
+    await writeJsonFile(paths.models, models);
+  }
+  return models;
 }
 
 export async function writeModels(
@@ -1253,8 +1258,25 @@ export async function writeModels(
   home = getBraincodeHome(),
 ): Promise<void> {
   assertDocumentArray(models, "models");
+  migrateModels(models);
   const paths = await ensureBraincodeHome(home);
   await writeJsonFile(paths.models, models);
+}
+
+function migrateModels(document: BraincodeModels): boolean {
+  let changed = false;
+  for (const model of document.models) {
+    if (!model || typeof model !== "object") continue;
+    const record = model as Record<string, unknown>;
+    if (typeof record.api !== "string") continue;
+
+    const normalizedApi = normalizeModelApi(record.api);
+    if (normalizedApi !== record.api) {
+      record.api = normalizedApi;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export async function readTools(

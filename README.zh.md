@@ -41,6 +41,16 @@ Braincode 目前有两种顶层模式：
 - 在核心 agent 运行时跑通之前，不设计复杂的插件系统。
 - 不在仓库中存放用户密钥或机器本地配置。
 
+## 文档
+
+- [总览](./docs/overview.zh.md) —— 分层、包结构、一次完整请求的流程。从这里开始。
+- [Architecture](./docs/architecture.md) —— 主系统架构、Brain Model 设计、上下文隔离、Pi 集成、本地配置服务（仅英文）。
+- [上下文管理](./docs/context-management.zh.md) —— Brain / worker 隔离、handoff / result packet、prompt 引用、session JSONL。
+- [Agent 通信](./docs/agent-communication.zh.md) —— worker 生命周期、路由、hook、运行时事件、多 agent 运行。
+- [Project structure and plan](./docs/project-structure.md) —— 工作区布局、各包职责、里程碑（仅英文）。
+- [Visual style](./docs/visual-style.md) —— UI / 品牌方向（仅英文）。
+- [References](./docs/references.md) —— 设计决策参考的 Amp / Pi 资料（仅英文）。
+
 ## 更多内容
 
 当前 TUI 支持 `/help` 查看命令、`/plan <任务>` 预览 Brain Model 路由但不调用 provider。TUI 不提供直接切换模型的命令；模型和 provider 配置属于 `braincode config`。

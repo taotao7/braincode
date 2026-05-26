@@ -2,6 +2,13 @@
 
 This document is the main architecture reference for Braincode.
 
+For contributors, two companion docs go deeper on the trickiest parts:
+
+- [Context management](./context-management.md) — how Brain and worker contexts stay isolated, packet shapes, prompt references, session JSONL.
+- [Agent communication](./agent-communication.md) — worker lifecycle, routing, hooks, runtime events, multi-agent runs.
+
+If you are new to the codebase, start with [Overview](./overview.md).
+
 ## Architecture goals
 
 - Build a coding-first agent that can also perform general tasks.

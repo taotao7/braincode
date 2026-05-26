@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { listBuiltInModelCatalog, listBuiltInProviders, toBraincodeModel } from "./index"
+import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, toBraincodeModel } from "./index"
 
 test("listBuiltInProviders exposes Pi providers", () => {
   expect(listBuiltInProviders()).toContain("anthropic")
@@ -37,4 +37,19 @@ test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
     supportsTools: true,
     defaultThinkingLevel: "off",
   })
+})
+
+test("resolvePiModel maps legacy OpenAI chat completions API id", () => {
+  const { piModel } = resolvePiModel({
+    id: "proxy/gemini",
+    provider: "proxy",
+    modelId: "gemini",
+    name: "Gemini via proxy",
+    api: "openai-chat-completions",
+    baseUrl: "http://localhost:9999/v1",
+    contextWindow: 128000,
+    supportsTools: true,
+  })
+
+  expect(piModel.api).toBe("openai-completions")
 })
