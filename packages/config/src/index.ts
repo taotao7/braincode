@@ -60,6 +60,17 @@ export type ProjectInstructionFile = {
   content: string;
 };
 
+export type McpServerEntry = {
+  type?: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  http_headers?: Record<string, string>;
+  disabled?: boolean;
+  [key: string]: unknown;
+};
+
 export type ProjectMcpConfig = {
   path: string;
   config: Record<string, unknown>;
@@ -75,6 +86,18 @@ export type ProjectSkill = {
 export type ProjectSupport = {
   root: string;
   agents?: ProjectInstructionFile;
+  mcp?: ProjectMcpConfig;
+  skills: ProjectSkill[];
+};
+
+export type UserSupportPaths = {
+  home: string;
+  mcp: string;
+  skills: string;
+};
+
+export type UserSupport = {
+  home: string;
   mcp?: ProjectMcpConfig;
   skills: ProjectSkill[];
 };
@@ -397,6 +420,14 @@ export function getProjectSupportPaths(
   };
 }
 
+export function getUserSupportPaths(home = getBraincodeHome()): UserSupportPaths {
+  return {
+    home,
+    mcp: join(home, "mcp.json"),
+    skills: join(home, "skills"),
+  };
+}
+
 async function writeJsonFile(path: string, value: unknown) {
   await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -429,6 +460,55 @@ function extractMcpServerNames(config: Record<string, unknown>): string[] {
   const servers = asRecord(config.mcpServers) ?? asRecord(config.servers);
   if (!servers) return [];
   return Object.keys(servers).sort();
+}
+
+export function extractMcpServerEntries(
+  config: Record<string, unknown>,
+): Array<{ name: string; entry: McpServerEntry }> {
+  const servers = asRecord(config.mcpServers) ?? asRecord(config.servers);
+  if (!servers) return [];
+  return Object.entries(servers)
+    .map(([name, value]) => ({
+      name,
+      entry: (asRecord(value) ?? {}) as McpServerEntry,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function detectMcpServersKey(parsed: Record<string, unknown>): "mcpServers" | "servers" {
+  if (parsed.mcpServers && typeof parsed.mcpServers === "object") return "mcpServers";
+  if (parsed.servers && typeof parsed.servers === "object") return "servers";
+  return "mcpServers";
+}
+
+export async function setMcpServerDisabled(
+  filePath: string,
+  serverName: string,
+  disabled: boolean,
+): Promise<void> {
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) {
+    throw new Error(`MCP config not found at ${filePath}`);
+  }
+  const raw = await file.text();
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const key = detectMcpServersKey(parsed);
+  const existing = asRecord(parsed[key]);
+  if (!existing) {
+    throw new Error(`MCP config at ${filePath} has no '${key}' map`);
+  }
+  if (!(serverName in existing)) {
+    throw new Error(`MCP server '${serverName}' not found in ${filePath}`);
+  }
+  const entry = (asRecord(existing[serverName]) ?? {}) as McpServerEntry;
+  if (disabled) {
+    entry.disabled = true;
+  } else {
+    delete entry.disabled;
+  }
+  existing[serverName] = entry as Record<string, unknown>;
+  parsed[key] = existing;
+  await writeJsonFile(filePath, parsed);
 }
 
 function stripMarkdownExtension(name: string): string {
@@ -585,6 +665,26 @@ export async function readProjectSupport(
   };
 }
 
+export async function readUserSupport(home = getBraincodeHome()): Promise<UserSupport> {
+  const paths = getUserSupportPaths(home);
+  const mcpFile = Bun.file(paths.mcp);
+  const mcpConfig = (await mcpFile.exists())
+    ? asRecord(JSON.parse(await mcpFile.text()))
+    : undefined;
+
+  return {
+    home: paths.home,
+    mcp: mcpConfig
+      ? {
+          path: paths.mcp,
+          config: mcpConfig,
+          serverNames: extractMcpServerNames(mcpConfig),
+        }
+      : undefined,
+    skills: await readProjectSkills(paths.skills),
+  };
+}
+
 export async function readUserHooks(
   home = getBraincodeHome(),
 ): Promise<HookSource> {
@@ -623,6 +723,102 @@ export async function readHookSources(
   const userHooks = await readUserHooks(home);
   const projectHooks = await readProjectHooks(projectRoot);
   return projectHooks ? [userHooks, projectHooks] : [userHooks];
+}
+
+export type SessionSummary = {
+  sessionId: string;
+  path: string;
+  updatedAt: number;
+  prompt?: string;
+  brainId?: string;
+  role?: string;
+  summary?: string;
+  status: "completed" | "failed" | "incomplete";
+};
+
+export async function listSessions(
+  home = getBraincodeHome(),
+  limit = 25,
+): Promise<SessionSummary[]> {
+  const paths = await ensureBraincodeHome(home);
+  let entries;
+  try {
+    entries = await readdir(paths.sessions, { withFileTypes: true });
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return [];
+    throw error;
+  }
+  const records: Array<SessionSummary & { sortKey: number }> = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const fullPath = join(paths.sessions, entry.name);
+    const file = Bun.file(fullPath);
+    const updatedAt = file.lastModified;
+    if (records.length >= limit * 4) break;
+    let prompt: string | undefined;
+    let brainId: string | undefined;
+    let role: string | undefined;
+    let summary: string | undefined;
+    let status: SessionSummary["status"] = "incomplete";
+    try {
+      const text = await file.text();
+      const lines = text.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const record = JSON.parse(trimmed) as Record<string, unknown>;
+          if (record.type === "run_start") {
+            if (typeof record.prompt === "string" && !prompt) prompt = record.prompt;
+            const plan = record.plan as { brain?: { id?: unknown }; role?: unknown } | undefined;
+            if (plan?.brain && typeof plan.brain.id === "string") brainId = brainId ?? plan.brain.id;
+            if (typeof plan?.role === "string") role = role ?? plan.role;
+          } else if (record.type === "run_end") {
+            if (typeof record.summary === "string") summary = record.summary;
+            status = "completed";
+          } else if (record.type === "run_error" && status !== "completed") {
+            if (typeof record.error === "string") summary = record.error;
+            status = "failed";
+          }
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } catch {
+      // ignore unreadable session
+    }
+    const sessionId = entry.name.replace(/\.jsonl$/, "");
+    records.push({ sessionId, path: fullPath, updatedAt, prompt, brainId, role, summary, status, sortKey: updatedAt });
+  }
+  records.sort((left, right) => right.sortKey - left.sortKey);
+  return records.slice(0, limit).map(({ sortKey: _drop, ...rest }) => rest);
+}
+
+export async function setHookHandlerEnabled(
+  filePath: string,
+  eventName: HookEventName,
+  matcherIndex: number,
+  handlerIndex: number,
+  enabled: boolean,
+): Promise<void> {
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) {
+    throw new Error(`hooks file not found at ${filePath}`);
+  }
+  const raw = await file.text();
+  const parsed = normalizeHooks(JSON.parse(raw));
+  const groups = parsed.hooks[eventName];
+  if (!Array.isArray(groups) || !groups[matcherIndex]) {
+    throw new Error(`hook group not found: ${eventName}[${matcherIndex}]`);
+  }
+  const handler = groups[matcherIndex].hooks[handlerIndex];
+  if (!handler) {
+    throw new Error(
+      `hook handler not found: ${eventName}[${matcherIndex}][${handlerIndex}]`,
+    );
+  }
+  handler.enabled = enabled;
+  await writeJsonFile(filePath, parsed);
 }
 
 function assertSettings(value: BraincodeSettings) {

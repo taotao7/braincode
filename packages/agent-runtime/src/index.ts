@@ -1,8 +1,13 @@
 import { spawn } from "node:child_process"
+import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
+export type { AgentEvent } from "@earendil-works/pi-agent-core"
+import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
+export { collectMcpToolServers, McpToolHub } from "./mcp"
+export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { Model } from "@earendil-works/pi-ai"
 import { formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSettings, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
@@ -13,6 +18,8 @@ export type AgentRunRequest = {
   prompt: string
   sessionId?: string
   projectRoot?: string
+  onEvent?: (event: AgentEvent) => void | Promise<void>
+  onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
 }
 
 export type AgentRunResult = {
@@ -20,6 +27,7 @@ export type AgentRunResult = {
   summary: string
   plan: RuntimePlan
   workerResults: ExecutedWorkerResult[]
+  mcp?: McpHubConnectReport
 }
 
 export type RuntimeModelSelection = {
@@ -34,6 +42,7 @@ export type BraincodeAgentRuntimeOptions = {
   model: BraincodeModel
   policy: ModelPolicy
   sessionId?: string
+  tools?: import("@earendil-works/pi-agent-core").AgentTool[]
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
 }
@@ -395,11 +404,13 @@ async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: Brainco
 }
 
 async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<Array<{ selection: RuntimeModelSelection; apiKey: string }>> {
-  const modelIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
+  const explicitIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
   const candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }> = []
+  const seenIds = new Set<string>()
+  const seenProviders = new Set<string>()
 
-  for (const modelId of modelIds) {
+  for (const modelId of explicitIds) {
     try {
       const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models)
       const apiKey = await readProviderApiKey(selection.piModel.provider, home)
@@ -407,9 +418,29 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
         errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
         continue
       }
+      seenIds.add(modelId)
+      seenProviders.add(selection.piModel.provider)
       candidates.push({ selection, apiKey })
     } catch (error) {
       errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  // Cross-provider safety net: append catalog-wide fallbacks so a regional/upstream
+  // failure on one provider (e.g. cliproxyapi → OpenAI 400 "User location is not
+  // supported") automatically rolls over to another provider with an available API key.
+  for (const model of models) {
+    if (seenIds.has(model.id)) continue
+    if (seenProviders.has(model.provider)) continue
+    try {
+      const selection = selectRuntimeModel({ ...policy, modelId: model.id, fallbackModelIds: [] }, models)
+      const apiKey = await readProviderApiKey(selection.piModel.provider, home)
+      if (!apiKey) continue
+      seenIds.add(model.id)
+      seenProviders.add(selection.piModel.provider)
+      candidates.push({ selection, apiKey })
+    } catch {
+      // ignore catalog-fallback failures; explicit errors are already collected
     }
   }
 
@@ -425,7 +456,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       systemPrompt: options.systemPrompt,
       model: piModel,
       thinkingLevel: normalizeRuntimeThinkingLevel(options.model, options.policy),
-      tools: [],
+      tools: options.tools ?? [],
       messages: [],
     },
     getApiKey: options.getApiKey,
@@ -1007,63 +1038,180 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   if (promptHooks.blockedReason) {
     throw new Error(`UserPromptSubmit hook blocked the prompt: ${promptHooks.blockedReason}`)
   }
-  const effectivePrompt = addHookAdditionalContext(request.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
+  const expanded = await expandPromptReferences(request.prompt, cwd)
+  const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true)
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
   const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home)
 
   const projectSupport = await readProjectSupport(cwd)
+  const userSupport = await readUserSupport(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
   const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
-  let lastError: unknown
-  for (const [attempt, { selection, apiKey }] of candidates.entries()) {
-    plan.model = selection.configured
-    plan.piModel = toPiModelSummary(selection)
-    await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
-
-    const runtime = createBraincodeAgentRuntime({
-      mode: plan.mode,
-      systemPrompt: getAgentRoleSystemPrompt(plan.role, plan.policy),
-      model: plan.model,
-      policy: plan.policy,
-      sessionId,
-      getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
-    })
-
-    try {
-      await runtime.agent.prompt(primaryPrompt)
-      const primarySummary = extractAssistantText(runtime.agent.state.messages)
-      const reviewResult =
-        plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-          ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext)
-          : undefined
-      if (reviewResult) workerResults.push(reviewResult)
-
-      const stopHooks = await runAndRecordHooks(
-        "Stop",
-        {
-          stop_hook_active: false,
-          last_assistant_message: primarySummary || null,
-        },
-        { ...hookContext, model: plan.model.id },
-        undefined,
-        home,
-        "hook_stop",
-      )
-      const summary = `${mergeReviewResult(primarySummary, reviewResult)}${formatStopHookFeedback(stopHooks)}`
-      await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, attempt: attempt + 1 }, home)
-      return { sessionId, summary, plan, workerResults }
-    } catch (error) {
-      lastError = error
-      const message = error instanceof Error ? error.message : String(error)
-      await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+  const mcpHub = new McpToolHub()
+  const { servers: mcpServers, skipped: mcpSkipped } = collectMcpToolServers({
+    userMcp: userSupport.mcp,
+    projectMcp: projectSupport.mcp,
+  })
+  let mcpReport: McpHubConnectReport = { connected: [], failed: [], skipped: mcpSkipped, toolCount: 0 }
+  if (mcpServers.length > 0) {
+    const connectReport = await mcpHub.connect(mcpServers)
+    mcpReport = {
+      connected: connectReport.connected,
+      failed: connectReport.failed,
+      skipped: [...mcpSkipped, ...connectReport.skipped],
+      toolCount: connectReport.toolCount,
     }
   }
+  if (request.onMcpReport) {
+    try {
+      await request.onMcpReport(mcpReport)
+    } catch {
+      // ignore listener errors
+    }
+  }
+  await appendSessionRecord(sessionId, { type: "mcp_connect", report: mcpReport }, home)
+  const mcpTools = mcpHub.getTools()
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  try {
+    let lastError: unknown
+    for (const [attempt, { selection, apiKey }] of candidates.entries()) {
+      plan.model = selection.configured
+      plan.piModel = toPiModelSummary(selection)
+      await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
+
+      const runtime = createBraincodeAgentRuntime({
+        mode: plan.mode,
+        systemPrompt: getAgentRoleSystemPrompt(plan.role, plan.policy),
+        model: plan.model,
+        policy: plan.policy,
+        sessionId,
+        tools: mcpTools,
+        getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
+        onEvent: request.onEvent,
+      })
+
+      try {
+        await runtime.agent.prompt(primaryPrompt)
+        const primarySummary = extractAssistantText(runtime.agent.state.messages)
+        const reviewResult =
+          plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext)
+            : undefined
+        if (reviewResult) workerResults.push(reviewResult)
+
+        const stopHooks = await runAndRecordHooks(
+          "Stop",
+          {
+            stop_hook_active: false,
+            last_assistant_message: primarySummary || null,
+          },
+          { ...hookContext, model: plan.model.id },
+          undefined,
+          home,
+          "hook_stop",
+        )
+        const summary = `${mergeReviewResult(primarySummary, reviewResult)}${formatStopHookFeedback(stopHooks)}`
+        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, attempt: attempt + 1 }, home)
+        return { sessionId, summary, plan, workerResults, mcp: mcpReport }
+      } catch (error) {
+        lastError = error
+        const message = error instanceof Error ? error.message : String(error)
+        await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  } finally {
+    mcpHub.shutdown()
+  }
 }
+
+export type PromptReference = {
+  token: string
+  path: string
+  kind: "text" | "image" | "missing"
+  size?: number
+  reason?: string
+}
+
+export type ExpandedPromptResult = {
+  prompt: string
+  references: PromptReference[]
+}
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"])
+const MAX_INLINE_FILE_BYTES = 64 * 1024
+
+function inlineCodeFence(path: string): string {
+  const dot = path.lastIndexOf(".")
+  const ext = dot === -1 ? "" : path.slice(dot + 1).toLowerCase()
+  if (!ext) return ""
+  return ext.replace(/[^a-z0-9]/g, "")
+}
+
+export async function expandPromptReferences(prompt: string, projectRoot: string): Promise<ExpandedPromptResult> {
+  const references: PromptReference[] = []
+  const tokens = new Map<string, PromptReference>()
+  const pattern = /(^|\s)@([^\s@]+)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(prompt)) !== null) {
+    const rawPath = match[2]
+    if (!rawPath || rawPath === "image" || rawPath.startsWith("image:")) continue
+    const token = `@${rawPath}`
+    if (tokens.has(token)) continue
+    const absolute = isAbsolute(rawPath) ? rawPath : resolvePath(projectRoot, rawPath)
+    const file = Bun.file(absolute)
+    if (!(await file.exists())) {
+      const ref: PromptReference = { token, path: absolute, kind: "missing", reason: "file not found" }
+      tokens.set(token, ref)
+      references.push(ref)
+      continue
+    }
+    const dot = absolute.lastIndexOf(".")
+    const ext = dot === -1 ? "" : absolute.slice(dot).toLowerCase()
+    if (IMAGE_EXTENSIONS.has(ext)) {
+      const ref: PromptReference = { token, path: absolute, kind: "image" }
+      tokens.set(token, ref)
+      references.push(ref)
+      continue
+    }
+    const size = file.size
+    if (size > MAX_INLINE_FILE_BYTES) {
+      const ref: PromptReference = { token, path: absolute, kind: "missing", reason: `file is ${size} bytes (limit ${MAX_INLINE_FILE_BYTES})`, size }
+      tokens.set(token, ref)
+      references.push(ref)
+      continue
+    }
+    const ref: PromptReference = { token, path: absolute, kind: "text", size }
+    tokens.set(token, ref)
+    references.push(ref)
+  }
+
+  if (references.length === 0) return { prompt, references }
+
+  const sections: string[] = []
+  for (const ref of references) {
+    if (ref.kind === "text") {
+      const content = await Bun.file(ref.path).text()
+      const rel = relativePath(projectRoot, ref.path) || ref.path
+      const fence = inlineCodeFence(ref.path)
+      sections.push(`File ${ref.token} (${rel}):\n\`\`\`${fence}\n${content}\n\`\`\``)
+    } else if (ref.kind === "image") {
+      const rel = relativePath(projectRoot, ref.path) || ref.path
+      sections.push(`Image ${ref.token} attached at ${rel}.`)
+    } else {
+      sections.push(`Reference ${ref.token} could not be inlined: ${ref.reason ?? "unknown"}.`)
+    }
+  }
+  return {
+    prompt: `${prompt}\n\nReferenced attachments:\n${sections.join("\n\n")}`,
+    references,
+  }
+}
+

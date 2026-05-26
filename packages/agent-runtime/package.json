@@ -16,6 +16,7 @@
     "@braincode/protocol": "workspace:*",
     "@braincode/shared": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.75.5",
-    "@earendil-works/pi-ai": "^0.75.5"
+    "@earendil-works/pi-ai": "^0.75.5",
+    "typebox": "1.1.38"
   }
 }
