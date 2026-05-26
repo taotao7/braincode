@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Box, render, Text, useApp, useInput } from "ink"
+import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
-import { executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan } from "@braincode/agent-runtime"
+import { executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
 import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
@@ -12,11 +12,12 @@ import { fuzzyFilter, listProjectFiles } from "./project-files"
 
 type TranscriptItem = {
   id: string
-  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking"
+  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker"
   text: string
   plan?: RuntimePlan
   toolName?: string
   toolStatus?: "running" | "ok" | "failed"
+  workerStatus?: "running" | "completed" | "failed"
   startedAt?: number
   finishedAt?: number
 }
@@ -37,6 +38,7 @@ const COMMANDS: CommandDefinition[] = [
   { name: "sessions", label: "/sessions", hint: "Browse recent sessions" },
   { name: "resume", label: "/resume", hint: "Resume a session by id", insert: "/resume " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
+  { name: "team", label: "/team", hint: "Force a multi-agent run · /team [roleA,roleB,…] <prompt>", insert: "/team " },
   { name: "skill", label: "/skill", hint: "List project skills (.agents/skill)" },
   { name: "agents", label: "/agents", hint: "Show AGENTS.md location and length" },
   { name: "files", label: "/files", hint: "Refresh the @file index" },
@@ -105,8 +107,76 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   await instance.waitUntilExit()
 }
 
+const INPUT_MAX_LINES = 6
+const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
+
+const BRAIN_BODY: ReadonlyArray<string> = [
+  "  ╭─────╮  ",
+  " ╭╯∾∽∾∽∾╰╮ ",
+  " │∽◔ ∾ ◔∽│ ",
+  " │∾ ∽⌣∽ ∾│ ",
+  " ╰╮∾∽∾∽∾╭╯ ",
+  "  ╰──┬──╯  ",
+]
+
+const BRAIN_SPARKLES: ReadonlyArray<ReadonlyArray<string>> = [
+  ["    ✦      ", "           ", "        ✧  "],
+  ["           ", "  ✦        ", "       ✧   "],
+  ["       ✧   ", "           ", "   ✦       "],
+  ["  ✦      ✧ ", "           ", "        ✦  "],
+]
+
+const BRAIN_IDLE_SPARKLES: ReadonlyArray<string> = [
+  "           ",
+  "     ·     ",
+  "           ",
+]
+
+const BRAIN_PULSE_COLORS = ["magenta", "cyan", "magentaBright", "cyanBright"] as const
+
+type BrainPetProps = { thinking: boolean }
+
+function BrainPet({ thinking }: BrainPetProps) {
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    const tick = thinking ? 180 : 700
+    const interval = setInterval(() => {
+      setFrame((value) => (value + 1) % 1024)
+    }, tick)
+    return () => clearInterval(interval)
+  }, [thinking])
+  const sparkles = thinking
+    ? BRAIN_SPARKLES[frame % BRAIN_SPARKLES.length]
+    : BRAIN_IDLE_SPARKLES
+  const bodyColor = thinking
+    ? BRAIN_PULSE_COLORS[frame % BRAIN_PULSE_COLORS.length]
+    : "gray"
+  const label = thinking ? "thinking…" : "idle"
+  return (
+    <Box flexDirection="column" alignItems="center">
+      {sparkles.map((line, index) => (
+        <Text key={`spark-${index}`} color="yellow">{line}</Text>
+      ))}
+      {BRAIN_BODY.map((line, index) => (
+        <Text key={`body-${index}`} color={bodyColor}>{line}</Text>
+      ))}
+      <Text color={thinking ? "cyan" : "gray"}>{label}</Text>
+    </Box>
+  )
+}
+
 function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const { exit } = useApp()
+  const { stdout } = useStdout()
+  const [terminalCols, setTerminalCols] = useState<number>(stdout?.columns ?? 80)
+  useEffect(() => {
+    if (!stdout) return
+    const handler = () => setTerminalCols(stdout.columns ?? 80)
+    stdout.on("resize", handler)
+    return () => {
+      stdout.off("resize", handler)
+    }
+  }, [stdout])
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const projectRoot = useMemo(() => process.cwd(), [])
   const [draft, setDraft] = useState(initialPrompt ?? "")
@@ -809,6 +879,44 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }
     }
 
+    const workerItems = new Map<string, { itemId: string; startedAt: number }>()
+    const workerKey = (event: WorkerLifecycleEvent) => `${event.phase}:${event.role}`
+    const onWorkerEvent = (event: WorkerLifecycleEvent) => {
+      finalizeStreamingBuffers()
+      const key = workerKey(event)
+      if (event.type === "worker_start") {
+        const itemId = crypto.randomUUID()
+        workerItems.set(key, { itemId, startedAt: Date.now() })
+        appendItemRaw({
+          id: itemId,
+          kind: "worker",
+          workerStatus: "running",
+          startedAt: Date.now(),
+          text: `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  ${event.modelId}  ${event.goal ? `· goal: ${truncate(event.goal, 80)}` : ""}`,
+        })
+        updateStatus(`Worker ${event.role} running…`)
+        return
+      }
+      // worker_end
+      const tracked = workerItems.get(key)
+      const itemId = tracked?.itemId
+      const elapsed = tracked ? Date.now() - tracked.startedAt : undefined
+      if (itemId) workerItems.delete(key)
+      const text = event.status === "completed"
+        ? `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  done${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
+        : `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`
+      if (itemId) {
+        updateItem(itemId, {
+          workerStatus: event.status,
+          finishedAt: Date.now(),
+          text,
+        })
+      } else {
+        appendItemRaw({ id: crypto.randomUUID(), kind: "worker", workerStatus: event.status, finishedAt: Date.now(), text })
+      }
+      updateStatus(`Worker ${event.role} ${event.status}.`)
+    }
+
     const onMcpReport = (report: import("@braincode/agent-runtime").McpHubConnectReport) => {
       if (report.toolCount === 0 && report.failed.length === 0 && report.skipped.length === 0) return
       const parts: string[] = []
@@ -820,7 +928,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     try {
-      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onEvent, onMcpReport })
+      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onEvent, onMcpReport, onWorkerEvent })
       finalizeStreamingBuffers()
       setItems((previous) => {
         const next = previous.filter((item) => item.id !== statusId)
@@ -832,8 +940,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         })
         const trimmedSummary = (result.summary ?? "").trim()
         const hasMatchingAssistant = trimmedSummary && previous.some((item) => item.kind === "assistant" && item.text.trim() === trimmedSummary)
+        const sawAssistantText = previous.some((item) => item.kind === "assistant" && item.text.trim().length > 0)
         if (trimmedSummary && !hasMatchingAssistant) {
           next.push({ id: crypto.randomUUID(), kind: "assistant", text: trimmedSummary })
+        } else if (!trimmedSummary && !sawAssistantText) {
+          next.push({ id: crypto.randomUUID(), kind: "assistant", text: "(model returned no text — check tool calls above or run /sessions to inspect)" })
         }
         return next
       })
@@ -1148,12 +1259,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="row" paddingX={1}>
+      <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
         <Box flexDirection="column">
           <Text color="cyan" bold>BRAIN / CODE</Text>
           <Text color="gray">
-            Braincode Ink TUI · session {sessionId.slice(0, 8)} · {relative(homedir(), projectRoot) || projectRoot}
+            session {sessionId.slice(0, 8)} · {relative(homedir(), projectRoot) || projectRoot}
           </Text>
           <Text color="gray">
             project: {projectSupport ? `AGENTS.md ${projectSupport.agents ? "✓" : "·"}  mcp:${projectMcpCount}  skills:${projectSkillCount}` : "loading…"}
@@ -1271,15 +1383,33 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
-      <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="row">
-        <Text color={running ? "gray" : "green"} wrap="wrap">
-          {running ? "… wait for the current run to finish" : composeDraftLine(draft, cursor)}
-        </Text>
+      <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="column">
+        {running ? (
+          <Text color="gray">… wait for the current run to finish</Text>
+        ) : (
+          (() => {
+            const innerWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
+            const window = clipDraftToWindow(draft, cursor, innerWidth, INPUT_MAX_LINES)
+            return (
+              <>
+                {window.hiddenAbove > 0 ? <Text color="gray">↑ {window.hiddenAbove} more line{window.hiddenAbove === 1 ? "" : "s"}</Text> : null}
+                {window.lines.map((line, index) => (
+                  <Text key={index} color="green" wrap="truncate-end">{line || " "}</Text>
+                ))}
+                {window.hiddenBelow > 0 ? <Text color="gray">↓ {window.hiddenBelow} more line{window.hiddenBelow === 1 ? "" : "s"}</Text> : null}
+              </>
+            )
+          })()
+        )}
       </Box>
       <Text color="gray">
         Enter submits · / for commands · @ for files · Ctrl+V pastes image/text · Esc dismisses · Ctrl+C exits
       </Text>
       {statusFlash ? <Text color="cyan">{statusFlash}</Text> : null}
+      </Box>
+      <Box flexDirection="column" marginLeft={2} paddingTop={1}>
+        <BrainPet thinking={running} />
+      </Box>
     </Box>
   )
 }
@@ -1333,6 +1463,106 @@ function composeDraftLine(draft: string, cursor: number): string {
   return `› ${head}|${tail}`
 }
 
+function isWideChar(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0x9fff) ||
+    (code >= 0xa000 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe4f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x20000 && code <= 0x2fffd) ||
+    (code >= 0x30000 && code <= 0x3fffd)
+  )
+}
+
+function wrapByVisualWidth(text: string, width: number): string[] {
+  if (width <= 0) return [text]
+  const lines: string[] = []
+  let current = ""
+  let currentWidth = 0
+  for (const char of text) {
+    if (char === "\n") {
+      lines.push(current)
+      current = ""
+      currentWidth = 0
+      continue
+    }
+    const charWidth = isWideChar(char) ? 2 : 1
+    if (currentWidth + charWidth > width) {
+      lines.push(current)
+      current = ""
+      currentWidth = 0
+    }
+    current += char
+    currentWidth += charWidth
+  }
+  lines.push(current)
+  return lines
+}
+
+function locateCursorRow(text: string, cursor: number, width: number): number {
+  if (width <= 0) return 0
+  let row = 0
+  let col = 0
+  let index = 0
+  for (const char of text) {
+    if (index >= cursor) return row
+    if (char === "\n") {
+      row++
+      col = 0
+    } else {
+      const w = isWideChar(char) ? 2 : 1
+      if (col + w > width) {
+        row++
+        col = 0
+      }
+      col += w
+    }
+    index += char.length
+  }
+  return row
+}
+
+type DraftWindow = {
+  lines: string[]
+  hiddenAbove: number
+  hiddenBelow: number
+}
+
+function clipDraftToWindow(draft: string, cursor: number, width: number, maxLines: number): DraftWindow {
+  const composed = composeDraftLine(draft, cursor)
+  const lines = wrapByVisualWidth(composed, width)
+  if (lines.length <= maxLines) {
+    return { lines, hiddenAbove: 0, hiddenBelow: 0 }
+  }
+  // Cursor position: head length + 1 for caret offset, then "› " adds 2 chars.
+  const cursorOffsetInComposed = 2 + clamp(cursor, 0, draft.length)
+  const cursorRow = locateCursorRow(composed, cursorOffsetInComposed, width)
+  let start = Math.max(0, cursorRow - Math.floor(maxLines / 2))
+  let end = start + maxLines
+  if (end > lines.length) {
+    end = lines.length
+    start = Math.max(0, end - maxLines)
+  }
+  if (cursorRow < start) {
+    start = cursorRow
+    end = Math.min(lines.length, start + maxLines)
+  }
+  if (cursorRow >= end) {
+    end = Math.min(lines.length, cursorRow + 1)
+    start = Math.max(0, end - maxLines)
+  }
+  return {
+    lines: lines.slice(start, end),
+    hiddenAbove: start,
+    hiddenBelow: lines.length - end,
+  }
+}
+
 function labelFor(item: TranscriptItem): string {
   switch (item.kind) {
     case "user": return "You:"
@@ -1347,6 +1577,13 @@ function labelFor(item: TranscriptItem): string {
         case "ok": return "✓"
         case "failed": return "✗"
         default: return "→"
+      }
+    }
+    case "worker": {
+      switch (item.workerStatus) {
+        case "completed": return "◉"
+        case "failed": return "◌"
+        default: return "◎"
       }
     }
   }
@@ -1368,6 +1605,13 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
         default: return "yellow"
       }
     }
+    case "worker": {
+      switch (item.workerStatus) {
+        case "completed": return "magenta"
+        case "failed": return "red"
+        default: return "yellow"
+      }
+    }
   }
 }
 
@@ -1379,8 +1623,8 @@ function formatHelp(): string {
     "Tips:",
     "  • Start typing / to open the command palette.",
     "  • Use @<path> to attach project files (Tab to accept).",
-    "  • Ctrl+V pastes a clipboard image (saved under ~/.braincode/sessions/) or text.",
-    "  • Model/provider setup lives in `braincode config`; the TUI does not switch models directly.",
+    "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
+    "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n")
 }
 

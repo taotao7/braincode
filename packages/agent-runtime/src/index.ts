@@ -18,6 +18,7 @@ export type AgentRunRequest = {
   prompt: string
   sessionId?: string
   projectRoot?: string
+  forceRoles?: RoutedAgentRole[]
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
@@ -584,14 +585,29 @@ ${prompt}`)
   }
 }
 
-async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean): Promise<RuntimePlan> {
+async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[]): Promise<RuntimePlan> {
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
   const heuristicPlan = planAgentRouting(prompt, brain)
-  const routerDecision = useRouterBrain ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, home) : undefined
-  const agentPlan = routerDecision ?? heuristicPlan
+  const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
+    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, home)
+    : undefined
+  const baseAgentPlan = routerDecision ?? heuristicPlan
+  const agentPlan = forceRoles && forceRoles.length > 0
+    ? {
+        ...baseAgentPlan,
+        primaryRole: forceRoles[0]!,
+        workers: forceRoles.map((role, index) => ({
+          role,
+          goal: `Respond independently as the ${role} agent.${index === 0 ? " (primary)" : ""}`,
+          reason: "Forced multi-agent invocation via /team.",
+        })),
+        requiresReview: false,
+        reason: `Forced multi-agent run across ${forceRoles.join(", ")}.`,
+      }
+    : baseAgentPlan
   const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
   const selection = selectRuntimeModel(policy, models as BraincodeModel[])
@@ -1056,7 +1072,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
   const expanded = await expandPromptReferences(request.prompt, cwd)
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
-  const plan = await buildRuntimePlan(effectivePrompt, home, true)
+  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
   const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home)
