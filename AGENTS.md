@@ -36,6 +36,8 @@ When changing architecture, structure, or planning, update the relevant `docs/` 
 - Prefer small, typed interfaces between packages.
 - Do not let UI packages depend on agent internals directly; communicate through protocol/shared types.
 - Do not let agent workers share full conversation history. Use isolated contexts and structured handoff/result messages.
+- Keep context ownership layered: Brain owns orchestration context; each subagent owns exactly one isolated task context.
+- Give every subagent context its own id and a `parentId` pointing to the Brain task context for progress tracking and recovery.
 - Do not fork pi-mono unless there is no viable public API or integration point.
 - Follow the planned layout in [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout) unless a change is intentionally updating the plan.
 - Keep package ownership aligned with [`docs/project-structure.md#package-responsibilities`](./docs/project-structure.md#package-responsibilities).

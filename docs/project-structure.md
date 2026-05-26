@@ -9,6 +9,7 @@ This document is the source of truth for the planned workspace layout, package o
 - Support two top-level execution modes: `auto` and `radical`.
 - Dynamically route work to different models based on role, cost, latency, context size, and risk.
 - Isolate context between agents and exchange only structured handoff/result messages.
+- Enforce layered context ownership: Brain manages the orchestration context, and each subagent manages one isolated task context.
 - Provide a local configuration service that users open in the browser.
 - Store real user configuration under `~/.braincode/`.
 - Use Bun and a monorepo layout from the beginning.
@@ -167,6 +168,7 @@ Responsibilities:
 - Decide when to escalate to stronger models.
 - Decide when to spawn worker agents.
 - Decide when review is required.
+- Decide what crosses from the Brain context layer into each worker's isolated task context.
 
 ### `packages/llm`
 
@@ -200,7 +202,17 @@ Responsibilities:
 
 Owns context isolation, compaction policy, and handoff/result packets.
 
-Workers should not share full conversation history. The orchestrator sends a compact handoff packet; the worker returns a structured result.
+Workers should not share full conversation history. Brain owns the root orchestration context and gives it a stable task id for recording and recovery. Each worker owns a separate task context with its own id and a `parentId` pointing back to the Brain task. Brain sends the worker a compact handoff packet, and the worker returns a structured result for Brain to merge.
+
+Responsibilities:
+
+- Define root Brain task context metadata.
+- Define isolated subagent task context metadata.
+- Define typed Brain-to-agent handoff packets.
+- Define typed agent-to-Brain result packets.
+- Track child task progress through structured worker results rather than shared transcripts.
+- Keep context references selective, so file/thread/history references pull only task-relevant information.
+- Preserve the invariant that worker private transcripts and unrelated tool output do not become shared context.
 
 ### `packages/protocol`
 
@@ -267,6 +279,8 @@ MVP-2 starts by establishing the adapter boundary:
 ### MVP-4: isolated worker agents
 
 - Implement handoff packets.
+- Encode Brain-to-agent and agent-to-Brain context transfer directions.
+- Add stable parent/child task context ids for recovery and progress tracking.
 - Run isolated worker sessions.
 - Merge structured worker results into primary-agent execution.
 - Run mandatory review workers for risky file-editing tasks.

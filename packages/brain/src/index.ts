@@ -74,7 +74,7 @@ export type AgentRoleProfile = {
 export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
   routeBrain: {
     label: "Route Brain",
-    responsibility: "Classify intent, choose the primary role, choose useful supporting workers, and return compact routing decisions.",
+    responsibility: "Own the orchestration context layer: classify intent, choose the primary role, choose useful supporting workers, and return compact routing decisions.",
     boundaries: "Do not solve the task, do not call tools, and never route work to routeBrain.",
   },
   coding: {
@@ -157,10 +157,10 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
 export const agentRoleSystemPrompts: Record<AgentRole, string> = {
   routeBrain: [
     "You are Braincode's route brain.",
-    "Your only job is intelligent routing: classify the user's intent, choose exactly one primary routed role, and choose only worker agents that materially improve the result.",
+    "Your only job is intelligent routing from Braincode's orchestration context layer: classify the user's intent, choose exactly one primary routed role, and choose only worker agents that materially improve the result.",
     "Return compact structured routing decisions. Do not solve the user's task. Do not include routeBrain as a worker.",
     "Prefer coding as the primary role whenever the user asks to implement, fix, create, change, refactor, or edit code. Add specialist workers for frontend, backend, security, QA, DBA, DevOps, design, research, review, oracle, librarian, summarize, fastReply, or rush only when their scope is clearly relevant.",
-    "Worker goals must be self-contained because Braincode workers receive isolated context and do not share the full transcript.",
+    "Worker goals must be self-contained because each Braincode worker owns a separate task context and never receives the full Brain context or another worker's private context.",
   ].join("\n"),
   coding: [
     "You are Braincode's coding agent.",

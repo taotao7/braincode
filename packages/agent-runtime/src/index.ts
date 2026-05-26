@@ -2,7 +2,7 @@ import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
 import type { Model } from "@earendil-works/pi-ai"
 import { formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readModels, readProviderApiKey, readSettings } from "@braincode/config"
-import type { HandoffPacket, WorkerResult } from "@braincode/context"
+import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
@@ -361,18 +361,32 @@ function extractAssistantText(messages: unknown[]): string {
     .join("\n")
 }
 
-function createWorkerHandoff(worker: RuntimeWorkerPlan): HandoffPacket {
+function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string, phase: "support" | "review"): HandoffPacket {
+  const taskId = crypto.randomUUID()
   return {
+    ...brainToAgentContextTransfer,
     id: crypto.randomUUID(),
-    goal: worker.goal,
+    task: {
+      id: taskId,
+      parentId,
+      layer: "agent",
+      agentRole: worker.role,
+      goal: worker.goal,
+      progress: {
+        status: "pending",
+        summary: `${worker.role} ${phase} task is queued.`,
+      },
+      contextRefs: [],
+    },
     constraints: [
       `Run as the ${worker.role} agent only.`,
+      "Treat this as a Brain-to-agent context transfer: Brain owns orchestration context, and this worker owns only its isolated task context.",
       "Use only this handoff, the original user request, and explicit worker results supplied in the prompt.",
+      "Echo the task id and parentId exactly as provided; Brain will use the handoff values as authoritative.",
       "Do not assume access to the full root transcript or another worker's private chain of thought.",
       "Return concise structured findings for the primary Braincode agent.",
     ],
-    contextRefs: [],
-    expectedResult: "JSON with summary, artifacts, risks, and nextQuestions.",
+    expectedResult: "JSON with taskId, parentId, progress, summary, artifacts, risks, and nextQuestions.",
   }
 }
 
@@ -386,7 +400,7 @@ Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
 Return only JSON in this shape:
-{"summary":"concise actionable result","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"concise actionable result","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
 }
 
 function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole): string {
@@ -417,7 +431,7 @@ Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
 Return only JSON in this shape:
-{"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
 }
 
 function formatWorkerResults(workerResults: ExecutedWorkerResult[]): string {
@@ -425,7 +439,8 @@ function formatWorkerResults(workerResults: ExecutedWorkerResult[]): string {
     .map((result) => {
       const risks = result.risks.length > 0 ? `\nRisks:\n${result.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
       const questions = result.nextQuestions.length > 0 ? `\nOpen questions:\n${result.nextQuestions.map((question) => `- ${question}`).join("\n")}` : ""
-      return `### ${result.role} (${result.status})\nGoal: ${result.goal}\nSummary: ${result.summary}${risks}${questions}`
+      const progress = result.progress.summary ? `${result.progress.status}: ${result.progress.summary}` : result.progress.status
+      return `### ${result.role} (${result.status})\nTask: ${result.taskId} -> ${result.parentId}\nGoal: ${result.goal}\nProgress: ${progress}\nSummary: ${result.summary}${risks}${questions}`
     })
     .join("\n\n")
 }
@@ -452,14 +467,43 @@ function normalizeContextRefs(value: unknown): ContextRef[] {
   return value.map((item) => normalizeContextRef(item)).filter((item): item is ContextRef => Boolean(item))
 }
 
+function isTaskProgressStatus(value: unknown): value is TaskProgress["status"] {
+  return value === "pending" || value === "running" || value === "completed" || value === "blocked" || value === "failed"
+}
+
+function normalizeTaskProgress(value: unknown, fallbackStatus: TaskProgress["status"], fallbackSummary?: string): TaskProgress {
+  if (!value || typeof value !== "object") {
+    return fallbackSummary ? { status: fallbackStatus, summary: fallbackSummary } : { status: fallbackStatus }
+  }
+
+  const record = value as { status?: unknown; summary?: unknown; currentStep?: unknown; completedSteps?: unknown; percent?: unknown }
+  const progress: TaskProgress = {
+    status: isTaskProgressStatus(record.status) ? record.status : fallbackStatus,
+  }
+  const summary = typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : fallbackSummary
+  if (summary) progress.summary = summary
+  if (typeof record.currentStep === "string" && record.currentStep.trim()) progress.currentStep = record.currentStep.trim()
+  const completedSteps = normalizeStringArray(record.completedSteps)
+  if (completedSteps.length > 0) progress.completedSteps = completedSteps
+  if (typeof record.percent === "number" && Number.isFinite(record.percent)) {
+    progress.percent = Math.max(0, Math.min(100, record.percent))
+  }
+  return progress
+}
+
 function normalizeWorkerResultText(text: string, handoff: HandoffPacket): WorkerResult {
   try {
     const parsed = extractJsonObject(text)
     if (parsed && typeof parsed === "object") {
-      const record = parsed as { summary?: unknown; artifacts?: unknown; risks?: unknown; nextQuestions?: unknown }
+      const record = parsed as { progress?: unknown; summary?: unknown; artifacts?: unknown; risks?: unknown; nextQuestions?: unknown }
+      const summary = typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : text.trim()
       return {
+        ...agentToBrainContextTransfer,
         handoffId: handoff.id,
-        summary: typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : text.trim(),
+        taskId: handoff.task.id,
+        parentId: handoff.task.parentId,
+        progress: normalizeTaskProgress(record.progress, "completed", summary),
+        summary,
         artifacts: normalizeContextRefs(record.artifacts),
         risks: normalizeStringArray(record.risks),
         nextQuestions: normalizeStringArray(record.nextQuestions),
@@ -470,7 +514,11 @@ function normalizeWorkerResultText(text: string, handoff: HandoffPacket): Worker
   }
 
   return {
+    ...agentToBrainContextTransfer,
     handoffId: handoff.id,
+    taskId: handoff.task.id,
+    parentId: handoff.task.parentId,
+    progress: normalizeTaskProgress(undefined, "completed", text.trim() || "(empty worker response)"),
     summary: text.trim() || "(empty worker response)",
     artifacts: [],
     risks: [],
@@ -481,7 +529,14 @@ function normalizeWorkerResultText(text: string, handoff: HandoffPacket): Worker
 function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, error: unknown): ExecutedWorkerResult {
   const message = error instanceof Error ? error.message : String(error)
   return {
+    ...agentToBrainContextTransfer,
     handoffId: handoff.id,
+    taskId: handoff.task.id,
+    parentId: handoff.task.parentId,
+    progress: {
+      status: "failed",
+      summary: message,
+    },
     role: worker.role,
     goal: worker.goal,
     status: "failed",
@@ -502,7 +557,7 @@ async function runWorkerFromPlan(
   mode: BraincodeMode,
   phase: "support" | "review",
 ): Promise<ExecutedWorkerResult> {
-  const handoff = createWorkerHandoff(worker)
+  const handoff = createWorkerHandoff(worker, sessionId, phase)
   let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
 
   try {
@@ -515,13 +570,14 @@ async function runWorkerFromPlan(
 
   let lastError: unknown
   for (const [attempt, { selection, apiKey }] of candidates.entries()) {
-    await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, attempt: attempt + 1 }, home)
+    const agentSessionId = `${handoff.task.id}-${attempt + 1}`
+    await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
     const runtime = createBraincodeAgentRuntime({
       mode,
       systemPrompt: getAgentRoleSystemPrompt(worker.role, worker.policy),
       model: selection.configured,
       policy: worker.policy,
-      sessionId: `${sessionId}-${phase}-${worker.role}-${attempt + 1}`,
+      sessionId: agentSessionId,
       getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
     })
 

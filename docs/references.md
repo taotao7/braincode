@@ -14,6 +14,10 @@ Use this document for external references and design notes that inform Braincode
   - Context windows are a primary design constraint.
   - Handoff creates a fresh context from a distilled message.
   - Referencing other threads should pull only the relevant information, not the entire history.
+- Amp note: `https://ampcode.com/notes/200k-tokens-is-plenty`
+  - Short, focused threads produce better results and lower cost than one large thread.
+  - Treat threads as task units; a feature or bugfix can be a cluster of small contexts.
+  - For Braincode, this maps to Brain owning the orchestration context while each subagent owns one task context.
 
 ## Pi infrastructure
 

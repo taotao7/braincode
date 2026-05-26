@@ -8,6 +8,7 @@ This document is the main architecture reference for Braincode.
 - Let users select a high-level **Brain Model** instead of a single LLM.
 - Dynamically route planning, coding, research, review, summarization, and quick replies to different models.
 - Isolate context between agents.
+- Keep context ownership layered: Brain owns the orchestration context, and every subagent owns one isolated task context.
 - Communicate between agents with structured handoff/result messages instead of shared full transcripts.
 - Reuse Pi infrastructure where public package APIs fit.
 - Keep Braincode product orchestration separate from app entrypoints and UI layers.
@@ -129,28 +130,42 @@ Routing has two inputs:
 
 Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned.
 
-## Context isolation
+## Layered context ownership
 
 Workers must not share full conversation history.
 
 ```text
-Root context
-  -> compact handoff packet
-    -> isolated worker context
-      -> structured worker result
-  -> primary agent receives selected worker summaries
+Brain orchestration context
+  id: <brain-task-id>
+  -> compact Brain-to-agent handoff packet
+    -> isolated subagent task context
+       id: <agent-task-id>
+       parentId: <brain-task-id>
+      -> structured agent-to-Brain result
+  -> Brain keeps selected summaries, artifacts, risks, and questions
+  -> primary agent receives only selected worker results
   -> optional review worker checks risky primary results
   -> root returns merged final answer
 ```
 
+The ownership rule is:
+
+- Brain owns the root orchestration layer: user intent, routing plan, shared facts, allowed context references, worker result summaries, artifacts, risks, and open questions.
+- Brain assigns a stable task id for the root context so the run can be recorded, resumed, or recovered.
+- Each subagent owns exactly one task layer: its own context id, `parentId` pointing to the Brain task id, role prompt, compact handoff packet, allowed references, progress, and tool results produced in that isolated session.
+- Context crosses layers only through typed packets. Brain-to-agent handoff packets carry the subagent context id, parent id, goal, progress, constraints, references, and expected result. Agent-to-Brain result packets carry task id, parent id, progress, summary, artifacts, risks, and next questions.
+- Full transcripts, private reasoning, and unrelated tool output do not cross layers. If prior work is needed, Brain should reference or summarize the relevant part instead of copying an entire thread.
+
 Core packet types:
 
 - `ContextRef`
+- `BrainTaskContext`
+- `AgentTaskContext`
 - `HandoffPacket`
 - `WorkerResult`
 - `AgentMessage`
 
-The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries and project facts remain future extensions of the same packet boundary.
+The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries, project facts, and thread references remain future extensions of the same packet boundary.
 
 Agent-to-agent communication should use protocol types from `packages/protocol`.
 
