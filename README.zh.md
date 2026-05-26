@@ -6,6 +6,22 @@ Braincode 是一个基于 Bun 的 monorepo 项目，目标是构建一个以编�
 
 **语言版本**：[English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## 安装
+
+```bash
+# Homebrew（macOS / Linux）
+brew install taotao7/tap/braincode
+
+# npm（需要 Node >= 18）
+npm i -g @taotao7/braincode
+
+# 或者直接下载预编译二进制
+curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-darwin-arm64.tar.gz \
+  | tar -xz && ./braincode-darwin-arm64 help
+```
+
+支持的平台：`darwin-arm64`、`darwin-x64`、`linux-x64`、`linux-arm64`。安装完成后，运行 `braincode` 启动 TUI，或运行 `braincode config` 打开本地配置页面。
+
 ## 核心理念
 
 在现阶段的 AI 大模型时代，**合理的编排一定大于单个模型**。没有任何一个 LLM 能在所有维度都做到最好 —— 规划、写代码、审查、总结、快速廉价的回复，各有各的强项。把整个工作流绑死在单一模型上，既浪费能力，也浪费钱。Braincode 坚信：**合理利用每个模型的特性，通过精心编排把它们组合起来，才能最大化提升效率、质量与成本收益**。Brain Model 就是这种理念的具体落地。

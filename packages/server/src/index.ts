@@ -22,6 +22,7 @@ import { configWebHtml } from "@braincode/config-web"
 import { listBuiltInModelCatalog, listOpenAICompatibleModels, testModelConnection, type BraincodeModel } from "@braincode/llm"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
 import { debugLog, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
+import logoPath from "../../../resources/logo.png" with { type: "file" }
 
 export type ConfigServerOptions = {
   host?: string
@@ -58,7 +59,7 @@ async function handleRequest(request: Request): Promise<Response> {
     }
 
     if (request.method === "GET" && url.pathname === "/resources/logo.png") {
-      const logo = Bun.file("resources/logo.png")
+      const logo = Bun.file(logoPath)
       if (!(await logo.exists())) return json<ApiResult<never>>({ ok: false, error: "Logo not found" }, 404)
       return new Response(logo, {
         headers: { "content-type": "image/png" },

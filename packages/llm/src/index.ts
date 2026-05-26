@@ -91,7 +91,10 @@ export async function listOpenAICompatibleModels(request: OpenAICompatibleModelL
   debugLog("llm", "listing OpenAI-compatible models", { provider, baseUrl, hasApiKey: Boolean(request.apiKey) })
 
   const response = await fetch(`${baseUrl}/models`, {
-    headers: request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : undefined,
+    headers: {
+      "user-agent": "BrainCode",
+      ...(request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}),
+    },
   })
   const body = (await response.json().catch(() => undefined)) as { data?: Array<{ id?: unknown; name?: unknown }> } | undefined
   if (!response.ok) {
@@ -204,7 +207,7 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
     headers: {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
-      ...(kimiCoding ? { "user-agent": "claude-code/0.1.0" } : {}),
+      "user-agent": kimiCoding ? "claude-code/0.1.0" : "BrainCode",
     },
     body: JSON.stringify({
       model: model.modelId,
@@ -314,6 +317,7 @@ export async function callPetCompletion(input: PetCompletionInput): Promise<stri
       headers: {
         authorization: `Bearer ${input.apiKey}`,
         "content-type": "application/json",
+        "user-agent": "BrainCode",
       },
       body: JSON.stringify({
         model: input.model.modelId,

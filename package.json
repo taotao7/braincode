@@ -1,6 +1,8 @@
 {
   "name": "braincode",
   "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -10,10 +12,12 @@
     "braincode": "bun run apps/cli/src/index.ts",
     "config": "bun run apps/cli/src/index.ts config",
     "check": "bunx tsc --noEmit -p tsconfig.json",
-    "test": "bun test"
+    "test": "bun test",
+    "build:binaries": "bash scripts/build-binaries.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "react-devtools-core": "^7.0.1",
     "typescript": "latest"
   }
 }

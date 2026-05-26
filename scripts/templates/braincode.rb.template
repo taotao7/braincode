@@ -1,0 +1,38 @@
+class Braincode < Formula
+  desc "Coding-first AI agent with user-selectable Brain Model"
+  homepage "https://github.com/taotao7/braincode"
+  version "{{VERSION}}"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/taotao7/braincode/releases/download/v{{VERSION}}/braincode-darwin-arm64.tar.gz"
+      sha256 "{{SHA_DARWIN_ARM64}}"
+    end
+    on_intel do
+      url "https://github.com/taotao7/braincode/releases/download/v{{VERSION}}/braincode-darwin-x64.tar.gz"
+      sha256 "{{SHA_DARWIN_X64}}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/taotao7/braincode/releases/download/v{{VERSION}}/braincode-linux-arm64.tar.gz"
+      sha256 "{{SHA_LINUX_ARM64}}"
+    end
+    on_intel do
+      url "https://github.com/taotao7/braincode/releases/download/v{{VERSION}}/braincode-linux-x64.tar.gz"
+      sha256 "{{SHA_LINUX_X64}}"
+    end
+  end
+
+  def install
+    binary = Dir["braincode-*"].first
+    odie "no braincode binary in archive" unless binary
+    bin.install binary => "braincode"
+  end
+
+  test do
+    assert_match "Braincode", shell_output("#{bin}/braincode help")
+  end
+end

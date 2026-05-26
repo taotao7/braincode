@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 *.log
 .aider*
+dist/
+apps/cli/npm/bin/braincode-bin

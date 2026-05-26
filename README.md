@@ -10,6 +10,22 @@ The project reuses Pi infrastructure where it makes sense, while keeping Brainco
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## Install
+
+```bash
+# Homebrew (macOS / Linux)
+brew install taotao7/tap/braincode
+
+# npm (requires Node >= 18)
+npm i -g @taotao7/braincode
+
+# Or download a prebuilt binary
+curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-darwin-arm64.tar.gz \
+  | tar -xz && ./braincode-darwin-arm64 help
+```
+
+Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. After install, run `braincode` for the TUI or `braincode config` to open the local configuration page.
+
 ## Core philosophy
 
 At the current stage of AI, **smart orchestration of models matters more than any single model**. No individual LLM dominates every dimension — planning, coding, reviewing, summarizing, fast cheap replies — and locking a workflow to one model wastes both capability and money. Braincode is built on the belief that **leveraging each model's strengths through deliberate orchestration delivers the greatest gains in efficiency, quality, and cost**. The Brain Model is the concrete expression of this philosophy.
