@@ -89,6 +89,7 @@ export type RuntimePlan = {
     source: "router-brain" | "heuristic"
     confidence?: number
     reason?: string
+    maxParallelAgents?: number
   }
   model: BraincodeModel
   policy: ModelPolicy
@@ -489,11 +490,11 @@ function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolic
 }
 
 function isRoutedAgentRole(value: unknown): value is RoutedAgentRole {
-  return isAgentRole(value) && value !== "routeBrain"
+  return isAgentRole(value) && value !== "routeBrain" && value !== "pet"
 }
 
 function isAgentRole(value: unknown): value is AgentRole {
-  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain"
+  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
 function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
@@ -621,9 +622,10 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   }
   const workers = runtimeWorkerInputs.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
   const modePolicy = getModePolicy(settings.mode)
+  const maxParallelAgents = brain.routing?.maxParallelAgents
   const routing = routerDecision
-    ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason }
-    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "dry-run/default heuristic route" }
+    ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, maxParallelAgents }
+    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "dry-run/default heuristic route", maxParallelAgents }
   debugLog("runtime", "planned runtime", { mode: settings.mode, brainId: brain.id, role, routingSource: routing.source, modelId: selection.configured.id, provider: selection.piModel.provider })
 
   return {
@@ -1025,16 +1027,35 @@ async function runSupportWorkers(
   projectSupport?: ProjectSupport,
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
+  concurrencyCap?: number,
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
-  if (toolExecution === "parallel" && workers.length > 1) {
-    return Promise.all(workers.map((worker) => runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext, onWorkerEvent)))
-  }
+  void toolExecution // tool execution governs intra-agent tool calls; worker scheduling is independent.
 
-  const results: ExecutedWorkerResult[] = []
-  for (const worker of workers) {
-    results.push(await runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext, onWorkerEvent))
+  const limit = Number.isFinite(concurrencyCap) && (concurrencyCap as number) > 0
+    ? Math.min(workers.length, Math.floor(concurrencyCap as number))
+    : workers.length
+  const results: ExecutedWorkerResult[] = new Array(workers.length)
+  let next = 0
+  const runOne = async (slot: number) => {
+    const index = next++
+    if (index >= workers.length) return
+    const worker = workers[index]!
+    results[index] = await runWorkerFromPlan(
+      worker,
+      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport),
+      sessionId,
+      home,
+      models,
+      mode,
+      "support",
+      projectSupport,
+      hookContext,
+      onWorkerEvent,
+    )
+    return runOne(slot)
   }
+  await Promise.all(Array.from({ length: limit }, (_, slot) => runOne(slot)))
   return results
 }
 
@@ -1082,7 +1103,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent)
+  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()

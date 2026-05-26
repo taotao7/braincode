@@ -317,6 +317,14 @@ export const defaultBrains: BraincodeBrains = {
           thinkingLevel: "low",
           systemPrompt: agentRoleSystemPrompts.rush,
         },
+        pet: {
+          modelId: "google/gemini-3-flash-preview",
+          fallbackModelIds: [
+            "anthropic/claude-sonnet-4-6",
+          ],
+          thinkingLevel: "minimal",
+          systemPrompt: agentRoleSystemPrompts.pet,
+        },
       },
       routing: {
         maxParallelAgents: 2,

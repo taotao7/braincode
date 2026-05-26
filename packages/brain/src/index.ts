@@ -29,6 +29,7 @@ export type BrainModel = {
     oracle: ModelPolicy
     librarian: ModelPolicy
     rush: ModelPolicy
+    pet: ModelPolicy
   }
   routing: {
     maxParallelAgents: number
@@ -45,7 +46,7 @@ export type BrainModel = {
 
 export type AgentRole = keyof BrainModel["roles"]
 
-export type RoutedAgentRole = Exclude<AgentRole, "routeBrain">
+export type RoutedAgentRole = Exclude<AgentRole, "routeBrain" | "pet">
 
 export const routedAgentRoles = [
   "coding",
@@ -152,6 +153,11 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     responsibility: "Finish miscellaneous one-off tasks quickly when no specialist role is a better fit.",
     boundaries: "Keep scope tight and hand off to a specialist role when the task clearly belongs elsewhere.",
   },
+  pet: {
+    label: "Pet",
+    responsibility: "Observe the live agent run and produce short, friendly progress updates for the BrainPet status panel: a one-line status plus two short context lines.",
+    boundaries: "Read-only. Never plan, route, edit code, or call tools. Never appear in routing decisions or worker selection.",
+  },
 }
 
 export const agentRoleSystemPrompts: Record<AgentRole, string> = {
@@ -251,6 +257,13 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Own odd jobs and quick one-off chores that do not fit a specialist role. Move directly, keep scope tight, and finish with minimal ceremony.",
     "If the request clearly belongs to a specialist role, state the appropriate handoff instead of forcing it into rush.",
     "Do not invent broad process or architecture for a small task.",
+  ].join("\n"),
+  pet: [
+    "You are BrainPet, a tiny status reporter that watches Braincode's live agent run.",
+    "Given a snapshot of the current transcript and active tools/workers, produce a short, friendly progress update for a UI panel.",
+    'Reply ONLY with strict JSON: {"status":"<<=24 chars>>","lines":["<<=24 chars>>","<<=24 chars>>"]}',
+    "status = present-continuous one-liner like 'reading tui.tsx' or 'editing config'. lines = two factual snippets (file names, tool names, counts, durations). No emoji. No quotes inside strings. No markdown.",
+    "If nothing is happening, return status='idle' with lines=['','']. Do not invent activity that is not in the snapshot.",
   ].join("\n"),
 }
 

@@ -9,10 +9,11 @@ import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
 import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
 import { fuzzyFilter, listProjectFiles } from "./project-files"
+import { BrainPet } from "./brain-pet"
 
 type TranscriptItem = {
   id: string
-  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker"
+  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "queued"
   text: string
   plan?: RuntimePlan
   toolName?: string
@@ -20,6 +21,16 @@ type TranscriptItem = {
   workerStatus?: "running" | "completed" | "failed"
   startedAt?: number
   finishedAt?: number
+  queueId?: string
+}
+
+type QueuedTask = {
+  id: string
+  prompt: string
+  displayText: string
+  skipCommand: boolean
+  forceRoles?: string[]
+  itemId: string
 }
 
 type CommandDefinition = {
@@ -38,7 +49,7 @@ const COMMANDS: CommandDefinition[] = [
   { name: "sessions", label: "/sessions", hint: "Browse recent sessions" },
   { name: "resume", label: "/resume", hint: "Resume a session by id", insert: "/resume " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
-  { name: "team", label: "/team", hint: "Force a multi-agent run · /team [roleA,roleB,…] <prompt>", insert: "/team " },
+  { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
   { name: "skill", label: "/skill", hint: "List project skills (.agents/skill)" },
   { name: "agents", label: "/agents", hint: "Show AGENTS.md location and length" },
   { name: "files", label: "/files", hint: "Refresh the @file index" },
@@ -119,98 +130,6 @@ const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝",
 ]
 
-const BRAIN_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
-  [
-    "   .---.   ",
-    "  /~~|~~\\  ",
-    " |~~~|~~~| ",
-    "  \\~~|~~/  ",
-    "   `---´   ",
-  ],
-  [
-    "   .---.   ",
-    "  /≈≈|≈≈\\  ",
-    " |≈≈≈|≈≈≈| ",
-    "  \\≈≈|≈≈/  ",
-    "   `---´   ",
-  ],
-  [
-    "   .---.   ",
-    "  /∽∽|∽∽\\  ",
-    " |∽∽∽|∽∽∽| ",
-    "  \\∽∽|∽∽/  ",
-    "   `---´   ",
-  ],
-  [
-    "   .---.   ",
-    "  /≈≈|≈≈\\  ",
-    " |≈≈≈|≈≈≈| ",
-    "  \\≈≈|≈≈/  ",
-    "   `---´   ",
-  ],
-]
-
-const THOUGHT_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
-  [
-    "           ",
-    "           ",
-    "     .     ",
-  ],
-  [
-    "           ",
-    "     ·     ",
-    "     °     ",
-  ],
-  [
-    "     °     ",
-    "     o     ",
-    "           ",
-  ],
-  [
-    "     ○     ",
-    "           ",
-    "           ",
-  ],
-]
-
-const IDLE_THOUGHT: ReadonlyArray<string> = [
-  "           ",
-  "           ",
-  "           ",
-]
-
-const BRAIN_PULSE_COLORS = ["magenta", "magentaBright", "redBright", "magentaBright"] as const
-
-type BrainPetProps = { thinking: boolean }
-
-function BrainPet({ thinking }: BrainPetProps) {
-  const [frame, setFrame] = useState(0)
-  useEffect(() => {
-    const tick = thinking ? 220 : 800
-    const interval = setInterval(() => {
-      setFrame((value) => (value + 1) % 1024)
-    }, tick)
-    return () => clearInterval(interval)
-  }, [thinking])
-  const idx = frame % 4
-  const bodyLines = thinking ? BRAIN_FRAMES[idx] : BRAIN_FRAMES[0]
-  const thoughtLines = thinking ? THOUGHT_FRAMES[idx] : IDLE_THOUGHT
-  const bodyColor = thinking ? BRAIN_PULSE_COLORS[idx] : "gray"
-  const label = thinking ? "thinking…" : "idle"
-  const labelColor = thinking ? "cyan" : "gray"
-  return (
-    <Box flexDirection="column" alignItems="center">
-      {thoughtLines.map((line, index) => (
-        <Text key={`thought-${index}`} color="cyan">{line}</Text>
-      ))}
-      {bodyLines.map((line, index) => (
-        <Text key={`brain-${index}`} color={bodyColor}>{line}</Text>
-      ))}
-      <Text color={labelColor}>{label}</Text>
-    </Box>
-  )
-}
-
 function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const { exit } = useApp()
   const { stdout } = useStdout()
@@ -241,6 +160,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const initialRan = useRef(false)
   const lastEscapeAt = useRef(0)
   const DOUBLE_ESC_MS = 500
+  const queueRef = useRef<QueuedTask[]>([])
+  const [queueVersion, setQueueVersion] = useState(0)
+  const bumpQueue = () => setQueueVersion((value) => value + 1)
 
   const dynamicCommands = useMemo<CommandDefinition[]>(() => {
     const skills: CommandDefinition[] = []
@@ -352,8 +274,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       case "brain":
         void showBrainPanel(argument)
         return true
-      case "team":
-        invokeTeam(argument)
+      case "team-test":
+        invokeTeamTest(argument)
         return true
       case "skill":
       case "skills":
@@ -730,50 +652,22 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     appendItem({ kind: "panel", text: `${target.scope === "user" ? "User" : "Project"} · ${target.id}  →  ${target.path}\n\n${trimmed}` })
   }
 
-  const DEFAULT_TEAM_ROLES = ["coding", "research", "frontend", "backend", "review"]
-  const ALLOWED_ROLES = new Set(["coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian", "rush"])
+  const ALL_ROLES = ["coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian", "rush"]
 
-  function invokeTeam(argument: string) {
-    if (running) {
-      appendItem({ kind: "error", text: "A run is already in progress; wait for it to finish before invoking /team." })
+  function invokeTeamTest(argument: string) {
+    const promptArg = argument.trim()
+    if (!promptArg) {
+      appendItem({ kind: "error", text: "/team-test <prompt> needs a prompt to dispatch to every role." })
       return
     }
-    let rolesArg = ""
-    let promptArg = argument
-    if (argument.startsWith("[")) {
-      const close = argument.indexOf("]")
-      if (close === -1) {
-        appendItem({ kind: "error", text: "Bad /team syntax. Use /team [roleA,roleB] <prompt> or /team <prompt>." })
-        return
-      }
-      rolesArg = argument.slice(1, close)
-      promptArg = argument.slice(close + 1).trim()
+    const displayText = `/team-test ${promptArg}`
+    if (!running) {
+      appendItem({ kind: "panel", text: `Diagnostic /team-test · dispatching to ${ALL_ROLES.length} roles: ${ALL_ROLES.join(", ")}` })
     }
-    const requestedRoles = rolesArg
-      ? rolesArg.split(",").map((role) => role.trim()).filter(Boolean)
-      : DEFAULT_TEAM_ROLES
-    const unknown = requestedRoles.filter((role) => !ALLOWED_ROLES.has(role))
-    if (unknown.length > 0) {
-      appendItem({ kind: "error", text: `Unknown role(s): ${unknown.join(", ")}. Allowed: ${[...ALLOWED_ROLES].join(", ")}.` })
-      return
-    }
-    if (requestedRoles.length === 0) {
-      appendItem({ kind: "error", text: "/team needs at least one role." })
-      return
-    }
-    if (!promptArg.trim()) {
-      appendItem({ kind: "error", text: "/team <prompt> needs the task to send to each agent." })
-      return
-    }
-    const displayText = `/team [${requestedRoles.join(", ")}] ${promptArg}`
-    void submitPrompt(promptArg, { displayText, skipCommand: true, forceRoles: requestedRoles })
+    void submitPrompt(promptArg, { displayText, skipCommand: true, forceRoles: ALL_ROLES })
   }
 
   async function invokeSkill(skill: { id: string; scope: "user" | "project"; content: string; path: string }, argument: string) {
-    if (running) {
-      appendItem({ kind: "error", text: "A run is already in progress; wait for it to finish before invoking a skill." })
-      return
-    }
     const task = argument.trim()
     const skillPrompt = [
       `[Skill activation: ${skill.id} (${skill.scope})]`,
@@ -829,9 +723,49 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
+  function enqueueTask(prompt: string, options: { displayText?: string; skipCommand?: boolean; forceRoles?: string[] } = {}): boolean {
+    const trimmed = prompt.trim()
+    if (!trimmed) return false
+    const displayText = options.displayText ?? trimmed
+    const itemId = crypto.randomUUID()
+    const task: QueuedTask = {
+      id: crypto.randomUUID(),
+      prompt: trimmed,
+      displayText,
+      skipCommand: options.skipCommand ?? false,
+      forceRoles: options.forceRoles,
+      itemId,
+    }
+    queueRef.current = [...queueRef.current, task]
+    setItems((previous) => [...previous, { id: itemId, kind: "queued", text: `queued · ${truncate(displayText.replace(/\s+/g, " ").trim(), 140)}`, queueId: task.id }])
+    bumpQueue()
+    applyDraftChange("")
+    return true
+  }
+
+  async function drainQueue() {
+    while (queueRef.current.length > 0) {
+      const next = queueRef.current[0]!
+      queueRef.current = queueRef.current.slice(1)
+      bumpQueue()
+      setItems((previous) => previous.filter((item) => item.id !== next.itemId))
+      await submitPrompt(next.prompt, {
+        displayText: next.displayText,
+        skipCommand: next.skipCommand,
+        forceRoles: next.forceRoles,
+      })
+    }
+  }
+
   async function submitPrompt(prompt: string, options: { displayText?: string; skipCommand?: boolean; forceRoles?: string[] } = {}) {
     const trimmed = prompt.trim()
-    if (!trimmed || running) return
+    if (!trimmed) return
+
+    if (running) {
+      enqueueTask(trimmed, options)
+      flash(`Queued (${queueRef.current.length} pending)`)
+      return
+    }
 
     if (!options.skipCommand && trimmed.startsWith("/")) {
       applyDraftChange("")
@@ -1044,6 +978,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ])
     } finally {
       setRunning(false)
+    }
+    if (queueRef.current.length > 0) {
+      void drainQueue()
     }
   }
 
@@ -1293,6 +1230,17 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
 
+    if (key.upArrow && !overlay && queueRef.current.length > 0) {
+      const queue = queueRef.current
+      const last = queue[queue.length - 1]!
+      queueRef.current = queue.slice(0, -1)
+      bumpQueue()
+      setItems((previous) => previous.filter((item) => item.id !== last.itemId))
+      applyDraftChange(last.displayText.startsWith("/") ? last.displayText : last.prompt)
+      flash(`Editing queued task (${queueRef.current.length} still pending)`)
+      return
+    }
+
     if (key.leftArrow) {
       moveCursor(-1)
       return
@@ -1364,14 +1312,25 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       </Box>
 
-      <Box flexDirection="column">
-        {items.map((item) => (
-          <Box key={item.id} flexDirection="column" marginBottom={1}>
-            <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
-            {item.plan ? <Text color="gray">mode={item.plan.mode} routing={item.plan.routing.source} toolExecution={item.plan.toolExecution}</Text> : null}
+      {items.length === 0 ? (
+        <Box flexDirection="column" alignItems="center" marginY={1}>
+          {BRAIN_LOGO.map((line, index) => (
+            <Text key={`logo-${index}`} color="cyan" bold>{line}</Text>
+          ))}
+          <Box marginTop={1}>
+            <Text color="gray">type a prompt to begin · / for commands · @ for files</Text>
           </Box>
-        ))}
-      </Box>
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          {items.map((item) => (
+            <Box key={item.id} flexDirection="column" marginBottom={1}>
+              <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+              {item.plan ? <Text color="gray">mode={item.plan.mode} routing={item.plan.routing.source} toolExecution={item.plan.toolExecution}</Text> : null}
+            </Box>
+          ))}
+        </Box>
+      )}
 
       {brainPanel ? (
         <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
@@ -1491,8 +1450,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         )}
       </Box>
       <Text color="gray">
-        Enter submits · / for commands · @ for files · Ctrl+V pastes image/text · Esc dismisses · Ctrl+C exits
+        Enter submits · / for commands · @ for files · ↑ edits queued · Ctrl+V pastes image/text · Esc dismisses · Ctrl+C exits
       </Text>
+      {queueRef.current.length > 0 ? (
+        <Text color="yellow">
+          {queueRef.current.length} task{queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit the most recent
+        </Text>
+      ) : null}
       {statusFlash ? <Text color="cyan">{statusFlash}</Text> : null}
       </Box>
       <Box flexDirection="column" marginLeft={2} paddingTop={1}>
@@ -1674,6 +1638,7 @@ function labelFor(item: TranscriptItem): string {
         default: return "◎"
       }
     }
+    case "queued": return "⏳"
   }
 }
 
@@ -1700,6 +1665,7 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
         default: return "yellow"
       }
     }
+    case "queued": return "yellow"
   }
 }
 
