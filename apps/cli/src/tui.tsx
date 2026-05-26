@@ -47,6 +47,7 @@ type CommandDefinition = {
 const COMMANDS: CommandDefinition[] = [
   { name: "help", label: "/help", hint: "List all slash commands" },
   { name: "plan", label: "/plan", hint: "Preview Brain routing for a prompt", insert: "/plan " },
+  { name: "intent", label: "/intent", hint: "Show the current task decomposition and dependency graph" },
   { name: "mcp", label: "/mcp", hint: "Interactive MCP control panel" },
   { name: "hooks", label: "/hooks", hint: "Interactive hooks control panel" },
   { name: "sessions", label: "/sessions", hint: "Browse recent sessions" },
@@ -115,6 +116,10 @@ type BrainPanelState = {
   message?: string
 }
 
+type IntentPanelState = {
+  plan: RuntimePlan
+}
+
 type BraincodeTuiProps = {
   initialPrompt?: string
 }
@@ -163,6 +168,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [hookPanel, setHookPanel] = useState<HookPanelState | null>(null)
   const [sessionPanel, setSessionPanel] = useState<SessionPanelState | null>(null)
   const [brainPanel, setBrainPanel] = useState<BrainPanelState | null>(null)
+  const [intentPlan, setIntentPlan] = useState<RuntimePlan | null>(null)
+  const [intentPanel, setIntentPanel] = useState<IntentPanelState | null>(null)
   const [statusFlash, setStatusFlash] = useState<string>("")
   const initialRan = useRef(false)
   const lastEscapeAt = useRef(0)
@@ -260,6 +267,41 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setTimeout(() => setStatusFlash((current) => (current === text ? "" : current)), 2500)
   }
 
+  function rememberIntentPlan(plan: RuntimePlan) {
+    setIntentPlan(plan)
+    setIntentPanel((previous) => previous ? { plan } : previous)
+  }
+
+  function patchIntentTodo(event: TodoLifecycleEvent) {
+    const patchPlan = (plan: RuntimePlan): RuntimePlan => {
+      const updateTodo = (todo: RuntimePlan["todos"][number]) => todo.id === event.todo.id ? event.todo : todo
+      return {
+        ...plan,
+        todos: plan.todos.map(updateTodo),
+        agentPlan: {
+          ...plan.agentPlan,
+          todos: plan.agentPlan.todos.map(updateTodo),
+        },
+      }
+    }
+    setIntentPlan((previous) => previous ? patchPlan(previous) : previous)
+    setIntentPanel((previous) => previous ? { plan: patchPlan(previous.plan) } : previous)
+  }
+
+  function showIntentPanel() {
+    const plan = intentPlan ?? [...items].reverse().find((item) => item.plan)?.plan
+    if (!plan) {
+      appendItem({ kind: "status", text: "No intent graph yet. Run /plan <prompt> or submit a task first." })
+      return
+    }
+    setMcpPanel(null)
+    setHookPanel(null)
+    setSessionPanel(null)
+    setBrainPanel(null)
+    setOverlay(null)
+    setIntentPanel({ plan })
+  }
+
   function handleCommand(commandLine: string): boolean {
     const [commandRaw = "", ...rest] = commandLine.slice(1).trim().split(/\s+/)
     const command = commandRaw.toLowerCase()
@@ -285,6 +327,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true
       case "plan":
         void previewPlan(argument)
+        return true
+      case "intent":
+        showIntentPanel()
         return true
       case "mcp":
         showMcpPanel(argument)
@@ -396,6 +441,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
     setOverlay(null)
+    setIntentPanel(null)
     setMcpPanel({ entries, selected: 0 })
     for (let index = 0; index < entries.length; index++) {
       void runMcpHealth(index, entries[index]!)
@@ -524,6 +570,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
     setMcpPanel(null)
+    setIntentPanel(null)
     setOverlay(null)
     setHookPanel({ entries, selected: 0 })
   }
@@ -567,6 +614,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     setMcpPanel(null)
     setHookPanel(null)
+    setIntentPanel(null)
     setOverlay(null)
     setSessionPanel({ entries: sessions, selected: 0 })
   }
@@ -608,6 +656,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setHookPanel(null)
     setSessionPanel(null)
     setBrainPanel(null)
+    setIntentPanel(null)
     setOverlay(null)
   }
 
@@ -737,6 +786,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setSessionPanel(null)
     setHookPanel(null)
     setMcpPanel(null)
+    setIntentPanel(null)
     setOverlay(null)
     setBrainPanel({ brains, defaultBrainId: settings.defaultBrainId, selected })
   }
@@ -853,6 +903,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     try {
       const plan = await planRuntimeFromConfig(trimmed)
+      rememberIntentPlan(plan)
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
         {
@@ -1078,6 +1129,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       })
     }
     const onPlan = (plan: RuntimePlan) => {
+      rememberIntentPlan(plan)
       if (plan.todos.length === 0) return
       finalizeStreamingBuffers()
       appendItemRaw({ id: crypto.randomUUID(), kind: "panel", text: `Todo · ${plan.todos.length} planned task${plan.todos.length === 1 ? "" : "s"}` })
@@ -1087,6 +1139,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     const onTodoEvent = (event: TodoLifecycleEvent) => {
       finalizeStreamingBuffers()
+      patchIntentTodo(event)
       upsertTodoItem(event)
     }
     const workerKey = (event: WorkerLifecycleEvent) => `${event.phase}:${event.role}`
@@ -1138,6 +1191,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     try {
       const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
+      rememberIntentPlan(result.plan)
       finalizeStreamingBuffers()
       setItems((previous) => {
         const next = previous.filter((item) => item.id !== statusId)
@@ -1275,14 +1329,24 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
 
+    if (key.ctrl && input === "o") {
+      if (intentPanel) {
+        setIntentPanel(null)
+      } else {
+        showIntentPanel()
+      }
+      return
+    }
+
     if (key.escape) {
       const now = Date.now()
-      const closedOverlay = mcpPanel || hookPanel || sessionPanel || brainPanel || overlay
+      const closedOverlay = mcpPanel || hookPanel || sessionPanel || brainPanel || intentPanel || overlay
       if (closedOverlay) {
         setMcpPanel(null)
         setHookPanel(null)
         setSessionPanel(null)
         setBrainPanel(null)
+        setIntentPanel(null)
         setOverlay(null)
         lastEscapeAt.current = now
         return
@@ -1559,6 +1623,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
+      {intentPanel ? (
+        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color="cyan" bold>Intent Graph</Text>
+          {formatIntentGraphLines(intentPanel.plan, Math.max(40, terminalCols - 8)).map((line, index) => (
+            <Text key={index} color={index <= 1 ? "cyan" : line.includes("->") ? "yellow" : "gray"}>
+              {line}
+            </Text>
+          ))}
+          <Text color="gray">Ctrl+O / Esc close · /plan refreshes this graph</Text>
+        </Box>
+      ) : null}
+
       {sessionPanel ? (
         <Box borderStyle="round" borderColor="blue" flexDirection="column" paddingX={1} marginBottom={1}>
           <Text color="blue" bold>Sessions</Text>
@@ -1684,7 +1760,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         )}
       </Box>
       <Text color="gray">
-        Enter submits · / commands · @ files · @@ sessions · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · @ files · @@ sessions · Ctrl+O intent · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color="yellow">
@@ -1900,6 +1976,70 @@ function labelFor(item: TranscriptItem): string {
   }
 }
 
+function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
+  const todoById = new Map(plan.todos.map((todo) => [todo.id, todo]))
+  const outgoing = new Map<string, string[]>()
+  const incoming = new Set<string>()
+  for (const dependency of plan.dependencies) {
+    if (!todoById.has(dependency.fromTodoId) || !todoById.has(dependency.toTodoId)) continue
+    outgoing.set(dependency.fromTodoId, [...(outgoing.get(dependency.fromTodoId) ?? []), dependency.toTodoId])
+    incoming.add(dependency.toTodoId)
+  }
+
+  const lines: string[] = [
+    truncate(`brain root task · ${plan.brain.id} · primary=${plan.role} · routing=${plan.routing.source}`, width),
+    truncate(`model · ${plan.piModel.provider}/${plan.piModel.id} · toolExecution=${plan.toolExecution}`, width),
+    "Decomposition and dependency path:",
+    "brain root task",
+  ]
+
+  const roots = plan.todos.filter((todo) => !incoming.has(todo.id))
+  const orderedRoots = roots.length > 0 ? roots : plan.todos
+  const rendered = new Set<string>()
+  const walk = (todoId: string, prefix: string, seen: Set<string>) => {
+    const todo = todoById.get(todoId)
+    if (!todo) return
+    rendered.add(todoId)
+    const cycle = seen.has(todoId)
+    lines.push(truncate(`${prefix}${formatIntentTodo(todo)}${cycle ? " (cycle)" : ""}`, width))
+    if (cycle) return
+    const children = outgoing.get(todoId) ?? []
+    children.forEach((childId, index) => {
+      const isLast = index === children.length - 1
+      walk(childId, `${prefix}${isLast ? "   " : "│  "}${isLast ? "└─ " : "├─ "}`, new Set([...seen, todoId]))
+    })
+  }
+
+  orderedRoots.forEach((todo, index) => {
+    const isLast = index === orderedRoots.length - 1
+    walk(todo.id, isLast ? "└─ " : "├─ ", new Set())
+  })
+
+  const hidden = plan.todos.filter((todo) => !rendered.has(todo.id))
+  for (const todo of hidden) {
+    lines.push(truncate(`├─ ${formatIntentTodo(todo)}`, width))
+  }
+
+  lines.push("Dependency edges:")
+  if (plan.dependencies.length === 0) {
+    lines.push("  (none; subtasks can run independently before merge)")
+  } else {
+    for (const dependency of plan.dependencies) {
+      const from = todoById.get(dependency.fromTodoId)
+      const to = todoById.get(dependency.toTodoId)
+      if (!from || !to) continue
+      const reason = dependency.reason ? ` · ${dependency.reason}` : ""
+      lines.push(truncate(`  ${from.role}/${from.id} -> ${to.role}/${to.id}${reason}`, width))
+    }
+  }
+
+  return lines
+}
+
+function formatIntentTodo(todo: RuntimePlan["todos"][number]): string {
+  return `${todoGlyph(todo.status)} subtask (${todo.role}) ${todo.title}`
+}
+
 function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "yellow" | "magenta" | "gray" {
   switch (item.kind) {
     case "user": return "blue"
@@ -1955,6 +2095,7 @@ function formatHelp(): string {
     "  • Start typing / to open the command palette.",
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
+    "  • Press Ctrl+O or run /intent to inspect the current task graph.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n")

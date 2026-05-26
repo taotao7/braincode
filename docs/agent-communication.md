@@ -166,12 +166,13 @@ type AgentRoutingPlan = {
   primaryRole: RoutedAgentRole
   workers: AgentWorkerPlan[]    // { role, goal, reason, todoIds }
   todos: AgentTodoItem[]        // checkable tasks assigned to routed roles
+  dependencies: AgentTodoDependency[] // fromTodoId -> toTodoId edges
   requiresReview: boolean
   reason: string
 }
 ```
 
-`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan` by resolving its model + Pi model summary via `createRuntimeWorkerPlan`. It also builds the runtime todo list, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
+`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan` by resolving its model + Pi model summary via `createRuntimeWorkerPlan`. It also builds the runtime todo list and dependency graph, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
 If you add a new role:
 
@@ -255,6 +256,7 @@ type WorkerLifecycleEvent =
 Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` after the result is normalized. The CLI uses these to populate the spawn/finish lines under BrainPet and to drive the queued-tasks list.
 
 - **`onPlan` / `TodoLifecycleEvent`** from `AgentRunRequest` — Braincode-level todo planning and status updates. `onPlan` gives the UI the initial todo list; `TodoLifecycleEvent` moves each item through pending/running/completed/blocked/failed as the primary, support workers, and review workers finish.
+- **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`.
 
 When you add a new lifecycle moment that the UI should know about, prefer extending an existing typed event (`AgentEvent`, `WorkerLifecycleEvent`, or `TodoLifecycleEvent`) before adding another callback surface.
 

@@ -1255,7 +1255,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
-  await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos }, home)
+  await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
   if (request.onPlan) {
     try {
       await request.onPlan(plan)

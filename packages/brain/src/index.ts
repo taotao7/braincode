@@ -441,7 +441,6 @@ function normalizeAgentTodoDependencies(plan: Pick<AgentRoutingPlan, "primaryRol
       toTodoId: dependency.toTodoId,
       ...(dependency.reason?.trim() ? { reason: dependency.reason.trim() } : {}),
     }))
-  if (explicit.length > 0) return dedupeAgentTodoDependencies(explicit)
 
   const workerRoles = new Set(plan.workers.map((worker) => worker.role))
   const primaryTodoIds = plan.todos.filter((todo) => todo.role === plan.primaryRole).map((todo) => todo.id)
@@ -462,7 +461,7 @@ function normalizeAgentTodoDependencies(plan: Pick<AgentRoutingPlan, "primaryRol
     }
   }
 
-  return dedupeAgentTodoDependencies(dependencies)
+  return dedupeAgentTodoDependencies([...explicit, ...dependencies])
 }
 
 function dedupeAgentTodoDependencies(dependencies: AgentTodoDependency[]): AgentTodoDependency[] {

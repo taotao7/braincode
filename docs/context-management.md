@@ -140,7 +140,7 @@ If you add a new reference kind, follow the same compaction discipline: a snapsh
 | `run_start` | `executePromptFromConfig` | prompt, plan, project support summary, attempt number |
 | `run_end` | same | final summary + worker results |
 | `run_error` | same | error message, retry intent |
-| `todo_plan` | same | the checkable tasks produced by routing |
+| `todo_plan` | same | the checkable tasks and dependency edges produced by routing |
 | `todo_update` | same / `runWorkerFromPlan` | status changes for todo ids owned by primary or worker roles |
 | `worker_start` | `runWorkerFromPlan` | phase, role, goal, handoff, model, attempt |
 | `worker_end` | same | the executed `WorkerResult` |

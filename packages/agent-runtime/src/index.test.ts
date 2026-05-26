@@ -342,6 +342,10 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
     expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
     expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend", "review"])
     expect(plan.todos.map((todo) => todo.role)).toEqual(["coding", "frontend", "review"])
+    expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
+      ["todo-02-frontend", "todo-01-coding"],
+      ["todo-01-coding", "todo-03-review"],
+    ])
     expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-03-review"])
     expect(plan.workers.find((worker) => worker.role === "frontend")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
   } finally {

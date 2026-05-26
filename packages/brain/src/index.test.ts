@@ -65,6 +65,9 @@ test("planAgentRouting returns workers and review requirements", () => {
     ["todo-01-coding", "coding", "pending"],
     ["todo-02-frontend", "frontend", "pending"],
   ])
+  expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
+    ["todo-02-frontend", "todo-01-coding"],
+  ])
   expect(plan.workers[0]?.todoIds).toEqual(["todo-01-coding"])
   expect(plan.requiresReview).toBe(true)
   expect(plan.reason).toBe("Multiple specialized role signals matched the prompt.")

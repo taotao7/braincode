@@ -139,7 +139,7 @@ Routing has two inputs:
 
 Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned.
 
-Routing also produces a todo plan. Each todo has a stable id, title, assigned routed role, status, and optional summary. Worker plans carry the todo ids they own. During execution the runtime records `todo_plan` and `todo_update` session JSONL events, emits live todo updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
+Routing also produces a todo plan and dependency graph. Each todo has a stable id, title, assigned routed role, status, and optional summary. Dependency edges identify which todo must produce output before another todo can proceed. Worker plans carry the todo ids they own. During execution the runtime records `todo_plan` and `todo_update` session JSONL events, emits live todo updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. The TUI can show the current decomposition graph with `Ctrl+O` or `/intent`. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
 
 ## Layered context ownership
 
