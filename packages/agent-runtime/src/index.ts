@@ -81,6 +81,7 @@ const roleSystemPrompts: Record<AgentRole, string> = {
   fastReply: "You are Braincode's fast reply agent. Answer simple questions directly and avoid unnecessary tool use or long explanations.",
   oracle: "You are Braincode's oracle agent. Provide deep reasoning, architecture guidance, debugging plans, and tradeoff analysis for difficult engineering tasks.",
   librarian: "You are Braincode's librarian agent. Understand large or external codebases, trace architecture, and return precise file/function-level explanations.",
+  rush: "You are Braincode's rush agent. Handle miscellaneous one-off tasks quickly, keep scope tight, and finish the chore without unnecessary ceremony.",
 }
 
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]): RuntimeModelSelection {
@@ -146,7 +147,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     initialState: {
       systemPrompt: options.systemPrompt,
       model: piModel,
-      thinkingLevel: options.policy.thinkingLevel,
+      thinkingLevel: normalizeRuntimeThinkingLevel(options.model, options.policy),
       tools: [],
       messages: [],
     },
@@ -168,8 +169,13 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
   }
 }
 
+function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolicy): ModelPolicy["thinkingLevel"] {
+  if (model.baseUrl && policy.thinkingLevel === "minimal") return "low"
+  return policy.thinkingLevel
+}
+
 function isAgentRole(value: unknown): value is AgentRole {
-  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "routeBrain"
+  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain"
 }
 
 function extractJsonObject(text: string): unknown {
@@ -211,9 +217,10 @@ Allowed roles:
 - fastReply: short/simple conversational answer
 - oracle: deep reasoning, planning, architecture, or hard debugging
 - librarian: external/large-codebase understanding
+- rush: miscellaneous odd jobs and quick one-off chores that do not fit another role
 
 Return only JSON in this shape:
-{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian","confidence":0.0,"reason":"short reason"}
+{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","confidence":0.0,"reason":"short reason"}
 
 User prompt:
 ${prompt}`)
@@ -281,7 +288,13 @@ function extractAssistantText(messages: unknown[]): string {
     return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "assistant"
   })
 
-  const lastAssistant = assistantMessages.at(-1) as { content?: unknown } | undefined
+  const lastAssistant = assistantMessages.at(-1) as { content?: unknown; errorMessage?: unknown; stopReason?: unknown } | undefined
+  if (typeof lastAssistant?.errorMessage === "string" && lastAssistant.errorMessage.trim()) {
+    throw new Error(lastAssistant.errorMessage)
+  }
+  if (lastAssistant?.stopReason === "error") {
+    throw new Error("Provider returned an error without a message")
+  }
   if (!lastAssistant || !Array.isArray(lastAssistant.content)) return ""
 
   return lastAssistant.content

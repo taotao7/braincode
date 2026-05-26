@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { executePromptFromConfig, planRuntimeFromConfig, selectRuntimeModel } from "./index"
+import { createBraincodeAgentRuntime, executePromptFromConfig, planRuntimeFromConfig, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -41,6 +41,26 @@ test("selectRuntimeModel falls back when the primary model is unavailable", () =
   expect(selection.configured.id).toBe("known")
 })
 
+test("createBraincodeAgentRuntime normalizes minimal thinking for OpenAI-compatible models", () => {
+  const runtime = createBraincodeAgentRuntime({
+    mode: "auto",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "minimal" },
+  })
+
+  expect(runtime.agent.state.thinkingLevel).toBe("low")
+})
+
 test("planRuntimeFromConfig loads settings, brain, and model without executing a provider call", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-test-"))
   try {
@@ -49,7 +69,7 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
         version: 1,
         mode: "radical",
         configServer: { host: "127.0.0.1", port: 14580 },
-        defaultBrainId: "default",
+        defaultBrainId: "brain",
       },
       home,
     )
@@ -72,8 +92,8 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
       {
         brains: [
           {
-            id: "default",
-            name: "Default Brain",
+            id: "brain",
+            name: "Brain",
             description: "Test brain",
             planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
             roles: {

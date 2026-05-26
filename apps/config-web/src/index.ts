@@ -241,7 +241,6 @@ export const configWebHtml = `<!doctype html>
             <div class="grid">
               <div class="field"><label for="host" data-i18n="host">Config server host</label><input id="host" autocomplete="off" /></div>
               <div class="field"><label for="port" data-i18n="port">Config server port</label><input id="port" type="number" min="1" max="65535" /></div>
-              <div class="field"><label for="defaultBrainId" data-i18n="defaultBrain">Default brain id</label><select id="defaultBrainId"></select></div>
               <div class="field"><label for="mode" data-i18n="mode">Mode</label><select id="mode"><option value="auto" data-i18n="modeAuto">auto — plan and route agents automatically</option><option value="radical" data-i18n="modeRadical">radical — more aggressive autonomous execution</option></select></div>
             </div>
             <div class="row-between">
@@ -329,13 +328,13 @@ export const configWebHtml = `<!doctype html>
       const translations = {
         en: {
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
-          settingsTitle: "Settings", host: "Config server host", port: "Config server port", defaultBrain: "Default brain id", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
+          settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Tool toggles will appear here when coding tools are implemented.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok",
           thinking: "Thinking", fallbackModel: "Fallback model",
-          roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush",
           roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
           roleDesc_coding: "Code execution: handles code edits, bug fixes, and verification. Best for strong coding models with stable tool-calling.",
           roleDesc_frontend: "Frontend: UI, browser behavior, CSS, components, accessibility, and user-facing polish.",
@@ -350,17 +349,18 @@ export const configWebHtml = `<!doctype html>
           roleDesc_summarize: "Summary and handoff: compresses context, generates handoffs, and consolidates results. Best for cheap, fast models.",
           roleDesc_fastReply: "Quick reply: handles greetings, short questions, and lightweight responses. Best for the fastest, cheapest model.",
           roleDesc_oracle: "Deep reasoning: handles complex architecture, hard bugs, and major decisions. Best for the strongest reasoning model, usually xhigh.",
-          roleDesc_librarian: "Large codebase comprehension: reads external repos and broad architecture. Best for long-context, code-savvy models."
+          roleDesc_librarian: "Large codebase comprehension: reads external repos and broad architecture. Best for long-context, code-savvy models.",
+          roleDesc_rush: "Rush: takes on miscellaneous odd jobs and weird one-off tasks that don't fit other roles. Best for fast, cheap models that just get the chore done."
         },
         zh: {
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
-          settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", defaultBrain: "默认 Brain ID", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
+          settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "编码工具实现后，这里会显示工具开关。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常",
           thinking: "思考", fallbackModel: "备用模型",
-          roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian",
+          roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂",
           roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
           roleDesc_coding: "代码实现：负责改代码、修 bug、跑验证。适合强代码模型，优先稳定和工具调用能力。",
           roleDesc_frontend: "前端：负责 UI、浏览器行为、CSS、组件、可访问性和用户侧打磨。",
@@ -375,11 +375,12 @@ export const configWebHtml = `<!doctype html>
           roleDesc_summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。适合便宜快速模型。",
           roleDesc_fastReply: "简单回复：负责问候、短问题、轻量响应。适合最快最低成本模型。",
           roleDesc_oracle: "深度推理：负责复杂架构、疑难 bug、重大决策。适合最强推理模型，通常 xhigh。",
-          roleDesc_librarian: "大型代码库理解：负责外部仓库/大范围架构阅读。适合长上下文和代码理解强的模型。"
+          roleDesc_librarian: "大型代码库理解：负责外部仓库/大范围架构阅读。适合长上下文和代码理解强的模型。",
+          roleDesc_rush: "打杂：负责各种杂事和莫名其妙的一次性任务，凡是不属于其他角色的零碎活儿都丢给它。适合便宜快速的模型，干完就走不啰嗦。"
         }
       }
 
-      const roles = ["routeBrain", "coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian"]
+      const roles = ["routeBrain", "coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian", "rush"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
@@ -393,7 +394,6 @@ export const configWebHtml = `<!doctype html>
       const brainForm = document.querySelector("#brain-form")
       const hostInput = document.querySelector("#host")
       const portInput = document.querySelector("#port")
-      const defaultBrainIdInput = document.querySelector("#defaultBrainId")
       const modeInput = document.querySelector("#mode")
       const savedProviderSelect = document.querySelector("#saved-provider-select")
       const customProviderInput = document.querySelector("#custom-provider")
@@ -491,8 +491,6 @@ export const configWebHtml = `<!doctype html>
         hostInput.value = currentSettings.configServer.host
         portInput.value = String(currentSettings.configServer.port)
         modeInput.value = currentSettings.mode
-        defaultBrainIdInput.replaceChildren(...currentBrains.brains.map((brain) => option(brain.id, brain.name ? brain.id + " — " + brain.name : brain.id)))
-        defaultBrainIdInput.value = currentSettings.defaultBrainId
         enhanceSelects(settingsForm)
       }
 
@@ -774,7 +772,7 @@ export const configWebHtml = `<!doctype html>
 
       settingsForm.addEventListener("submit", (event) => {
         event.preventDefault()
-        const nextSettings = { ...currentSettings, configServer: { host: hostInput.value, port: Number(portInput.value) }, defaultBrainId: defaultBrainIdInput.value, mode: modeInput.value }
+        const nextSettings = { ...currentSettings, configServer: { host: hostInput.value, port: Number(portInput.value) }, mode: modeInput.value }
         status.textContent = t("saving") + " settings..."
         putJson("/api/settings", nextSettings).then((savedSettings) => { currentSettings = savedSettings; renderSettings(); status.textContent = t("saved") + " settings" }).catch(showError)
       })

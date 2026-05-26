@@ -45,8 +45,12 @@ When changing architecture, structure, or planning, update the relevant `docs/` 
 - Prefer depending on Pi packages instead of copying Pi code.
 - Use `@earendil-works/pi-ai` for provider/model streaming abstractions.
 - Use `@earendil-works/pi-agent-core` for agent runtime, tool calling, sessions, and compaction where it fits.
+- Do not use Pi's TUI or generic model-switching UI as Braincode's product interface.
+- Build Braincode's terminal interface with Ink, exposing Braincode concepts such as mode, Brain Model routing, roles, tools, permissions, sessions, and handoffs.
+- Keep provider/model configuration in `braincode config`; the terminal UI may display the routed model but should not let users bypass Braincode routing by switching models directly.
 - Keep Braincode's own responsibilities separate:
   - brain model schema and routing policy
+  - Braincode-owned Ink terminal UI
   - multi-agent orchestration
   - context isolation and handoff protocol
   - local configuration server

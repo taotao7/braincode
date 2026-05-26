@@ -28,6 +28,7 @@ export type BrainModel = {
     fastReply: ModelPolicy
     oracle: ModelPolicy
     librarian: ModelPolicy
+    rush: ModelPolicy
   }
   routing: {
     maxParallelAgents: number

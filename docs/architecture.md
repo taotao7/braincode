@@ -15,7 +15,7 @@ This document is the main architecture reference for Braincode.
 ## High-level system
 
 ```text
-User / CLI / Config UI
+User / Ink TUI / CLI / Config UI
   -> apps/cli or apps/config-web
     -> packages/server
       -> packages/config
@@ -30,7 +30,7 @@ User / CLI / Config UI
 
 Runtime responsibilities are split into four layers:
 
-1. **Interface layer**: CLI and browser configuration UI.
+1. **Interface layer**: Braincode-owned Ink TUI, CLI commands, and browser configuration UI.
 2. **Product layer**: Brain Model selection, routing, local configuration service, coding workflow policy.
 3. **Agent layer**: isolated sessions, handoff packets, tool registry, normalized runtime events.
 4. **Provider/runtime layer**: Pi AI and Pi Agent Core integration.
@@ -156,6 +156,8 @@ Use:
 
 - `@earendil-works/pi-ai` for provider/model streaming abstractions.
 - `@earendil-works/pi-agent-core` for agent runtime, tool calling, sessions, and compaction where it fits.
+
+Braincode does not use Pi's TUI as the product interface. The interactive terminal UI is owned by Braincode and implemented with Ink so the UI can expose Braincode concepts instead of generic provider/model controls. Provider/model setup belongs in `braincode config`; the TUI can display routing decisions but must not offer a direct model switch that bypasses Brain Model policy.
 
 Braincode owns:
 

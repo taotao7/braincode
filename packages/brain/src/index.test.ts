@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 import { getModePolicy, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
 
 const brain: BrainModel = {
-  id: "default",
-  name: "Default",
+  id: "brain",
+  name: "Brain",
   description: "Test brain",
   planner: { modelId: "planner", thinkingLevel: "medium" },
   roles: {
@@ -22,6 +22,7 @@ const brain: BrainModel = {
     fastReply: { modelId: "fast", thinkingLevel: "minimal" },
     oracle: { modelId: "oracle", thinkingLevel: "xhigh" },
     librarian: { modelId: "librarian", thinkingLevel: "high" },
+    rush: { modelId: "rush", thinkingLevel: "low" },
   },
   routing: {
     maxParallelAgents: 2,
@@ -52,6 +53,6 @@ test("selectAgentRole uses simple intent heuristics", () => {
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {
-  expect(selectBrain([brain], "default")).toBe(brain)
+  expect(selectBrain([brain], "brain")).toBe(brain)
   expect(selectModelPolicy(brain, "review")).toEqual({ modelId: "review", thinkingLevel: "high" })
 })

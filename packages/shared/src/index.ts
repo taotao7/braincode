@@ -8,7 +8,7 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 export function isDebugEnabled(): boolean {
   if (process.env.BRAINCODE_DEBUG === "true") return true
   if (process.env.BRAINCODE_DEBUG === "false") return false
-  return process.env.NODE_ENV !== "production" && process.env.BRAINCODE_PACKAGED !== "true"
+  return false
 }
 
 export function debugLog(scope: string, message: string, details?: Record<string, unknown>): void {

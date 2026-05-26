@@ -2,7 +2,7 @@
 
 Braincode est un monorepo basé sur Bun pour un agent IA orienté codage capable aussi de traiter des tâches générales. Son idée centrale est un **Brain Model** sélectionnable par l'utilisateur : un profil de stratégie de haut niveau qui planifie dynamiquement quel modèle sous-jacent, quel rôle d'agent, quels outils et quel budget de contexte utiliser pour chaque partie d'une tâche.
 
-Le projet réutilise l'infrastructure Pi lorsque cela a du sens, tout en gardant l'orchestration spécifique au produit Braincode séparée.
+Le projet réutilise l'infrastructure Pi lorsque cela a du sens, tout en gardant l'orchestration et l'interface produit Braincode séparées. L'interface terminal interactive appartient à Braincode et est construite avec Ink ; Pi reste une couche provider/runtime, pas l'interface produit.
 
 **Langues** : [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
@@ -24,16 +24,20 @@ Braincode est construit autour de cette idée : au lieu de choisir un seul modè
 - Isoler le contexte entre les agents et n'échanger que des messages handoff/result structurés.
 - Fournir un service de configuration local que l'utilisateur ouvre dans son navigateur.
 - Stocker la configuration utilisateur réelle sous `~/.braincode/`.
+- Utiliser une TUI Ink appartenant à Braincode, centrée sur le mode, le routage Brain Model, les rôles d'agent, les permissions d'outils et l'état de session.
 - Utiliser Bun et une architecture monorepo dès le départ.
 - Garder les paquets faiblement couplés et réutilisables.
 
 ## Non-objectifs pour la première phase
 
 - Ne pas forker pi-mono.
+- Ne pas utiliser la TUI Pi ou une interface générique de changement de modèle comme interface produit Braincode.
 - Ne pas construire toutes les surfaces UI d'un coup.
 - Ne pas concevoir un système de plugins complexe avant que le runtime d'agent de base ne fonctionne.
 - Ne pas stocker les secrets utilisateur ou les paramètres locaux dans le dépôt.
 
 ## Pour aller plus loin
+
+La TUI actuelle prend en charge `/help` pour afficher les commandes et `/plan <tâche>` pour prévisualiser le routage Brain Model sans appel provider. Elle n'offre volontairement aucune commande de changement direct de modèle ; la configuration des modèles et providers appartient à `braincode config`.
 
 Pour l'architecture complète, les responsabilités des paquets, la disposition des configurations et la feuille de route, consultez la version anglaise du [README.md](./README.md).

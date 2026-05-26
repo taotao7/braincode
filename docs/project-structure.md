@@ -17,6 +17,7 @@ This document is the source of truth for the planned workspace layout, package o
 ## Non-goals for the first phase
 
 - Do not fork pi-mono.
+- Do not use Pi's TUI as Braincode's product interface.
 - Do not build every UI surface at once.
 - Do not design a complex plugin system before the core agent runtime works.
 - Do not store user secrets or machine-local settings in the repository.
@@ -25,6 +26,7 @@ This document is the source of truth for the planned workspace layout, package o
 
 - Runtime: Bun
 - Package manager: Bun workspaces
+- Terminal UI: Ink, owned by Braincode
 - Local server: `Bun.serve()`
 - User config directory: `~/.braincode/`
 - Pi integration target:
@@ -47,6 +49,7 @@ braincode/
     cli/
       src/
         index.ts
+        tui.tsx
     config-web/
       src/
         index.ts
@@ -95,6 +98,15 @@ Expected commands:
 - `braincode run <task>` — execute one non-interactive prompt through the configured provider when auth is available.
 
 The CLI should stay thin. It should delegate implementation to packages.
+
+The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, and session state. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
+
+Early TUI commands:
+
+- `/help` — show Braincode TUI commands and the model-configuration boundary.
+- `/plan <task>` — preview Brain Model routing without making a provider call.
+- `/clear` — clear the transcript.
+- `/exit` or `/quit` — leave the TUI.
 
 ### `apps/config-web`
 

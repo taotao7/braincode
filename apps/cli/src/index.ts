@@ -2,6 +2,7 @@
 
 import { executePromptFromConfig, planRuntimeFromConfig } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
+import { runTui } from "./tui"
 
 function readFlag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name)
@@ -13,11 +14,13 @@ function printHelp() {
   console.log(`Braincode
 
 Usage:
+  braincode [tui]
   braincode config [--port <port>] [--host <host>]
   braincode run [--dry-run] <prompt>
   braincode help
 
 Commands:
+  tui      Start the interactive TUI (default when no command is given).
   config   Start the local browser configuration service.
   run      Plan or execute a task using the configured brain and model.
   help     Show this help message.
@@ -63,9 +66,15 @@ async function runTask(args: string[]) {
 
 async function main() {
   const args = process.argv.slice(2)
-  const command = args[0] ?? "help"
+  const command = args[0]
 
   switch (command) {
+    case undefined:
+      await runTui()
+      break
+    case "tui":
+      await runTui()
+      break
     case "config":
       await runConfig(args.slice(1))
       break
@@ -78,9 +87,7 @@ async function main() {
       printHelp()
       break
     default:
-      console.error(`Unknown command: ${command}`)
-      printHelp()
-      process.exitCode = 1
+      await runTui(command ? [command, ...args.slice(1)].join(" ") : undefined)
   }
 }
 

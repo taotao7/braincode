@@ -53,11 +53,11 @@ test("settings can be read and written from an explicit home", async () => {
 test("non-secret config documents can be read and written from an explicit home", async () => {
   const home = await makeTempHome()
 
-  await writeBrains({ brains: [{ id: "default" }] }, home)
+  await writeBrains({ brains: [{ id: "brain" }] }, home)
   await writeModels({ models: [{ id: "fast" }] }, home)
   await writeTools({ tools: [{ name: "read" }] }, home)
 
-  await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "default" }] })
+  await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "brain" }] })
   await expect(readModels(home)).resolves.toEqual({ models: [{ id: "fast" }] })
   await expect(readTools(home)).resolves.toEqual({ tools: [{ name: "read" }] })
 })

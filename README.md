@@ -6,7 +6,7 @@ Braincode is a Bun-based monorepo for a coding-first AI agent that can also hand
 
 Its main idea is a user-selectable **Brain Model**: a high-level strategy profile that dynamically plans which underlying model, agent role, tools, and context budget should be used for each part of a task.
 
-The project reuses Pi infrastructure where it makes sense, while keeping Braincode's product-specific orchestration separate.
+The project reuses Pi infrastructure where it makes sense, while keeping Braincode's product-specific orchestration and UI separate. The interactive terminal UI is Braincode-owned and built with Ink; Pi remains a provider/runtime layer, not the product interface.
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
@@ -35,12 +35,14 @@ Braincode has two top-level modes:
 ## Current status
 
 - Bun workspace and package skeleton are in place.
+- `braincode` starts a minimal Braincode-owned Ink TUI.
 - `braincode config` starts a local configuration service backed by `~/.braincode/`.
 - The config UI can edit settings, execution mode, brains, models, and tools; auth currently exposes status only and does not display secrets.
 - Pi adapter boundaries are started:
   - `packages/llm` maps Braincode model config to Pi model objects.
   - `packages/agent-runtime` creates Pi-backed runtime instances from mode, model policy, and system prompt.
-- Real model execution, Brain Model routing, and multi-agent orchestration are planned next.
+- Single-prompt real model execution and Brain Model routing are wired through `braincode run` and the Ink TUI when provider auth is configured.
+- Multi-agent orchestration, coding tools, permissions, and richer TUI workflows are planned next.
 
 ## Current development commands
 
@@ -49,6 +51,7 @@ bun install
 bun run check
 bun test
 bun run braincode -- help
+bun run braincode
 bun run config
 bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
@@ -56,4 +59,5 @@ bun run braincode -- run "hello"
 ```
 
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.
-Real `run` requires a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.
+Real `run` and TUI prompts require a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.
+Inside the TUI, use `/help` for commands and `/plan <task>` to preview Brain Model routing without calling a provider. The TUI intentionally has no direct model-switching command.

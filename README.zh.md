@@ -2,7 +2,7 @@
 
 Braincode 是一个基于 Bun 的 monorepo 项目，目标是构建一个以编码为核心、同时也能处理通用任务的 AI agent。它的核心理念是用户可选的 **Brain Model（大脑模型）**：一种高层策略画像，可以动态决定每个子任务该使用哪个底层模型、哪种 agent 角色、哪些工具以及多大的上下文预算。
 
-项目在合适的地方复用 Pi 基础设施，同时把 Braincode 自身的产品级编排逻辑保持独立。
+项目在合适的地方复用 Pi 基础设施，同时把 Braincode 自身的产品级编排逻辑和 UI 保持独立。交互式终端 UI 由 Braincode 自己使用 Ink 实现；Pi 保留在 provider/runtime 层，不作为产品界面。
 
 **语言版本**：[English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
@@ -24,16 +24,20 @@ Braincode 就是围绕这个想法构建的：用户不再为所有任务挑选�
 - 在 agent 之间隔离上下文，仅交换结构化的 handoff/result 消息。
 - 提供本地配置服务，用户在浏览器中打开使用。
 - 真实的用户配置存储在 `~/.braincode/` 下。
+- 终端 UI 使用 Ink，由 Braincode 拥有，只展示 Braincode 的 mode、Brain Model 路由、agent 角色、工具权限和会话状态。
 - 从一开始就使用 Bun 与 monorepo 布局。
 - 保持包之间的低耦合与高复用。
 
 ## 第一阶段的非目标
 
 - 不 fork pi-mono。
+- 不把 Pi TUI 或通用模型切换界面作为 Braincode 的产品界面。
 - 不一次性构建所有 UI。
 - 在核心 agent 运行时跑通之前，不设计复杂的插件系统。
 - 不在仓库中存放用户密钥或机器本地配置。
 
 ## 更多内容
+
+当前 TUI 支持 `/help` 查看命令、`/plan <任务>` 预览 Brain Model 路由但不调用 provider。TUI 不提供直接切换模型的命令；模型和 provider 配置属于 `braincode config`。
 
 完整的架构、包职责、配置布局、路线图等，请参考英文版的 [README.md](./README.md)。
