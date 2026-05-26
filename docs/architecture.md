@@ -202,6 +202,7 @@ Braincode owns:
 - context isolation and handoff protocol;
 - local configuration server;
 - project/user configuration storage;
+- project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`;
 - coding workflow product behavior.
 
 The adapter boundary is:
@@ -209,6 +210,30 @@ The adapter boundary is:
 - `packages/llm` converts Braincode model configuration into Pi model objects.
 - `packages/agent-runtime` creates Pi-backed agent runtime instances from Braincode mode, selected model policy, and system prompt.
 - Higher-level orchestration should depend on Braincode package interfaces, not Pi package internals directly.
+
+## Project support context
+
+Braincode reads project-local support files from the active project root:
+
+- `AGENTS.md` provides durable project instructions and conventions.
+- `.mcp.json` declares project MCP servers. The runtime may use this file to configure MCP tools, but model prompts should only receive safe metadata such as server names and the config path, not raw secrets or full command configuration.
+- `.agents/skill` contains project-local skills. A skill can live at `.agents/skill/<skill-id>/SKILL.md` or as a Markdown file directly under `.agents/skill`.
+- `.agents/hooks.json` contains project-local lifecycle hooks.
+
+`packages/config` owns discovery and parsing for these project support files. `packages/agent-runtime` injects discovered `AGENTS.md` and skill content into primary, worker, and review prompts, and records support metadata in the Brain task session log. Worker handoff packets carry support file references, but each worker still receives its own isolated task context.
+
+## Hooks
+
+Braincode supports lifecycle command hooks using Braincode-owned paths, not `.codex` paths:
+
+- User hooks: `~/.braincode/hooks.json`
+- Project hooks: `<repo>/.agents/hooks.json`
+
+The schema follows the same three-level shape as the Codex reference: event name, matcher group, and command handlers. Supported event names are `SessionStart`, `SubagentStart`, `SubagentStop`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `UserPromptSubmit`, and `Stop`.
+
+Early runtime support runs trusted `command` hooks for `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, and `Stop`. Matching hooks from user and project files all run, and matching command hooks run concurrently. Command hooks receive one JSON object on stdin with shared fields such as `session_id`, `cwd`, `hook_event_name`, `model`, `turn_id`, and `permission_mode`, plus event-specific fields. Hook output may add `hookSpecificOutput.additionalContext`; `SessionStart` can block the run, and `UserPromptSubmit` can block the prompt.
+
+Until Braincode has a hook review UI, command handlers must set `trusted: true` to run. Untrusted, disabled, async, and unsupported handler types are skipped and recorded in the session log.
 
 ## Local configuration architecture
 

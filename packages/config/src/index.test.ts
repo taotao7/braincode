@@ -1,8 +1,8 @@
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
-import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readModels, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -25,10 +25,62 @@ test("ensureBraincodeHome creates config files and directories", async () => {
   await expect(Bun.file(paths.brains).exists()).resolves.toBe(true)
   await expect(Bun.file(paths.models).exists()).resolves.toBe(true)
   await expect(Bun.file(paths.tools).exists()).resolves.toBe(true)
+  await expect(Bun.file(paths.hooks).exists()).resolves.toBe(true)
 
   expect((await stat(paths.sessions)).isDirectory()).toBe(true)
   expect((await stat(paths.logs)).isDirectory()).toBe(true)
   expect((await stat(paths.cache)).isDirectory()).toBe(true)
+})
+
+test("readProjectSupport discovers AGENTS, MCP config, and local skills", async () => {
+  const projectRoot = await makeTempHome()
+  await Bun.write(join(projectRoot, "AGENTS.md"), "Use Bun for scripts.\n")
+  await Bun.write(
+    join(projectRoot, ".mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        filesystem: { command: "bunx", args: ["mcp-filesystem"] },
+      },
+    }),
+  )
+  await mkdir(join(projectRoot, ".agents", "skill", "docs"), { recursive: true })
+  await Bun.write(join(projectRoot, ".agents", "skill", "docs", "SKILL.md"), "# Docs skill\nSummarize project docs.\n")
+
+  const support = await readProjectSupport(projectRoot)
+
+  expect(support.agents?.content).toContain("Use Bun")
+  expect(support.mcp?.serverNames).toEqual(["filesystem"])
+  expect(support.skills.map((skill) => skill.id)).toEqual(["docs"])
+  expect(support.skills[0]?.content).toContain("Docs skill")
+})
+
+test("readHookSources discovers user and project hook config", async () => {
+  const home = await makeTempHome()
+  const projectRoot = await makeTempHome()
+  const homePaths = await ensureBraincodeHome(home)
+  await mkdir(join(projectRoot, ".agents"), { recursive: true })
+  await Bun.write(
+    homePaths.hooks,
+    JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: "command", command: "echo user", trusted: true }] }],
+      },
+    }),
+  )
+  await Bun.write(
+    join(projectRoot, ".agents", "hooks.json"),
+    JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: "command", command: "echo project" }] }],
+      },
+    }),
+  )
+
+  const sources = await readHookSources(home, projectRoot)
+
+  expect(sources.map((source) => source.kind)).toEqual(["user", "project"])
+  expect(sources[0]?.document.hooks.UserPromptSubmit?.[0]?.hooks[0]?.trusted).toBe(true)
+  expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(false)
 })
 
 test("default tool configuration enables safe read tools only", async () => {

@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { agentRoleSystemPrompts } from "@braincode/brain";
@@ -23,6 +23,9 @@ export type BraincodeSettings = {
     port: number;
   };
   defaultBrainId: string;
+  features?: {
+    hooks?: boolean;
+  };
 };
 
 export type BraincodeAuth = {
@@ -44,6 +47,77 @@ export type AuthStatus = {
   configuredProviders: string[];
 };
 
+export type ProjectSupportPaths = {
+  root: string;
+  agents: string;
+  mcp: string;
+  skills: string;
+  hooks: string;
+};
+
+export type ProjectInstructionFile = {
+  path: string;
+  content: string;
+};
+
+export type ProjectMcpConfig = {
+  path: string;
+  config: Record<string, unknown>;
+  serverNames: string[];
+};
+
+export type ProjectSkill = {
+  id: string;
+  path: string;
+  content: string;
+};
+
+export type ProjectSupport = {
+  root: string;
+  agents?: ProjectInstructionFile;
+  mcp?: ProjectMcpConfig;
+  skills: ProjectSkill[];
+};
+
+export type HookEventName =
+  | "SessionStart"
+  | "SubagentStart"
+  | "SubagentStop"
+  | "PreToolUse"
+  | "PermissionRequest"
+  | "PostToolUse"
+  | "PreCompact"
+  | "PostCompact"
+  | "UserPromptSubmit"
+  | "Stop";
+
+export type HookHandler = {
+  type: string;
+  command?: string;
+  commandWindows?: string;
+  command_windows?: string;
+  timeout?: number;
+  statusMessage?: string;
+  async?: boolean;
+  enabled?: boolean;
+  trusted?: boolean;
+};
+
+export type HookMatcherGroup = {
+  matcher?: string;
+  hooks: HookHandler[];
+};
+
+export type BraincodeHooks = {
+  hooks: Partial<Record<HookEventName, HookMatcherGroup[]>>;
+};
+
+export type HookSource = {
+  kind: "user" | "project";
+  path: string;
+  document: BraincodeHooks;
+};
+
 export type SessionRecord = {
   type: string;
   [key: string]: unknown;
@@ -56,6 +130,7 @@ export type BraincodePaths = {
   brains: string;
   models: string;
   tools: string;
+  hooks: string;
   sessions: string;
   logs: string;
   cache: string;
@@ -69,6 +144,9 @@ export const defaultSettings: BraincodeSettings = {
     port: DEFAULT_CONFIG_PORT,
   },
   defaultBrainId: "brain",
+  features: {
+    hooks: true,
+  },
 };
 
 export const defaultAuth: BraincodeAuth = { providers: {} };
@@ -273,6 +351,20 @@ export const defaultModels: BraincodeModels = {
   ],
 };
 export const defaultTools: BraincodeTools = createDefaultToolConfiguration();
+export const defaultHooks: BraincodeHooks = { hooks: {} };
+
+const hookEventNames: HookEventName[] = [
+  "SessionStart",
+  "SubagentStart",
+  "SubagentStop",
+  "PreToolUse",
+  "PermissionRequest",
+  "PostToolUse",
+  "PreCompact",
+  "PostCompact",
+  "UserPromptSubmit",
+  "Stop",
+];
 
 export function getBraincodeHome(): string {
   return join(homedir(), BRAINCODE_HOME_DIR_NAME);
@@ -286,9 +378,22 @@ export function getBraincodePaths(home = getBraincodeHome()): BraincodePaths {
     brains: join(home, "brains.json"),
     models: join(home, "models.json"),
     tools: join(home, "tools.json"),
+    hooks: join(home, "hooks.json"),
     sessions: join(home, "sessions"),
     logs: join(home, "logs"),
     cache: join(home, "cache"),
+  };
+}
+
+export function getProjectSupportPaths(
+  projectRoot = process.cwd(),
+): ProjectSupportPaths {
+  return {
+    root: projectRoot,
+    agents: join(projectRoot, "AGENTS.md"),
+    mcp: join(projectRoot, ".mcp.json"),
+    skills: join(projectRoot, ".agents", "skill"),
+    hooks: join(projectRoot, ".agents", "hooks.json"),
   };
 }
 
@@ -304,6 +409,220 @@ async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
   if (!text.trim()) return fallback;
 
   return JSON.parse(text) as T;
+}
+
+async function readOptionalTextFile(path: string): Promise<string | undefined> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return undefined;
+
+  const text = await file.text();
+  return text.trim() ? text : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  return value as Record<string, unknown>;
+}
+
+function extractMcpServerNames(config: Record<string, unknown>): string[] {
+  const servers = asRecord(config.mcpServers) ?? asRecord(config.servers);
+  if (!servers) return [];
+  return Object.keys(servers).sort();
+}
+
+function stripMarkdownExtension(name: string): string {
+  return name.replace(/\.md$/i, "");
+}
+
+function normalizeHookHandler(value: unknown): HookHandler | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === "string" && record.type.trim()
+    ? record.type.trim()
+    : "command";
+  const handler: HookHandler = {
+    type,
+    enabled: record.enabled === false ? false : true,
+    trusted: record.trusted === true,
+  };
+  if (typeof record.command === "string" && record.command.trim()) {
+    handler.command = record.command.trim();
+  }
+  if (
+    typeof record.commandWindows === "string" &&
+    record.commandWindows.trim()
+  ) {
+    handler.commandWindows = record.commandWindows.trim();
+  }
+  if (
+    typeof record.command_windows === "string" &&
+    record.command_windows.trim()
+  ) {
+    handler.command_windows = record.command_windows.trim();
+  }
+  if (typeof record.timeout === "number" && Number.isFinite(record.timeout)) {
+    handler.timeout = Math.max(1, record.timeout);
+  }
+  if (typeof record.statusMessage === "string" && record.statusMessage.trim()) {
+    handler.statusMessage = record.statusMessage.trim();
+  }
+  if (record.async === true) {
+    handler.async = true;
+  }
+  return handler;
+}
+
+function normalizeHookMatcherGroup(value: unknown): HookMatcherGroup | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.hooks)) return undefined;
+
+  const hooks = record.hooks
+    .map((hook) => normalizeHookHandler(hook))
+    .filter((hook): hook is HookHandler => Boolean(hook));
+  if (hooks.length === 0) return undefined;
+
+  return {
+    matcher:
+      typeof record.matcher === "string" ? record.matcher.trim() : undefined,
+    hooks,
+  };
+}
+
+export function normalizeHooks(value: unknown): BraincodeHooks {
+  const record = asRecord(value);
+  const hooksRecord = asRecord(record?.hooks);
+  if (!hooksRecord) return defaultHooks;
+
+  const hooks: BraincodeHooks["hooks"] = {};
+  for (const eventName of hookEventNames) {
+    const groupsValue = hooksRecord[eventName];
+    if (!Array.isArray(groupsValue)) continue;
+
+    const groups = groupsValue
+      .map((group) => normalizeHookMatcherGroup(group))
+      .filter((group): group is HookMatcherGroup => Boolean(group));
+    if (groups.length > 0) {
+      hooks[eventName] = groups;
+    }
+  }
+  return { hooks };
+}
+
+async function readProjectSkills(skillsPath: string): Promise<ProjectSkill[]> {
+  let entries;
+  try {
+    entries = await readdir(skillsPath, { withFileTypes: true });
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return [];
+    throw error;
+  }
+
+  const skills: ProjectSkill[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+
+    if (entry.isDirectory()) {
+      const skillPath = join(skillsPath, entry.name, "SKILL.md");
+      const content = await readOptionalTextFile(skillPath);
+      if (content) {
+        skills.push({
+          id: entry.name,
+          path: skillPath,
+          content,
+        });
+      }
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      const skillPath = join(skillsPath, entry.name);
+      const content = await readOptionalTextFile(skillPath);
+      if (content) {
+        skills.push({
+          id: stripMarkdownExtension(entry.name),
+          path: skillPath,
+          content,
+        });
+      }
+    }
+  }
+
+  return skills.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export async function readProjectSupport(
+  projectRoot = process.cwd(),
+): Promise<ProjectSupport> {
+  const paths = getProjectSupportPaths(projectRoot);
+  const agentsContent = await readOptionalTextFile(paths.agents);
+  const mcpFile = Bun.file(paths.mcp);
+  const mcpConfig = (await mcpFile.exists())
+    ? asRecord(JSON.parse(await mcpFile.text()))
+    : undefined;
+
+  return {
+    root: paths.root,
+    agents: agentsContent
+      ? {
+          path: paths.agents,
+          content: agentsContent,
+        }
+      : undefined,
+    mcp: mcpConfig
+      ? {
+          path: paths.mcp,
+          config: mcpConfig,
+          serverNames: extractMcpServerNames(mcpConfig),
+        }
+      : undefined,
+    skills: await readProjectSkills(paths.skills),
+  };
+}
+
+export async function readUserHooks(
+  home = getBraincodeHome(),
+): Promise<HookSource> {
+  const paths = await ensureBraincodeHome(home);
+  const hooks = await readJsonFile<unknown>(paths.hooks, defaultHooks);
+  const normalized = normalizeHooks(hooks);
+  if (JSON.stringify(normalized) !== JSON.stringify(hooks)) {
+    await writeJsonFile(paths.hooks, normalized);
+  }
+  return {
+    kind: "user",
+    path: paths.hooks,
+    document: normalized,
+  };
+}
+
+export async function readProjectHooks(
+  projectRoot = process.cwd(),
+): Promise<HookSource | undefined> {
+  const paths = getProjectSupportPaths(projectRoot);
+  const file = Bun.file(paths.hooks);
+  if (!(await file.exists())) return undefined;
+
+  const hooks = normalizeHooks(JSON.parse(await file.text()));
+  return {
+    kind: "project",
+    path: paths.hooks,
+    document: hooks,
+  };
+}
+
+export async function readHookSources(
+  home = getBraincodeHome(),
+  projectRoot = process.cwd(),
+): Promise<HookSource[]> {
+  const userHooks = await readUserHooks(home);
+  const projectHooks = await readProjectHooks(projectRoot);
+  return projectHooks ? [userHooks, projectHooks] : [userHooks];
 }
 
 function assertSettings(value: BraincodeSettings) {
@@ -331,6 +650,12 @@ function assertSettings(value: BraincodeSettings) {
   ) {
     throw new Error("settings.defaultBrainId must be a non-empty string");
   }
+  if (
+    value.features?.hooks !== undefined &&
+    typeof value.features.hooks !== "boolean"
+  ) {
+    throw new Error("settings.features.hooks must be a boolean");
+  }
 }
 
 function assertDocumentArray(
@@ -355,6 +680,10 @@ function normalizeSettings(
     configServer: {
       ...defaultSettings.configServer,
       ...value.configServer,
+    },
+    features: {
+      ...defaultSettings.features,
+      ...value.features,
     },
   };
 }
@@ -384,6 +713,7 @@ export async function ensureBraincodeHome(
   await ensureJsonFile(paths.brains, defaultBrains);
   await ensureJsonFile(paths.models, defaultModels);
   await ensureJsonFile(paths.tools, defaultTools);
+  await ensureJsonFile(paths.hooks, defaultHooks);
 
   return paths;
 }

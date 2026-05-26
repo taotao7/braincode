@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { createBraincodeAgentRuntime, executePromptFromConfig, planRuntimeFromConfig, selectRuntimeModel } from "./index"
+import { createBraincodeAgentRuntime, executePromptFromConfig, planRuntimeFromConfig, runConfiguredHooks, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -59,6 +59,58 @@ test("createBraincodeAgentRuntime normalizes minimal thinking for OpenAI-compati
   })
 
   expect(runtime.agent.state.thinkingLevel).toBe("low")
+})
+
+test("runConfiguredHooks executes trusted project command hooks", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-project-test-"))
+  try {
+    await mkdir(join(projectRoot, ".agents"), { recursive: true })
+    const hookScript = join(projectRoot, "prompt-hook.js")
+    await Bun.write(
+      hookScript,
+      [
+        "let input = '';",
+        "process.stdin.on('data', (chunk) => input += chunk);",
+        "process.stdin.on('end', () => {",
+        "  const event = JSON.parse(input);",
+        "  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event.hook_event_name, additionalContext: `checked ${event.prompt}` } }));",
+        "});",
+      ].join("\n"),
+    )
+    await Bun.write(
+      join(projectRoot, ".agents", "hooks.json"),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: `bun ${JSON.stringify(hookScript)}`,
+                  trusted: true,
+                  timeout: 5,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    )
+
+    const result = await runConfiguredHooks(
+      "UserPromptSubmit",
+      { prompt: "hello" },
+      { sessionId: "hook-test", cwd: projectRoot, home, model: "test-model" },
+    )
+
+    expect(result.blockedReason).toBeUndefined()
+    expect(result.additionalContext).toEqual(["checked hello"])
+    expect(result.records[0]?.status).toBe("completed")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
 })
 
 test("planRuntimeFromConfig loads settings, brain, and model without executing a provider call", async () => {

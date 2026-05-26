@@ -39,6 +39,12 @@ This document is the source of truth for the planned workspace layout, package o
 ```text
 braincode/
   AGENTS.md
+  .mcp.json
+  .agents/
+    hooks.json
+    skill/
+      <skill-id>/
+        SKILL.md
   README.md
   package.json
   tsconfig.json
@@ -128,6 +134,7 @@ Planned files under the user directory:
   brains.json
   models.json
   tools.json
+  hooks.json
   sessions/
   logs/
   cache/
@@ -142,6 +149,11 @@ Responsibilities:
 - Write settings atomically where practical.
 - Keep secrets separate from normal settings.
 - Apply future config migrations.
+- Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
+- Parse `.mcp.json` for project MCP server metadata without copying secrets into model context.
+- Load local skill Markdown from `.agents/skill/<skill-id>/SKILL.md` or top-level `.agents/skill/*.md`.
+- Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
+- Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
 
 ### `packages/server`
 
@@ -194,6 +206,9 @@ Responsibilities:
 - Run a review worker for risky tasks when Brain policy requires it.
 - Merge structured worker and review results into the final run result.
 - Connect tools to the underlying agent runtime.
+- Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
+- Carry project support references in worker handoff packets.
+- Run trusted lifecycle hooks at supported runtime points and record hook outcomes in the session log.
 - Emit normalized Braincode events.
 - Persist sessions.
 - Apply Braincode-specific runtime policy.
@@ -227,6 +242,7 @@ Owns tool definitions and permissions.
 Responsibilities:
 
 - Register coding tools such as read, write, edit, shell, search.
+- Register project MCP tools declared in `.mcp.json` once MCP runtime wiring is implemented.
 - Define safe execution policies.
 - Keep permission checks outside individual UI surfaces.
 - Support future project-specific tool configuration.
@@ -289,5 +305,9 @@ MVP-2 starts by establishing the adapter boundary:
 ### MVP-5: coding workflow
 
 - Add read/search/edit/shell tools with permissions.
+- Use `AGENTS.md` as durable project instruction context.
+- Load project MCP server declarations from `.mcp.json`.
+- Load project-local skills from `.agents/skill`.
+- Load and run trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Add review agent for risky file edits.
 - Add user confirmation flows where needed.
