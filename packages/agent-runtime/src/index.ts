@@ -1,9 +1,11 @@
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
 import type { Model } from "@earendil-works/pi-ai"
-import { getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readModels, readProviderApiKey, readSettings } from "@braincode/config"
+import type { HandoffPacket, WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
+import type { ContextRef } from "@braincode/protocol"
 import { debugLog } from "@braincode/shared"
 
 export type AgentRunRequest = {
@@ -15,6 +17,7 @@ export type AgentRunResult = {
   sessionId: string
   summary: string
   plan: RuntimePlan
+  workerResults: ExecutedWorkerResult[]
 }
 
 export type RuntimeModelSelection = {
@@ -38,12 +41,33 @@ export type BraincodeAgentRuntime = {
   selection: RuntimeModelSelection
 }
 
+export type RuntimePiModelSummary = {
+  provider: string
+  id: string
+  name: string
+  contextWindow: number
+}
+
+export type RuntimeWorkerPlan = AgentWorkerPlan & {
+  model: BraincodeModel
+  policy: ModelPolicy
+  piModel: RuntimePiModelSummary
+}
+
+export type ExecutedWorkerResult = WorkerResult & {
+  role: RoutedAgentRole
+  goal: string
+  status: "completed" | "failed"
+  error?: string
+}
+
 export type RuntimePlan = {
   mode: BraincodeMode
   modeDescription: string
   brain: Pick<BrainModel, "id" | "name" | "description">
-  role: AgentRole
+  role: RoutedAgentRole
   agentPlan: AgentRoutingPlan
+  workers: RuntimeWorkerPlan[]
   routing: {
     source: "router-brain" | "heuristic"
     confidence?: number
@@ -51,36 +75,12 @@ export type RuntimePlan = {
   }
   model: BraincodeModel
   policy: ModelPolicy
-  piModel: {
-    provider: string
-    id: string
-    name: string
-    contextWindow: number
-  }
+  piModel: RuntimePiModelSummary
   toolExecution: "sequential" | "parallel"
 }
 
 type RouterPlanDecision = AgentRoutingPlan & {
   confidence?: number
-}
-
-const roleSystemPrompts: Record<AgentRole, string> = {
-  routeBrain: "You are Braincode's router brain. Classify user intent, choose the best specialized role, and return compact structured routing decisions. Do not solve the task yourself unless routing is impossible.",
-  coding: "You are Braincode's coding agent. Make small correct code changes, follow repository conventions, run focused verification, and report outcomes honestly.",
-  frontend: "You are Braincode's frontend agent. Build accessible UI, component behavior, browser interactions, styling, and user-facing polish while matching the product's visual language.",
-  backend: "You are Braincode's backend agent. Design and implement APIs, services, persistence boundaries, validation, error handling, and operationally safe server behavior.",
-  designer: "You are Braincode's design agent. Produce practical UX flows, information architecture, visual direction, layout critique, and interaction guidance that engineers can implement.",
-  dba: "You are Braincode's DBA agent. Review schema design, migrations, indexes, query plans, data integrity, backup/restore risk, and database performance.",
-  devops: "You are Braincode's DevOps agent. Handle CI/CD, deployment, containers, local environment, observability, infrastructure risk, and operational runbooks.",
-  security: "You are Braincode's security agent. Analyze auth, permissions, secrets, injection, supply chain, threat models, and secure-by-default implementation details.",
-  qa: "You are Braincode's QA agent. Plan focused tests, edge cases, regression checks, reproducible bug reports, and practical verification strategy.",
-  research: "You are Braincode's research agent. Find relevant facts quickly, cite concrete files or sources, and return concise actionable findings.",
-  review: "You are Braincode's review agent. Inspect code for correctness, regressions, security issues, and missing tests. Prioritize concrete findings.",
-  summarize: "You are Braincode's summarizer agent. Preserve decisions, changed files, validation results, caveats, and next steps in compact handoff form.",
-  fastReply: "You are Braincode's fast reply agent. Answer simple questions directly and avoid unnecessary tool use or long explanations.",
-  oracle: "You are Braincode's oracle agent. Provide deep reasoning, architecture guidance, debugging plans, and tradeoff analysis for difficult engineering tasks.",
-  librarian: "You are Braincode's librarian agent. Understand large or external codebases, trace architecture, and return precise file/function-level explanations.",
-  rush: "You are Braincode's rush agent. Handle miscellaneous one-off tasks quickly, keep scope tight, and finish the chore without unnecessary ceremony.",
 }
 
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]): RuntimeModelSelection {
@@ -108,6 +108,26 @@ export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]
   }
 
   throw new Error(`Model policy references no usable model. Tried: ${errors.join("; ")}`)
+}
+
+function toPiModelSummary(selection: RuntimeModelSelection): RuntimePiModelSummary {
+  return {
+    provider: selection.piModel.provider,
+    id: selection.piModel.id,
+    name: selection.piModel.name,
+    contextWindow: selection.piModel.contextWindow,
+  }
+}
+
+function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[]): RuntimeWorkerPlan {
+  const policy = selectModelPolicy(brain, worker.role)
+  const selection = selectRuntimeModel(policy, models)
+  return {
+    ...worker,
+    model: selection.configured,
+    policy,
+    piModel: toPiModelSummary(selection),
+  }
 }
 
 async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<{ selection: RuntimeModelSelection; apiKey: string }> {
@@ -181,15 +201,15 @@ function isAgentRole(value: unknown): value is AgentRole {
   return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain"
 }
 
-function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan): RouterPlanDecision {
+function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
   const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
-  const workers: AgentRoutingPlan["workers"] = []
+  const workersByRole = new Map<RoutedAgentRole, AgentRoutingPlan["workers"][number]>()
   if (Array.isArray(value.workers)) {
     for (const worker of value.workers) {
       if (typeof worker !== "object" || worker === null) continue
       const candidate = worker as { role?: unknown; goal?: unknown; reason?: unknown }
       if (!isRoutedAgentRole(candidate.role)) continue
-      workers.push({
+      workersByRole.set(candidate.role, {
         role: candidate.role,
         goal: typeof candidate.goal === "string" && candidate.goal.trim() ? candidate.goal : fallback.workers.find((item) => item.role === candidate.role)?.goal ?? `Handle ${candidate.role} work.`,
         reason: typeof candidate.reason === "string" && candidate.reason.trim() ? candidate.reason : fallback.workers.find((item) => item.role === candidate.role)?.reason ?? `Router selected ${candidate.role}.`,
@@ -197,16 +217,21 @@ function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; con
     }
   }
 
+  const workers = Array.from(workersByRole.values())
   if (workers.length === 0) {
     workers.push(...fallback.workers)
   }
   if (!workers.some((worker) => worker.role === primaryRole)) {
     workers.unshift({ role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
   }
+  const cappedWorkers = workers.slice(0, Math.max(1, maxWorkers))
+  if (!cappedWorkers.some((worker) => worker.role === primaryRole)) {
+    cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, { role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
+  }
 
   return {
     primaryRole,
-    workers,
+    workers: cappedWorkers,
     requiresReview: fallback.requiresReview,
     confidence: typeof value.confidence === "number" ? value.confidence : undefined,
     reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
@@ -229,7 +254,7 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
 
     const runtime = createBraincodeAgentRuntime({
       mode,
-      systemPrompt: roleSystemPrompts.routeBrain,
+      systemPrompt: getAgentRoleSystemPrompt("routeBrain", routerPolicy),
       model: routerSelection.configured,
       policy: routerPolicy,
       getApiKey: (provider) => (provider === routerSelection.piModel.provider ? apiKey : undefined),
@@ -238,21 +263,7 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
     await runtime.agent.prompt(`Choose the best primary role and any useful worker agents for this user prompt.
 
 Allowed roles:
-- coding: implement or modify code
-- frontend: UI, browser behavior, CSS, components, and user-facing product polish
-- backend: APIs, services, validation, persistence boundaries, and server behavior
-- designer: UX flows, visual direction, interaction design, and product layout
-- dba: database schema, migrations, indexes, query plans, and data integrity
-- devops: CI/CD, deployment, containers, infrastructure, and operations
-- security: auth, permissions, secrets, vulnerabilities, and threat modeling
-- qa: tests, regression checks, quality strategy, and reproducible bugs
-- research: find information or inspect code/docs
-- review: review, audit, check, or find bugs
-- summarize: summarize or create handoff context
-- fastReply: short/simple conversational answer
-- oracle: deep reasoning, planning, architecture, or hard debugging
-- librarian: external/large-codebase understanding
-- rush: miscellaneous odd jobs and quick one-off chores that do not fit another role
+${formatRoutedAgentRoleCatalog()}
 
 Return only JSON in this shape:
 {"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","workers":[{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","goal":"short worker goal","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
@@ -269,9 +280,8 @@ ${prompt}`)
 
     const text = extractAssistantText(runtime.agent.state.messages)
     const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }
-    if (!isRoutedAgentRole(parsed.role)) throw new Error(`invalid router role: ${String(parsed.role)}`)
 
-    const decision = normalizeRouterDecision(parsed, fallback)
+    const decision = normalizeRouterDecision(parsed, fallback, brain.routing.maxParallelAgents)
     debugLog("runtime", "router brain selected role", decision)
     return decision
   } catch (error) {
@@ -291,6 +301,15 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
   const selection = selectRuntimeModel(policy, models as BraincodeModel[])
+  const runtimeWorkerInputs = [...agentPlan.workers]
+  if (agentPlan.requiresReview && role !== "review" && !runtimeWorkerInputs.some((worker) => worker.role === "review")) {
+    runtimeWorkerInputs.push({
+      role: "review",
+      goal: "Review the primary agent result for correctness, regressions, missing verification, and safety risks.",
+      reason: "Brain policy requires review for risky file-editing work.",
+    })
+  }
+  const workers = runtimeWorkerInputs.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
   const modePolicy = getModePolicy(settings.mode)
   const routing = routerDecision
     ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason }
@@ -307,15 +326,11 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     },
     role,
     agentPlan,
+    workers,
     routing,
     model: selection.configured,
     policy,
-    piModel: {
-      provider: selection.piModel.provider,
-      id: selection.piModel.id,
-      name: selection.piModel.name,
-      contextWindow: selection.piModel.contextWindow,
-    },
+    piModel: toPiModelSummary(selection),
     toolExecution: settings.mode === "radical" ? "parallel" : "sequential",
   }
 }
@@ -346,28 +361,235 @@ function extractAssistantText(messages: unknown[]): string {
     .join("\n")
 }
 
+function createWorkerHandoff(worker: RuntimeWorkerPlan): HandoffPacket {
+  return {
+    id: crypto.randomUUID(),
+    goal: worker.goal,
+    constraints: [
+      `Run as the ${worker.role} agent only.`,
+      "Use only this handoff, the original user request, and explicit worker results supplied in the prompt.",
+      "Do not assume access to the full root transcript or another worker's private chain of thought.",
+      "Return concise structured findings for the primary Braincode agent.",
+    ],
+    contextRefs: [],
+    expectedResult: "JSON with summary, artifacts, risks, and nextQuestions.",
+  }
+}
+
+function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket): string {
+  return `Run this isolated Braincode worker handoff.
+
+Original user request:
+${originalPrompt}
+
+Handoff packet:
+${JSON.stringify(handoff, null, 2)}
+
+Return only JSON in this shape:
+{"summary":"concise actionable result","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
+}
+
+function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole): string {
+  if (workerResults.length === 0) return originalPrompt
+
+  return `User request:
+${originalPrompt}
+
+Supporting worker results:
+${formatWorkerResults(workerResults)}
+
+Complete the request as the primary ${primaryRole} agent. Treat worker results as advisory context, resolve conflicts explicitly, and produce the final user-facing result.`
+}
+
+function buildReviewPrompt(originalPrompt: string, primarySummary: string, workerResults: ExecutedWorkerResult[], handoff: HandoffPacket): string {
+  return `Review this Braincode run as an isolated review agent.
+
+Original user request:
+${originalPrompt}
+
+Primary agent result:
+${primarySummary}
+
+Supporting worker results:
+${workerResults.length > 0 ? formatWorkerResults(workerResults) : "No supporting worker results."}
+
+Handoff packet:
+${JSON.stringify(handoff, null, 2)}
+
+Return only JSON in this shape:
+{"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+}
+
+function formatWorkerResults(workerResults: ExecutedWorkerResult[]): string {
+  return workerResults
+    .map((result) => {
+      const risks = result.risks.length > 0 ? `\nRisks:\n${result.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
+      const questions = result.nextQuestions.length > 0 ? `\nOpen questions:\n${result.nextQuestions.map((question) => `- ${question}`).join("\n")}` : ""
+      return `### ${result.role} (${result.status})\nGoal: ${result.goal}\nSummary: ${result.summary}${risks}${questions}`
+    })
+    .join("\n\n")
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+}
+
+function normalizeContextRef(value: unknown): ContextRef | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const record = value as { kind?: unknown; uri?: unknown; label?: unknown }
+  if (record.kind !== "file" && record.kind !== "thread" && record.kind !== "summary" && record.kind !== "artifact") return undefined
+  if (typeof record.uri !== "string" || !record.uri.trim()) return undefined
+  return {
+    kind: record.kind,
+    uri: record.uri.trim(),
+    label: typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined,
+  }
+}
+
+function normalizeContextRefs(value: unknown): ContextRef[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => normalizeContextRef(item)).filter((item): item is ContextRef => Boolean(item))
+}
+
+function normalizeWorkerResultText(text: string, handoff: HandoffPacket): WorkerResult {
+  try {
+    const parsed = extractJsonObject(text)
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as { summary?: unknown; artifacts?: unknown; risks?: unknown; nextQuestions?: unknown }
+      return {
+        handoffId: handoff.id,
+        summary: typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : text.trim(),
+        artifacts: normalizeContextRefs(record.artifacts),
+        risks: normalizeStringArray(record.risks),
+        nextQuestions: normalizeStringArray(record.nextQuestions),
+      }
+    }
+  } catch {
+    // Plain-text worker responses are accepted so provider drift does not break orchestration.
+  }
+
+  return {
+    handoffId: handoff.id,
+    summary: text.trim() || "(empty worker response)",
+    artifacts: [],
+    risks: [],
+    nextQuestions: [],
+  }
+}
+
+function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, error: unknown): ExecutedWorkerResult {
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    handoffId: handoff.id,
+    role: worker.role,
+    goal: worker.goal,
+    status: "failed",
+    summary: `${worker.role} worker failed: ${message}`,
+    artifacts: [],
+    risks: [message],
+    nextQuestions: [],
+    error: message,
+  }
+}
+
+async function runWorkerFromPlan(
+  worker: RuntimeWorkerPlan,
+  buildPrompt: (handoff: HandoffPacket) => string,
+  sessionId: string,
+  home: string | undefined,
+  models: BraincodeModel[],
+  mode: BraincodeMode,
+  phase: "support" | "review",
+): Promise<ExecutedWorkerResult> {
+  const handoff = createWorkerHandoff(worker)
+  let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
+
+  try {
+    candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home)
+  } catch (error) {
+    const result = failedWorkerResult(worker, handoff, error)
+    await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, handoff, error: result.error }, home)
+    return result
+  }
+
+  let lastError: unknown
+  for (const [attempt, { selection, apiKey }] of candidates.entries()) {
+    await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, attempt: attempt + 1 }, home)
+    const runtime = createBraincodeAgentRuntime({
+      mode,
+      systemPrompt: getAgentRoleSystemPrompt(worker.role, worker.policy),
+      model: selection.configured,
+      policy: worker.policy,
+      sessionId: `${sessionId}-${phase}-${worker.role}-${attempt + 1}`,
+      getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
+    })
+
+    try {
+      await runtime.agent.prompt(buildPrompt(handoff))
+      const text = extractAssistantText(runtime.agent.state.messages)
+      const result = normalizeWorkerResultText(text, handoff)
+      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, status: "completed" }
+      await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
+      return executed
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+    }
+  }
+
+  return failedWorkerResult(worker, handoff, lastError)
+}
+
+async function runSupportWorkers(
+  workers: RuntimeWorkerPlan[],
+  originalPrompt: string,
+  sessionId: string,
+  home: string | undefined,
+  models: BraincodeModel[],
+  mode: BraincodeMode,
+  toolExecution: RuntimePlan["toolExecution"],
+): Promise<ExecutedWorkerResult[]> {
+  if (workers.length === 0) return []
+  if (toolExecution === "parallel" && workers.length > 1) {
+    return Promise.all(workers.map((worker) => runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff), sessionId, home, models, mode, "support")))
+  }
+
+  const results: ExecutedWorkerResult[] = []
+  for (const worker of workers) {
+    results.push(await runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff), sessionId, home, models, mode, "support"))
+  }
+  return results
+}
+
+function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undefined): string {
+  if (!review) return summary
+  const risks = review.risks.length > 0 ? `\nRisks:\n${review.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
+  return `${summary}\n\nReview:\n${review.summary}${risks}`
+}
+
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
   const plan = await buildRuntimePlan(request.prompt, home, true)
   const modelDocument = await readModels(home)
-  const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
-  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models as BraincodeModel[], home)
+  const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home)
 
   const sessionId = request.sessionId ?? crypto.randomUUID()
+  const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
+  const reviewWorker = plan.workers.find((worker) => worker.role === "review")
+  const workerResults = await runSupportWorkers(supportingWorkers, request.prompt, sessionId, home, models, plan.mode, plan.toolExecution)
+  const primaryPrompt = buildPrimaryPrompt(request.prompt, workerResults, plan.role)
 
   let lastError: unknown
   for (const [attempt, { selection, apiKey }] of candidates.entries()) {
     plan.model = selection.configured
-    plan.piModel = {
-      provider: selection.piModel.provider,
-      id: selection.piModel.id,
-      name: selection.piModel.name,
-      contextWindow: selection.piModel.contextWindow,
-    }
+    plan.piModel = toPiModelSummary(selection)
     await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, attempt: attempt + 1 }, home)
 
     const runtime = createBraincodeAgentRuntime({
       mode: plan.mode,
-      systemPrompt: roleSystemPrompts[plan.role],
+      systemPrompt: getAgentRoleSystemPrompt(plan.role, plan.policy),
       model: plan.model,
       policy: plan.policy,
       sessionId,
@@ -375,10 +597,17 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     })
 
     try {
-      await runtime.agent.prompt(request.prompt)
-      const summary = extractAssistantText(runtime.agent.state.messages)
-      await appendSessionRecord(sessionId, { type: "run_end", summary, attempt: attempt + 1 }, home)
-      return { sessionId, summary, plan }
+      await runtime.agent.prompt(primaryPrompt)
+      const primarySummary = extractAssistantText(runtime.agent.state.messages)
+      const reviewResult =
+        plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
+          ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(request.prompt, primarySummary, workerResults, handoff), sessionId, home, models, plan.mode, "review")
+          : undefined
+      if (reviewResult) workerResults.push(reviewResult)
+
+      const summary = mergeReviewResult(primarySummary, reviewResult)
+      await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, attempt: attempt + 1 }, home)
+      return { sessionId, summary, plan, workerResults }
     } catch (error) {
       lastError = error
       const message = error instanceof Error ? error.message : String(error)

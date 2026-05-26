@@ -123,8 +123,73 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
 
     expect(plan.mode).toBe("radical")
     expect(plan.role).toBe("review")
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["review"])
     expect(plan.toolExecution).toBe("parallel")
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test("planRuntimeFromConfig exposes isolated worker plans and mandatory review", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-workers-test-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "anthropic/claude-sonnet-4-5-20250929",
+            provider: "anthropic",
+            modelId: "claude-sonnet-4-5-20250929",
+            name: "Claude Sonnet 4.5",
+            contextWindow: 200000,
+            supportsTools: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(
+      {
+        brains: [
+          {
+            id: "brain",
+            name: "Brain",
+            description: "Test brain",
+            planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+            roles: {
+              routeBrain: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+            },
+            routing: {
+              maxParallelAgents: 2,
+              preferCheapModelForSimpleTasks: true,
+              escalateOnUncertainty: true,
+              requireReviewForFileEdits: true,
+            },
+            context: { maxInputTokens: 1000, compaction: "auto", isolation: "strict" },
+          },
+        ],
+      },
+      home,
+    )
+
+    const plan = await planRuntimeFromConfig("implement a secure frontend login flow", home)
+
+    expect(plan.role).toBe("coding")
+    expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend", "review"])
+    expect(plan.workers.find((worker) => worker.role === "frontend")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

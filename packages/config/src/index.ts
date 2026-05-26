@@ -1,6 +1,7 @@
 import { appendFile, chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { agentRoleSystemPrompts } from "@braincode/brain";
 import {
   BRAINCODE_HOME_DIR_NAME,
   DEFAULT_CONFIG_HOST,
@@ -80,16 +81,14 @@ export const defaultBrains: BraincodeBrains = {
       planner: {
         modelId: "azure-openai-responses/gpt-5.5",
         thinkingLevel: "xhigh",
-        systemPrompt:
-          "You are Braincode's router brain. Understand the user's intent, choose the right agent role, split work when needed, and coordinate other agents through concise structured instructions.",
+        systemPrompt: agentRoleSystemPrompts.routeBrain,
       },
       roles: {
         routeBrain: {
           modelId: "azure-openai-responses/gpt-5.5",
           fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
           thinkingLevel: "xhigh",
-          systemPrompt:
-            "You are the router brain. Classify intent, select the best role, and manage agent handoffs without sharing full private context.",
+          systemPrompt: agentRoleSystemPrompts.routeBrain,
         },
         coding: {
           modelId: "anthropic/claude-sonnet-4-6",
@@ -98,8 +97,7 @@ export const defaultBrains: BraincodeBrains = {
             "google/gemini-3.1-pro-preview",
           ],
           thinkingLevel: "medium",
-          systemPrompt:
-            "You are the coding agent. Make small correct code changes, follow project conventions, run focused verification, and report outcomes honestly.",
+          systemPrompt: agentRoleSystemPrompts.coding,
         },
         frontend: {
           modelId: "anthropic/claude-sonnet-4-6",
@@ -108,8 +106,7 @@ export const defaultBrains: BraincodeBrains = {
             "azure-openai-responses/gpt-5.5",
           ],
           thinkingLevel: "medium",
-          systemPrompt:
-            "You are the frontend agent. Build accessible UI, manage component state, CSS/layout, browser behavior, and user-facing polish while following the product's visual language.",
+          systemPrompt: agentRoleSystemPrompts.frontend,
         },
         backend: {
           modelId: "anthropic/claude-sonnet-4-6",
@@ -118,8 +115,7 @@ export const defaultBrains: BraincodeBrains = {
             "google/gemini-3.1-pro-preview",
           ],
           thinkingLevel: "medium",
-          systemPrompt:
-            "You are the backend agent. Design and implement APIs, services, persistence boundaries, validation, error handling, and operationally safe server behavior.",
+          systemPrompt: agentRoleSystemPrompts.backend,
         },
         designer: {
           modelId: "google/gemini-3.1-pro-preview",
@@ -128,8 +124,7 @@ export const defaultBrains: BraincodeBrains = {
             "google/gemini-3-flash-preview",
           ],
           thinkingLevel: "medium",
-          systemPrompt:
-            "You are the design agent. Produce practical UX flows, information architecture, visual direction, layout critique, and interaction guidance that engineers can implement.",
+          systemPrompt: agentRoleSystemPrompts.designer,
         },
         dba: {
           modelId: "google/gemini-3.1-pro-preview",
@@ -138,8 +133,7 @@ export const defaultBrains: BraincodeBrains = {
             "anthropic/claude-sonnet-4-6",
           ],
           thinkingLevel: "high",
-          systemPrompt:
-            "You are the DBA agent. Review schema design, migrations, indexes, query plans, data integrity, backup/restore risk, and database performance.",
+          systemPrompt: agentRoleSystemPrompts.dba,
         },
         devops: {
           modelId: "anthropic/claude-sonnet-4-6",
@@ -148,8 +142,7 @@ export const defaultBrains: BraincodeBrains = {
             "azure-openai-responses/gpt-5.5",
           ],
           thinkingLevel: "medium",
-          systemPrompt:
-            "You are the DevOps agent. Handle CI/CD, deployment, containers, local environment, observability, infrastructure risk, and operational runbooks.",
+          systemPrompt: agentRoleSystemPrompts.devops,
         },
         security: {
           modelId: "google/gemini-3.1-pro-preview",
@@ -158,8 +151,7 @@ export const defaultBrains: BraincodeBrains = {
             "anthropic/claude-sonnet-4-6",
           ],
           thinkingLevel: "high",
-          systemPrompt:
-            "You are the security agent. Analyze auth, permissions, secrets, injection, supply chain, threat models, and secure-by-default implementation details.",
+          systemPrompt: agentRoleSystemPrompts.security,
         },
         qa: {
           modelId: "google/gemini-3-flash-preview",
@@ -168,15 +160,13 @@ export const defaultBrains: BraincodeBrains = {
             "google/gemini-3.1-pro-preview",
           ],
           thinkingLevel: "low",
-          systemPrompt:
-            "You are the QA agent. Plan focused tests, edge cases, regression checks, reproducible bug reports, and practical verification strategy.",
+          systemPrompt: agentRoleSystemPrompts.qa,
         },
         research: {
           modelId: "google/gemini-3-flash-preview",
           fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
           thinkingLevel: "low",
-          systemPrompt:
-            "You are the research agent. Find relevant facts quickly, cite concrete sources or files, and return concise actionable findings.",
+          systemPrompt: agentRoleSystemPrompts.research,
         },
         review: {
           modelId: "google/gemini-3.1-pro-preview",
@@ -185,22 +175,19 @@ export const defaultBrains: BraincodeBrains = {
             "azure-openai-responses/gpt-5.5",
           ],
           thinkingLevel: "high",
-          systemPrompt:
-            "You are the review agent. Inspect code for correctness, regressions, security issues, and missing tests. Prioritize concrete findings.",
+          systemPrompt: agentRoleSystemPrompts.review,
         },
         summarize: {
           modelId: "google/gemini-3-flash-preview",
           fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
           thinkingLevel: "low",
-          systemPrompt:
-            "You are the summarizer agent. Preserve decisions, changed files, validation results, caveats, and next steps in compact handoff form.",
+          systemPrompt: agentRoleSystemPrompts.summarize,
         },
         fastReply: {
           modelId: "google/gemini-3-flash-preview",
           fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
           thinkingLevel: "minimal",
-          systemPrompt:
-            "You are the fast reply agent. Answer simple questions directly and avoid unnecessary tool use or long explanations.",
+          systemPrompt: agentRoleSystemPrompts.fastReply,
         },
         oracle: {
           modelId: "azure-openai-responses/gpt-5.5",
@@ -209,8 +196,7 @@ export const defaultBrains: BraincodeBrains = {
             "google/gemini-3.1-pro-preview",
           ],
           thinkingLevel: "xhigh",
-          systemPrompt:
-            "You are the oracle agent. Provide deep reasoning, architecture guidance, debugging plans, and tradeoff analysis for difficult engineering tasks.",
+          systemPrompt: agentRoleSystemPrompts.oracle,
         },
         librarian: {
           modelId: "anthropic/claude-sonnet-4-6",
@@ -219,8 +205,7 @@ export const defaultBrains: BraincodeBrains = {
             "azure-openai-responses/gpt-5.5",
           ],
           thinkingLevel: "high",
-          systemPrompt:
-            "You are the librarian agent. Understand large or external codebases, trace architecture, and return precise file/function-level explanations.",
+          systemPrompt: agentRoleSystemPrompts.librarian,
         },
         rush: {
           modelId: "google/gemini-3-flash-preview",
@@ -229,8 +214,7 @@ export const defaultBrains: BraincodeBrains = {
             "azure-openai-responses/gpt-5.5",
           ],
           thinkingLevel: "low",
-          systemPrompt:
-            "You are the rush agent. Take on miscellaneous odd jobs, weird one-off tasks, and anything that doesn't cleanly fit other roles. Move fast, keep scope tight, and finish the chore without ceremony.",
+          systemPrompt: agentRoleSystemPrompts.rush,
         },
       },
       routing: {

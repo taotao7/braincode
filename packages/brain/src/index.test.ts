@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { getModePolicy, planAgentRouting, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, getModePolicy, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -42,11 +42,12 @@ test("mode policies distinguish auto and radical", () => {
   expect(getModePolicy("radical").mode).toBe("radical")
 })
 
-test("selectAgentRole uses simple intent heuristics", () => {
+test("selectAgentRole returns the primary role from routing heuristics", () => {
   expect(selectAgentRole("review this patch")).toBe("review")
   expect(selectAgentRole("summarize the work")).toBe("summarize")
   expect(selectAgentRole("research pi agent runtime")).toBe("research")
-  expect(selectAgentRole("fix the frontend layout")).toBe("frontend")
+  expect(selectAgentRole("frontend layout guidance")).toBe("frontend")
+  expect(selectAgentRole("fix the frontend layout")).toBe("coding")
   expect(selectAgentRole("optimize this SQL migration")).toBe("dba")
   expect(selectAgentRole("deep architecture tradeoff analysis")).toBe("oracle")
   expect(selectAgentRole("understand this external codebase architecture")).toBe("librarian")
@@ -70,6 +71,13 @@ test("planAgentRouting respects max parallel worker budget", () => {
   })
 
   expect(plan.workers).toHaveLength(3)
+})
+
+test("agent role prompts cover every routed role and the router", () => {
+  expect(agentRoleSystemPrompts.routeBrain).toContain("intelligent routing")
+  for (const role of routedAgentRoles) {
+    expect(agentRoleSystemPrompts[role]).toContain("Braincode")
+  }
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {

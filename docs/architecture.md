@@ -82,11 +82,22 @@ type BrainModel = {
   description: string
   planner: ModelPolicy
   roles: {
+    routeBrain: ModelPolicy
     coding: ModelPolicy
+    frontend: ModelPolicy
+    backend: ModelPolicy
+    designer: ModelPolicy
+    dba: ModelPolicy
+    devops: ModelPolicy
+    security: ModelPolicy
+    qa: ModelPolicy
     research: ModelPolicy
     review: ModelPolicy
     summarize: ModelPolicy
     fastReply: ModelPolicy
+    oracle: ModelPolicy
+    librarian: ModelPolicy
+    rush: ModelPolicy
   }
   routing: {
     maxParallelAgents: number
@@ -111,6 +122,13 @@ The Brain Model layer decides:
 - when review is required;
 - how much context can be passed into a worker.
 
+Routing has two inputs:
+
+- deterministic heuristics in `packages/brain`, used for dry-runs and fallback;
+- the configured `routeBrain`/`planner` model, used during real execution when credentials are available.
+
+Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned.
+
 ## Context isolation
 
 Workers must not share full conversation history.
@@ -120,17 +138,19 @@ Root context
   -> compact handoff packet
     -> isolated worker context
       -> structured worker result
-  -> root decides what to merge
+  -> primary agent receives selected worker summaries
+  -> optional review worker checks risky primary results
+  -> root returns merged final answer
 ```
 
-Planned concepts:
+Core packet types:
 
 - `ContextRef`
 - `HandoffPacket`
 - `WorkerResult`
-- `ContextSummary`
-- `ProjectFacts`
-- compaction policy
+- `AgentMessage`
+
+The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries and project facts remain future extensions of the same packet boundary.
 
 Agent-to-agent communication should use protocol types from `packages/protocol`.
 

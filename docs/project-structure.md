@@ -162,6 +162,7 @@ Responsibilities:
 - Apply the selected top-level mode: `auto` or `radical`.
 - Classify tasks.
 - Select agent roles.
+- Maintain role definitions and built-in role prompts for every Braincode agent.
 - Select model policies.
 - Decide when to escalate to stronger models.
 - Decide when to spawn worker agents.
@@ -185,6 +186,11 @@ Owns Braincode's runtime wrapper around Pi agent core.
 Responsibilities:
 
 - Start and run agent sessions.
+- Expand routing plans into runtime worker plans with model selections.
+- Run isolated support workers from compact handoff packets.
+- Run the primary agent with only structured worker results as additional context.
+- Run a review worker for risky tasks when Brain policy requires it.
+- Merge structured worker and review results into the final run result.
 - Connect tools to the underlying agent runtime.
 - Emit normalized Braincode events.
 - Persist sessions.
@@ -252,15 +258,19 @@ MVP-2 starts by establishing the adapter boundary:
 ### MVP-3: Brain Model routing
 
 - Load `brains.json`.
-- Select model by task role.
-- Support thinking level and escalation policy.
+- Select model by task role, including specialist roles such as frontend, backend, security, QA, DBA, DevOps, oracle, librarian, and rush.
+- Use deterministic routing for dry-runs and fallback.
+- Use the configured route brain during real execution when credentials are available.
+- Keep built-in prompts aligned with each role's scope and boundaries.
+- Support thinking level, fallbacks, and escalation policy.
 
 ### MVP-4: isolated worker agents
 
 - Implement handoff packets.
 - Run isolated worker sessions.
-- Merge structured worker results.
-- Add context compaction/summarization policy.
+- Merge structured worker results into primary-agent execution.
+- Run mandatory review workers for risky file-editing tasks.
+- Add richer context compaction/summarization policy.
 
 ### MVP-5: coding workflow
 
