@@ -200,6 +200,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const command = commandRaw.toLowerCase()
     const argument = rest.join(" ").trim()
 
+    const skillCommand = dynamicCommands.find((entry) => entry.name === command && entry.skill)
+    if (skillCommand?.skill) {
+      void invokeSkill(skillCommand.skill, argument)
+      return true
+    }
+
     switch (command) {
       case "help":
       case "?":
@@ -605,6 +611,28 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     appendItem({ kind: "panel", text: `${target.scope === "user" ? "User" : "Project"} · ${target.id}  →  ${target.path}\n\n${trimmed}` })
   }
 
+  async function invokeSkill(skill: { id: string; scope: "user" | "project"; content: string; path: string }, argument: string) {
+    if (running) {
+      appendItem({ kind: "error", text: "A run is already in progress; wait for it to finish before invoking a skill." })
+      return
+    }
+    const task = argument.trim()
+    const skillPrompt = [
+      `[Skill activation: ${skill.id} (${skill.scope})]`,
+      "Use the instructions below as your operating playbook for this task. Apply them when relevant; do not narrate the playbook back unless asked.",
+      "",
+      "----- SKILL INSTRUCTIONS -----",
+      skill.content.trim(),
+      "----- END SKILL INSTRUCTIONS -----",
+      "",
+      task ? `Task:\n${task}` : "Task: (no explicit user task — proceed using the skill defaults).",
+    ].join("\n")
+    const displayText = task
+      ? `/${skill.id} ${task}`
+      : `/${skill.id}  (skill: ${skill.scope})`
+    void submitPrompt(skillPrompt, { displayText, skipCommand: true })
+  }
+
   async function previewPlan(prompt: string) {
     const trimmed = prompt.trim()
     if (!trimmed) {
@@ -643,17 +671,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
-  async function submitPrompt(prompt: string) {
+  async function submitPrompt(prompt: string, options: { displayText?: string; skipCommand?: boolean } = {}) {
     const trimmed = prompt.trim()
     if (!trimmed || running) return
 
-    if (trimmed.startsWith("/")) {
+    if (!options.skipCommand && trimmed.startsWith("/")) {
       applyDraftChange("")
       handleCommand(trimmed)
       return
     }
 
-    const userItem: TranscriptItem = { id: crypto.randomUUID(), kind: "user", text: trimmed }
+    const displayText = options.displayText ?? trimmed
+    const userItem: TranscriptItem = { id: crypto.randomUUID(), kind: "user", text: displayText }
     const statusId = crypto.randomUUID()
     setItems((previous) => [
       ...previous,
@@ -879,7 +908,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function acceptOverlay() {
     if (!overlay) return false
     if (overlay.kind === "command") {
-      const filtered = filteredCommands(overlay.filter)
+      const filtered = filteredCommandsDynamic(overlay.filter)
       const command = filtered[overlay.selected] ?? filtered[0]
       if (!command) return false
       if (command.insert) {
@@ -1044,7 +1073,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     if (overlay) {
       const total = overlay.kind === "command"
-        ? filteredCommands(overlay.filter).length
+        ? filteredCommandsDynamic(overlay.filter).length
         : fuzzyFilter(projectFiles, overlay.filter, 12).length
       const moveNext = key.downArrow || (key.ctrl && input === "n")
       const movePrev = key.upArrow || (key.ctrl && input === "p")
@@ -1111,7 +1140,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   })
 
-  const commandMatches = overlay?.kind === "command" ? filteredCommands(overlay.filter) : []
+  const commandMatches = overlay?.kind === "command" ? filteredCommandsDynamic(overlay.filter) : []
   const fileMatches = overlay?.kind === "file" ? fuzzyFilter(projectFiles, overlay.filter, 12) : []
   const projectMcpCount = projectSupport?.mcp?.serverNames.length ?? 0
   const userMcpCount = userSupport?.mcp?.serverNames.length ?? 0
@@ -1242,13 +1271,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
-      <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1}>
-        <Text color={running ? "gray" : "green"}>{running ? "…" : "›"} </Text>
-        {running ? (
-          <Text>wait for the current run to finish</Text>
-        ) : (
-          renderDraftWithCursor(draft, cursor)
-        )}
+      <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="row">
+        <Text color={running ? "gray" : "green"} wrap="wrap">
+          {running ? "… wait for the current run to finish" : composeDraftLine(draft, cursor)}
+        </Text>
       </Box>
       <Text color="gray">
         Enter submits · / for commands · @ for files · Ctrl+V pastes image/text · Esc dismisses · Ctrl+C exits
@@ -1269,8 +1295,7 @@ function computeOverlay(draft: string, cursor: number, current: Overlay): Overla
   if (draft.startsWith("/") && !head.includes(" ")) {
     const filter = head.slice(1)
     const previous = current?.kind === "command" ? current.selected : 0
-    const total = filteredCommands(filter).length
-    return { kind: "command", filter, selected: total === 0 ? 0 : Math.min(previous, total - 1) }
+    return { kind: "command", filter, selected: Math.max(0, previous) }
   }
   const atIndex = lastAtIndex(head)
   if (atIndex !== -1) {
@@ -1301,17 +1326,11 @@ function clamp(value: number, min: number, max: number): number {
   return value
 }
 
-function renderDraftWithCursor(draft: string, cursor: number): React.ReactElement {
+function composeDraftLine(draft: string, cursor: number): string {
   const position = clamp(cursor, 0, draft.length)
   const head = draft.slice(0, position)
   const tail = draft.slice(position)
-  return (
-    <Text wrap="wrap">
-      {head}
-      <Text color="green">▎</Text>
-      {tail}
-    </Text>
-  )
+  return `› ${head}|${tail}`
 }
 
 function labelFor(item: TranscriptItem): string {

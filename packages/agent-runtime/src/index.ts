@@ -20,7 +20,12 @@ export type AgentRunRequest = {
   projectRoot?: string
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
+  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
 }
+
+export type WorkerLifecycleEvent =
+  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string }
+  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "failed"; summary?: string; error?: string }
 
 export type AgentRunResult = {
   sessionId: string
@@ -901,7 +906,12 @@ async function runWorkerFromPlan(
   phase: "support" | "review",
   projectSupport?: ProjectSupport,
   hookContext?: HookRuntimeContext,
+  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
 ): Promise<ExecutedWorkerResult> {
+  const emit = async (event: WorkerLifecycleEvent) => {
+    if (!onWorkerEvent) return
+    try { await onWorkerEvent(event) } catch { /* ignore listener error */ }
+  }
   const handoff = createWorkerHandoff(worker, sessionId, phase, projectSupport)
   let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
 
@@ -910,12 +920,14 @@ async function runWorkerFromPlan(
   } catch (error) {
     const result = failedWorkerResult(worker, handoff, error)
     await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, handoff, error: result.error }, home)
+    await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: result.error })
     return result
   }
 
   let lastError: unknown
   for (const [attempt, { selection, apiKey }] of candidates.entries()) {
     const agentSessionId = `${handoff.task.id}-${attempt + 1}`
+    await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id })
     await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
     const subagentHookContext: HookRuntimeContext = hookContext
       ? {
@@ -958,6 +970,7 @@ async function runWorkerFromPlan(
       const result = normalizeWorkerResultText(text, handoff)
       const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, status: "completed" }
       await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
+      await emit({ type: "worker_end", role: worker.role, phase, status: "completed", summary: text.trim() })
       await runAndRecordHooks(
         "SubagentStop",
         {
@@ -980,7 +993,9 @@ async function runWorkerFromPlan(
     }
   }
 
-  return failedWorkerResult(worker, handoff, lastError)
+  const failure = failedWorkerResult(worker, handoff, lastError)
+  await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: failure.error })
+  return failure
 }
 
 async function runSupportWorkers(
@@ -993,15 +1008,16 @@ async function runSupportWorkers(
   toolExecution: RuntimePlan["toolExecution"],
   projectSupport?: ProjectSupport,
   hookContext?: HookRuntimeContext,
+  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
   if (toolExecution === "parallel" && workers.length > 1) {
-    return Promise.all(workers.map((worker) => runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext)))
+    return Promise.all(workers.map((worker) => runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext, onWorkerEvent)))
   }
 
   const results: ExecutedWorkerResult[] = []
   for (const worker of workers) {
-    results.push(await runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext))
+    results.push(await runWorkerFromPlan(worker, (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport), sessionId, home, models, mode, "support", projectSupport, hookContext, onWorkerEvent))
   }
   return results
 }
@@ -1050,7 +1066,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext)
+  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()
@@ -1101,7 +1117,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent)
             : undefined
         if (reviewResult) workerResults.push(reviewResult)
 
