@@ -118,10 +118,12 @@ export function toOpenAICompatibleBraincodeModel(input: { provider: string; base
   }
 }
 
-export async function testModelConnection(model: BraincodeModel, apiKey?: string): Promise<ModelConnectionTestResult> {
+export async function testModelConnection(model: BraincodeModel, apiKey?: string, thinkingLevel?: ModelThinkingLevel): Promise<ModelConnectionTestResult> {
   if (!apiKey) {
     throw new Error(`Missing API key for provider '${model.provider}'`)
   }
+
+  const reasoning = thinkingLevel && thinkingLevel !== "off" ? (thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
 
   if (!model.baseUrl) {
     const { piModel } = resolvePiModel(model)
@@ -131,29 +133,30 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
         systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
         messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }],
       },
-      { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none" },
+      { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
     )
     return {
       modelId: model.id,
       provider: model.provider,
       reachable: true,
-      message: "Model generated a test response successfully.",
+      message: thinkingLevel ? `Model generated a test response successfully (thinking=${thinkingLevel}).` : "Model generated a test response successfully.",
     }
   }
 
-  await testOpenAICompatibleGeneration(model, apiKey)
+  await testOpenAICompatibleGeneration(model, apiKey, thinkingLevel)
 
   return {
     modelId: model.id,
     provider: model.provider,
     reachable: true,
-    message: "Model generated a test response successfully.",
+    message: thinkingLevel ? `Model generated a test response successfully (thinking=${thinkingLevel}).` : "Model generated a test response successfully.",
   }
 }
 
-async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string): Promise<void> {
+async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string, thinkingLevel?: ModelThinkingLevel): Promise<void> {
   const baseUrl = normalizeOpenAICompatibleBaseUrl(model.baseUrl ?? "")
   const kimiCoding = isKimiCodingModel(model, baseUrl)
+  const reasoningEffort = mapThinkingLevelToReasoningEffort(thinkingLevel)
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -169,6 +172,7 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
       ],
       max_tokens: kimiCoding ? 32 : 8,
       temperature: kimiCoding ? 0.6 : 0,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     }),
   })
 
@@ -189,6 +193,12 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
 
 function isKimiCodingModel(model: BraincodeModel, baseUrl: string): boolean {
   return baseUrl === "https://api.kimi.com/coding/v1" || model.provider.toLowerCase().includes("kimi") || model.modelId.toLowerCase().includes("kimi-for-coding")
+}
+
+function mapThinkingLevelToReasoningEffort(thinkingLevel: ModelThinkingLevel | undefined): string | undefined {
+  if (!thinkingLevel || thinkingLevel === "off") return undefined
+  if (thinkingLevel === "xhigh") return "high"
+  return thinkingLevel
 }
 
 function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {

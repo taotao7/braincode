@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { getModePolicy, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
+import { getModePolicy, planAgentRouting, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -48,8 +48,28 @@ test("selectAgentRole uses simple intent heuristics", () => {
   expect(selectAgentRole("research pi agent runtime")).toBe("research")
   expect(selectAgentRole("fix the frontend layout")).toBe("frontend")
   expect(selectAgentRole("optimize this SQL migration")).toBe("dba")
+  expect(selectAgentRole("deep architecture tradeoff analysis")).toBe("oracle")
+  expect(selectAgentRole("understand this external codebase architecture")).toBe("librarian")
   expect(selectAgentRole("hello")).toBe("fastReply")
   expect(selectAgentRole("implement the feature")).toBe("coding")
+})
+
+test("planAgentRouting returns workers and review requirements", () => {
+  const plan = planAgentRouting("implement a secure frontend login flow with tests", brain)
+
+  expect(plan.primaryRole).toBe("coding")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
+  expect(plan.requiresReview).toBe(true)
+  expect(plan.reason).toBe("Multiple specialized role signals matched the prompt.")
+})
+
+test("planAgentRouting respects max parallel worker budget", () => {
+  const plan = planAgentRouting("implement frontend backend security tests deployment", {
+    ...brain,
+    routing: { ...brain.routing, maxParallelAgents: 3 },
+  })
+
+  expect(plan.workers).toHaveLength(3)
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {

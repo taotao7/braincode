@@ -31,6 +31,42 @@ test("ensureBraincodeHome creates config files and directories", async () => {
   expect((await stat(paths.cache)).isDirectory()).toBe(true)
 })
 
+test("default tool configuration enables safe read tools only", async () => {
+  const home = await makeTempHome()
+  const tools = await readTools(home)
+
+  expect(tools.tools.map((tool) => tool.name)).toEqual(["read_file", "search_files", "edit_file", "shell"])
+  expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(true)
+  expect(tools.tools.find((tool) => tool.name === "search_files")?.enabled).toBe(true)
+  expect(tools.tools.find((tool) => tool.name === "edit_file")?.enabled).toBe(false)
+  expect(tools.tools.find((tool) => tool.name === "edit_file")?.approvalPolicy).toBe("allow")
+  expect(tools.tools.find((tool) => tool.name === "shell")?.approvalPolicy).toBe("confirm-dangerous")
+})
+
+test("legacy tool approval fields migrate to approval policies", async () => {
+  const home = await makeTempHome()
+  await writeTools(
+    {
+      tools: [
+        {
+          name: "shell",
+          description: "Run shell commands in the current project workspace.",
+          permissions: ["execute"],
+          risk: "high",
+          defaultEnabled: false,
+          requiresApproval: true,
+          enabled: true,
+        } as never,
+      ],
+    },
+    home,
+  )
+
+  const tools = await readTools(home)
+  expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(true)
+  expect(tools.tools.find((tool) => tool.name === "shell")?.approvalPolicy).toBe("confirm-dangerous")
+})
+
 test("settings can be read and written from an explicit home", async () => {
   const home = await makeTempHome()
   const settings = await readSettings(home)
@@ -55,11 +91,28 @@ test("non-secret config documents can be read and written from an explicit home"
 
   await writeBrains({ brains: [{ id: "brain" }] }, home)
   await writeModels({ models: [{ id: "fast" }] }, home)
-  await writeTools({ tools: [{ name: "read" }] }, home)
+  await writeTools(
+    {
+      tools: [
+        {
+          name: "read_file",
+          description: "Read files inside the current project workspace.",
+          permissions: ["read"],
+          risk: "low",
+          defaultEnabled: true,
+          approvalPolicy: "allow",
+          enabled: false,
+        },
+      ],
+    },
+    home,
+  )
 
   await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "brain" }] })
   await expect(readModels(home)).resolves.toEqual({ models: [{ id: "fast" }] })
-  await expect(readTools(home)).resolves.toEqual({ tools: [{ name: "read" }] })
+  const tools = await readTools(home)
+  expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
+  expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(false)
 })
 
 test("auth status lists configured provider names without returning secrets", async () => {

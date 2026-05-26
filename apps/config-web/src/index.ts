@@ -196,6 +196,7 @@ export const configWebHtml = `<!doctype html>
       .role-row { display: grid; gap: var(--gap-sm); margin-bottom: 10px; }
       .role-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
       .role-note { flex-grow: 1; color: var(--muted); font-size: 12px; }
+      .role-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
       select.enhanced-select { display: none; }
       .combo { position: relative; width: 100%; }
       .combo-input { width: 100%; padding-right: 28px; cursor: pointer; }
@@ -316,7 +317,7 @@ export const configWebHtml = `<!doctype html>
           <div class="container stack">
           <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
           <div class="panel-grid">
-            <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Tool toggles will appear here when coding tools are implemented.</p><div id="configured-tools" class="list"></div></div>
+            <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.</p><div id="configured-tools" class="list"></div></div>
             <div class="stack"><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
           </div>
           </div>
@@ -331,8 +332,8 @@ export const configWebHtml = `<!doctype html>
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
-          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Tool toggles will appear here when coding tools are implemented.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
-          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok",
+          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
+          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations",
           thinking: "Thinking", fallbackModel: "Fallback model",
           roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush",
           roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
@@ -357,8 +358,8 @@ export const configWebHtml = `<!doctype html>
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
-          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "编码工具实现后，这里会显示工具开关。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
-          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常",
+          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
+          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认",
           thinking: "思考", fallbackModel: "备用模型",
           roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂",
           roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
@@ -622,7 +623,17 @@ export const configWebHtml = `<!doctype html>
           const note = document.createElement("div")
           note.className = "role-note"
           note.textContent = roleDescription(role) || ""
-          card.append(row, note)
+          const testButton = document.createElement("button")
+          testButton.type = "button"
+          testButton.textContent = t("testConnection")
+          const testResult = document.createElement("div")
+          testResult.className = "test-result"
+          testResult.hidden = true
+          const actions = document.createElement("div")
+          actions.className = "role-actions"
+          actions.append(testButton)
+          testButton.addEventListener("click", (event) => { event.preventDefault(); testRoleModel(role, select, thinking, testButton, testResult) })
+          card.append(row, note, actions, testResult)
           roleModels.append(card)
           enhanceSelect(select)
           enhanceSelect(fallback)
@@ -635,9 +646,27 @@ export const configWebHtml = `<!doctype html>
         for (const tool of currentTools.tools) {
           const item = document.createElement("div")
           item.className = "item"
-          item.textContent = tool.name || JSON.stringify(tool)
+          const header = document.createElement("div")
+          header.className = "item-header"
+          const text = document.createElement("div")
+          text.textContent = tool.name + "\\n" + (tool.description || "") + "\\n" + (tool.permissions || []).join(", ") + " · " + (tool.risk || "low") + " · " + (tool.approvalPolicy === "confirm-dangerous" ? t("confirmDangerous") : t("allowedByDefault"))
+          const toggle = document.createElement("button")
+          toggle.type = "button"
+          toggle.className = tool.enabled ? "primary" : ""
+          toggle.textContent = tool.enabled ? t("enabled") : t("disabled")
+          toggle.addEventListener("click", () => toggleTool(tool.name))
+          header.append(text, toggle)
+          item.append(header)
           configuredTools.append(item)
         }
+      }
+
+      async function toggleTool(toolName) {
+        const nextTools = currentTools.tools.map((tool) => tool.name === toolName ? { ...tool, enabled: !tool.enabled } : tool)
+        status.textContent = t("saving") + " tools..."
+        currentTools = await putJson("/api/tools", { ...currentTools, tools: nextTools })
+        renderTools()
+        status.textContent = t("saved") + " tools"
       }
 
       async function loadAll() {
@@ -740,7 +769,7 @@ export const configWebHtml = `<!doctype html>
         manualTestResult.textContent = t("testing") + " " + model.id + "..."
         status.textContent = t("testing") + " " + model.id
         try {
-          const result = await postJson("/api/models/test-config", { model, apiKey: manualApiKeyInput.value.trim() })
+          const result = await postJson("/api/models/test-config", { model, apiKey: manualApiKeyInput.value.trim(), thinkingLevel: manualThinkingInput.value })
           const message = t("testOk") + ": " + result.message
           manualTestResult.className = "test-result ok"
           manualTestResult.textContent = message
@@ -753,6 +782,39 @@ export const configWebHtml = `<!doctype html>
         } finally {
           testManualModelButton.disabled = false
           testManualModelButton.textContent = previous
+        }
+      }
+
+      async function testRoleModel(role, modelSelect, thinkingSelect, button, resultElement) {
+        const modelId = modelSelect.value
+        const thinkingLevel = thinkingSelect.value
+        if (!modelId) {
+          resultElement.hidden = false
+          resultElement.className = "test-result fail"
+          resultElement.textContent = t("failed") + ": " + t("none")
+          return
+        }
+        const previous = button.textContent
+        button.disabled = true
+        button.textContent = t("testing") + "..."
+        resultElement.hidden = false
+        resultElement.className = "test-result"
+        resultElement.textContent = t("testing") + " " + modelId + " (" + thinkingLevel + ")..."
+        status.textContent = t("testing") + " " + role + " / " + modelId + " (" + thinkingLevel + ")"
+        try {
+          const result = await postJson("/api/models/test", { modelId, thinkingLevel })
+          const message = t("testOk") + ": " + result.message
+          resultElement.className = "test-result ok"
+          resultElement.textContent = message
+          status.textContent = message
+        } catch (error) {
+          const message = t("failed") + ": " + String(error?.message || error)
+          resultElement.className = "test-result fail"
+          resultElement.textContent = message
+          showError(error)
+        } finally {
+          button.disabled = false
+          button.textContent = previous
         }
       }
 

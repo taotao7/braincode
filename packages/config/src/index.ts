@@ -6,6 +6,11 @@ import {
   DEFAULT_CONFIG_HOST,
   DEFAULT_CONFIG_PORT,
 } from "@braincode/shared";
+import {
+  createDefaultToolConfiguration,
+  normalizeToolConfiguration,
+  type ToolConfigDocument,
+} from "@braincode/tools";
 
 export type BraincodeMode = "auto" | "radical";
 
@@ -32,9 +37,7 @@ export type BraincodeModels = {
   providers?: unknown[];
 };
 
-export type BraincodeTools = {
-  tools: unknown[];
-};
+export type BraincodeTools = ToolConfigDocument;
 
 export type AuthStatus = {
   configuredProviders: string[];
@@ -285,7 +288,7 @@ export const defaultModels: BraincodeModels = {
     },
   ],
 };
-export const defaultTools: BraincodeTools = { tools: [] };
+export const defaultTools: BraincodeTools = createDefaultToolConfiguration();
 
 export function getBraincodeHome(): string {
   return join(homedir(), BRAINCODE_HOME_DIR_NAME);
@@ -537,7 +540,12 @@ export async function readTools(
   home = getBraincodeHome(),
 ): Promise<BraincodeTools> {
   const paths = await ensureBraincodeHome(home);
-  return readJsonFile(paths.tools, defaultTools);
+  const tools = await readJsonFile<BraincodeTools>(paths.tools, defaultTools);
+  const normalized = normalizeToolConfiguration(tools);
+  if (JSON.stringify(normalized) !== JSON.stringify(tools)) {
+    await writeJsonFile(paths.tools, normalized);
+  }
+  return normalized;
 }
 
 export async function writeTools(
@@ -546,7 +554,7 @@ export async function writeTools(
 ): Promise<void> {
   assertDocumentArray(tools, "tools");
   const paths = await ensureBraincodeHome(home);
-  await writeJsonFile(paths.tools, tools);
+  await writeJsonFile(paths.tools, normalizeToolConfiguration(tools));
 }
 
 export async function appendSessionRecord(

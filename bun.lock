@@ -46,6 +46,7 @@
       "name": "@braincode/config",
       "dependencies": {
         "@braincode/shared": "workspace:*",
+        "@braincode/tools": "workspace:*",
       },
     },
     "packages/context": {

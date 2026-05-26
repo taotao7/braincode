@@ -1,6 +1,6 @@
 import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
 import type { Model } from "@earendil-works/pi-ai"
-import { getModePolicy, selectAgentRole, selectBrain, selectModelPolicy, type AgentRole, type BrainModel, type BraincodeMode, type ModelPolicy } from "@braincode/brain"
+import { getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readModels, readProviderApiKey, readSettings } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
@@ -43,6 +43,7 @@ export type RuntimePlan = {
   modeDescription: string
   brain: Pick<BrainModel, "id" | "name" | "description">
   role: AgentRole
+  agentPlan: AgentRoutingPlan
   routing: {
     source: "router-brain" | "heuristic"
     confidence?: number
@@ -59,10 +60,8 @@ export type RuntimePlan = {
   toolExecution: "sequential" | "parallel"
 }
 
-type RouterDecision = {
-  role: AgentRole
+type RouterPlanDecision = AgentRoutingPlan & {
   confidence?: number
-  reason?: string
 }
 
 const roleSystemPrompts: Record<AgentRole, string> = {
@@ -174,8 +173,44 @@ function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolic
   return policy.thinkingLevel
 }
 
+function isRoutedAgentRole(value: unknown): value is RoutedAgentRole {
+  return isAgentRole(value) && value !== "routeBrain"
+}
+
 function isAgentRole(value: unknown): value is AgentRole {
   return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain"
+}
+
+function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan): RouterPlanDecision {
+  const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
+  const workers: AgentRoutingPlan["workers"] = []
+  if (Array.isArray(value.workers)) {
+    for (const worker of value.workers) {
+      if (typeof worker !== "object" || worker === null) continue
+      const candidate = worker as { role?: unknown; goal?: unknown; reason?: unknown }
+      if (!isRoutedAgentRole(candidate.role)) continue
+      workers.push({
+        role: candidate.role,
+        goal: typeof candidate.goal === "string" && candidate.goal.trim() ? candidate.goal : fallback.workers.find((item) => item.role === candidate.role)?.goal ?? `Handle ${candidate.role} work.`,
+        reason: typeof candidate.reason === "string" && candidate.reason.trim() ? candidate.reason : fallback.workers.find((item) => item.role === candidate.role)?.reason ?? `Router selected ${candidate.role}.`,
+      })
+    }
+  }
+
+  if (workers.length === 0) {
+    workers.push(...fallback.workers)
+  }
+  if (!workers.some((worker) => worker.role === primaryRole)) {
+    workers.unshift({ role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
+  }
+
+  return {
+    primaryRole,
+    workers,
+    requiresReview: fallback.requiresReview,
+    confidence: typeof value.confidence === "number" ? value.confidence : undefined,
+    reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
+  }
 }
 
 function extractJsonObject(text: string): unknown {
@@ -185,7 +220,7 @@ function extractJsonObject(text: string): unknown {
   return JSON.parse(candidate)
 }
 
-async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, home?: string): Promise<RouterDecision | undefined> {
+async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, fallback: AgentRoutingPlan, home?: string): Promise<RouterPlanDecision | undefined> {
   const routerPolicy = brain.planner ?? brain.roles.routeBrain
   if (!routerPolicy?.modelId) return undefined
 
@@ -200,7 +235,7 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
       getApiKey: (provider) => (provider === routerSelection.piModel.provider ? apiKey : undefined),
     })
 
-    await runtime.agent.prompt(`Choose exactly one role for this user prompt.
+    await runtime.agent.prompt(`Choose the best primary role and any useful worker agents for this user prompt.
 
 Allowed roles:
 - coding: implement or modify code
@@ -220,20 +255,23 @@ Allowed roles:
 - rush: miscellaneous odd jobs and quick one-off chores that do not fit another role
 
 Return only JSON in this shape:
-{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","confidence":0.0,"reason":"short reason"}
+{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","workers":[{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","goal":"short worker goal","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
+
+Constraints:
+- Pick exactly one primary role in "role".
+- Include only workers that would materially improve the task.
+- Do not include routeBrain as a role.
+- Prefer no more than ${brain.routing.maxParallelAgents} workers.
+- If implementation is needed, include coding as a worker and usually as the primary role.
 
 User prompt:
 ${prompt}`)
 
     const text = extractAssistantText(runtime.agent.state.messages)
-    const parsed = extractJsonObject(text) as { role?: unknown; confidence?: unknown; reason?: unknown }
-    if (!isAgentRole(parsed.role) || parsed.role === "routeBrain") throw new Error(`invalid router role: ${String(parsed.role)}`)
+    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }
+    if (!isRoutedAgentRole(parsed.role)) throw new Error(`invalid router role: ${String(parsed.role)}`)
 
-    const decision = {
-      role: parsed.role,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
-      reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
-    }
+    const decision = normalizeRouterDecision(parsed, fallback)
     debugLog("runtime", "router brain selected role", decision)
     return decision
   } catch (error) {
@@ -247,8 +285,10 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
-  const routerDecision = useRouterBrain ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, home) : undefined
-  const role = routerDecision?.role ?? selectAgentRole(prompt)
+  const heuristicPlan = planAgentRouting(prompt, brain)
+  const routerDecision = useRouterBrain ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, home) : undefined
+  const agentPlan = routerDecision ?? heuristicPlan
+  const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
   const selection = selectRuntimeModel(policy, models as BraincodeModel[])
   const modePolicy = getModePolicy(settings.mode)
@@ -266,6 +306,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
       description: brain.description,
     },
     role,
+    agentPlan,
     routing,
     model: selection.configured,
     policy,

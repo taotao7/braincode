@@ -16,6 +16,11 @@ Les agents de codage actuels ne sont pas assez intelligents. Un agent idéal dev
 
 Braincode est construit autour de cette idée : au lieu de choisir un seul modèle pour tout, l'utilisateur sélectionne un **Brain Model** — une politique de routage qui dispatche chaque sous-tâche (planification, codage, recherche, revue, résumé, réponses rapides) vers le modèle le plus adapté.
 
+Braincode propose actuellement deux modes de haut niveau :
+
+- `auto` — le mode par défaut, qui planifie selon l'intention et route vers différents agents/modèles.
+- `radical` — un mode autonome plus agressif pour les utilisateurs qui veulent une exécution plus rapide et plus large.
+
 ## Objectifs
 
 - Construire un agent de codage capable aussi de faire de la recherche, de la revue, de la planification, du résumé et de l'automatisation.

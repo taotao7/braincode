@@ -135,22 +135,24 @@ async function handleRequest(request: Request): Promise<Response> {
     }
 
     if (request.method === "POST" && url.pathname === "/api/models/test") {
-      const body = (await request.json()) as { modelId?: string }
+      const body = (await request.json()) as { modelId?: string; thinkingLevel?: string }
       const modelId = body.modelId?.trim() ?? ""
       const savedModels = await readModels()
       const model = (savedModels.models as BraincodeModel[]).find((candidate) => candidate.id === modelId)
       if (!model) throw new Error(`Unknown configured model id: ${modelId}`)
       const apiKey = await readProviderApiKey(model.provider)
-      debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey) })
-      return json(ok(await testModelConnection(model, apiKey)))
+      const thinkingLevel = body.thinkingLevel?.trim() || undefined
+      debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
+      return json(ok(await testModelConnection(model, apiKey, thinkingLevel as never)))
     }
 
     if (request.method === "POST" && url.pathname === "/api/models/test-config") {
-      const body = (await request.json()) as { model?: BraincodeModel; apiKey?: string }
+      const body = (await request.json()) as { model?: BraincodeModel; apiKey?: string; thinkingLevel?: string }
       if (!body.model) throw new Error("model is required")
       const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderApiKey(body.model.provider) : undefined)
-      debugLog("server", "testing model config", { modelId: body.model.id, provider: body.model.provider, hasApiKey: Boolean(apiKey) })
-      return json(ok(await testModelConnection(body.model, apiKey)))
+      const thinkingLevel = body.thinkingLevel?.trim() || undefined
+      debugLog("server", "testing model config", { modelId: body.model.id, provider: body.model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
+      return json(ok(await testModelConnection(body.model, apiKey, thinkingLevel as never)))
     }
 
     if (request.method === "PUT" && url.pathname === "/api/models") {
