@@ -1341,8 +1341,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0
 
   return (
-    <Box flexDirection="row" paddingX={1}>
-      <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" paddingX={1}>
       <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
         <Box flexDirection="column">
           <Text color="cyan" bold>BRAIN / CODE</Text>
@@ -1496,6 +1495,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
+      <Box justifyContent="flex-end">
+        <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
+      </Box>
       <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="column">
         {running ? (
           <Text color="gray">… wait for the current run to finish</Text>
@@ -1524,10 +1526,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Text>
       ) : null}
       {statusFlash ? <Text color="cyan">{statusFlash}</Text> : null}
-      </Box>
-      <Box flexDirection="column" marginLeft={2} paddingTop={1}>
-        <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
-      </Box>
     </Box>
   )
 }
