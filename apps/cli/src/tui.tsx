@@ -110,57 +110,103 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 const INPUT_MAX_LINES = 6
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
 
-const BRAIN_BODY: ReadonlyArray<string> = [
-  "  ╭─────╮  ",
-  " ╭╯∾∽∾∽∾╰╮ ",
-  " │∽◔ ∾ ◔∽│ ",
-  " │∾ ∽⌣∽ ∾│ ",
-  " ╰╮∾∽∾∽∾╭╯ ",
-  "  ╰──┬──╯  ",
+const BRAIN_LOGO: ReadonlyArray<string> = [
+  "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
+  "   ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║",
+  "   ██████╔╝██████╔╝███████║██║██╔██╗ ██║",
+  "   ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║",
+  "   ██████╔╝██║  ██║██║  ██║██║██║ ╚████║",
+  "   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝",
 ]
 
-const BRAIN_SPARKLES: ReadonlyArray<ReadonlyArray<string>> = [
-  ["    ✦      ", "           ", "        ✧  "],
-  ["           ", "  ✦        ", "       ✧   "],
-  ["       ✧   ", "           ", "   ✦       "],
-  ["  ✦      ✧ ", "           ", "        ✦  "],
+const BRAIN_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
+  [
+    "   .---.   ",
+    "  /~~|~~\\  ",
+    " |~~~|~~~| ",
+    "  \\~~|~~/  ",
+    "   `---´   ",
+  ],
+  [
+    "   .---.   ",
+    "  /≈≈|≈≈\\  ",
+    " |≈≈≈|≈≈≈| ",
+    "  \\≈≈|≈≈/  ",
+    "   `---´   ",
+  ],
+  [
+    "   .---.   ",
+    "  /∽∽|∽∽\\  ",
+    " |∽∽∽|∽∽∽| ",
+    "  \\∽∽|∽∽/  ",
+    "   `---´   ",
+  ],
+  [
+    "   .---.   ",
+    "  /≈≈|≈≈\\  ",
+    " |≈≈≈|≈≈≈| ",
+    "  \\≈≈|≈≈/  ",
+    "   `---´   ",
+  ],
 ]
 
-const BRAIN_IDLE_SPARKLES: ReadonlyArray<string> = [
+const THOUGHT_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
+  [
+    "           ",
+    "           ",
+    "     .     ",
+  ],
+  [
+    "           ",
+    "     ·     ",
+    "     °     ",
+  ],
+  [
+    "     °     ",
+    "     o     ",
+    "           ",
+  ],
+  [
+    "     ○     ",
+    "           ",
+    "           ",
+  ],
+]
+
+const IDLE_THOUGHT: ReadonlyArray<string> = [
   "           ",
-  "     ·     ",
+  "           ",
   "           ",
 ]
 
-const BRAIN_PULSE_COLORS = ["magenta", "cyan", "magentaBright", "cyanBright"] as const
+const BRAIN_PULSE_COLORS = ["magenta", "magentaBright", "redBright", "magentaBright"] as const
 
 type BrainPetProps = { thinking: boolean }
 
 function BrainPet({ thinking }: BrainPetProps) {
   const [frame, setFrame] = useState(0)
   useEffect(() => {
-    const tick = thinking ? 180 : 700
+    const tick = thinking ? 220 : 800
     const interval = setInterval(() => {
       setFrame((value) => (value + 1) % 1024)
     }, tick)
     return () => clearInterval(interval)
   }, [thinking])
-  const sparkles = thinking
-    ? BRAIN_SPARKLES[frame % BRAIN_SPARKLES.length]
-    : BRAIN_IDLE_SPARKLES
-  const bodyColor = thinking
-    ? BRAIN_PULSE_COLORS[frame % BRAIN_PULSE_COLORS.length]
-    : "gray"
+  const idx = frame % 4
+  const bodyLines = thinking ? BRAIN_FRAMES[idx] : BRAIN_FRAMES[0]
+  const thoughtLines = thinking ? THOUGHT_FRAMES[idx] : IDLE_THOUGHT
+  const bodyColor = thinking ? BRAIN_PULSE_COLORS[idx] : "gray"
   const label = thinking ? "thinking…" : "idle"
+  const labelColor = thinking ? "cyan" : "gray"
   return (
     <Box flexDirection="column" alignItems="center">
-      {sparkles.map((line, index) => (
-        <Text key={`spark-${index}`} color="yellow">{line}</Text>
+      {thoughtLines.map((line, index) => (
+        <Text key={`thought-${index}`} color="cyan">{line}</Text>
       ))}
-      {BRAIN_BODY.map((line, index) => (
-        <Text key={`body-${index}`} color={bodyColor}>{line}</Text>
+      {bodyLines.map((line, index) => (
+        <Text key={`brain-${index}`} color={bodyColor}>{line}</Text>
       ))}
-      <Text color={thinking ? "cyan" : "gray"}>{label}</Text>
+      <Text color={labelColor}>{label}</Text>
     </Box>
   )
 }
@@ -305,6 +351,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true
       case "brain":
         void showBrainPanel(argument)
+        return true
+      case "team":
+        invokeTeam(argument)
         return true
       case "skill":
       case "skills":
@@ -681,6 +730,45 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     appendItem({ kind: "panel", text: `${target.scope === "user" ? "User" : "Project"} · ${target.id}  →  ${target.path}\n\n${trimmed}` })
   }
 
+  const DEFAULT_TEAM_ROLES = ["coding", "research", "frontend", "backend", "review"]
+  const ALLOWED_ROLES = new Set(["coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian", "rush"])
+
+  function invokeTeam(argument: string) {
+    if (running) {
+      appendItem({ kind: "error", text: "A run is already in progress; wait for it to finish before invoking /team." })
+      return
+    }
+    let rolesArg = ""
+    let promptArg = argument
+    if (argument.startsWith("[")) {
+      const close = argument.indexOf("]")
+      if (close === -1) {
+        appendItem({ kind: "error", text: "Bad /team syntax. Use /team [roleA,roleB] <prompt> or /team <prompt>." })
+        return
+      }
+      rolesArg = argument.slice(1, close)
+      promptArg = argument.slice(close + 1).trim()
+    }
+    const requestedRoles = rolesArg
+      ? rolesArg.split(",").map((role) => role.trim()).filter(Boolean)
+      : DEFAULT_TEAM_ROLES
+    const unknown = requestedRoles.filter((role) => !ALLOWED_ROLES.has(role))
+    if (unknown.length > 0) {
+      appendItem({ kind: "error", text: `Unknown role(s): ${unknown.join(", ")}. Allowed: ${[...ALLOWED_ROLES].join(", ")}.` })
+      return
+    }
+    if (requestedRoles.length === 0) {
+      appendItem({ kind: "error", text: "/team needs at least one role." })
+      return
+    }
+    if (!promptArg.trim()) {
+      appendItem({ kind: "error", text: "/team <prompt> needs the task to send to each agent." })
+      return
+    }
+    const displayText = `/team [${requestedRoles.join(", ")}] ${promptArg}`
+    void submitPrompt(promptArg, { displayText, skipCommand: true, forceRoles: requestedRoles })
+  }
+
   async function invokeSkill(skill: { id: string; scope: "user" | "project"; content: string; path: string }, argument: string) {
     if (running) {
       appendItem({ kind: "error", text: "A run is already in progress; wait for it to finish before invoking a skill." })
@@ -741,7 +829,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
-  async function submitPrompt(prompt: string, options: { displayText?: string; skipCommand?: boolean } = {}) {
+  async function submitPrompt(prompt: string, options: { displayText?: string; skipCommand?: boolean; forceRoles?: string[] } = {}) {
     const trimmed = prompt.trim()
     if (!trimmed || running) return
 
@@ -928,7 +1016,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     try {
-      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onEvent, onMcpReport, onWorkerEvent })
+      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onEvent, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
       finalizeStreamingBuffers()
       setItems((previous) => {
         const next = previous.filter((item) => item.id !== statusId)
