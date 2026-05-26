@@ -61,6 +61,11 @@ test("planAgentRouting returns workers and review requirements", () => {
 
   expect(plan.primaryRole).toBe("coding")
   expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
+  expect(plan.todos.map((todo) => [todo.id, todo.role, todo.status])).toEqual([
+    ["todo-01-coding", "coding", "pending"],
+    ["todo-02-frontend", "frontend", "pending"],
+  ])
+  expect(plan.workers[0]?.todoIds).toEqual(["todo-01-coding"])
   expect(plan.requiresReview).toBe(true)
   expect(plan.reason).toBe("Multiple specialized role signals matched the prompt.")
 })

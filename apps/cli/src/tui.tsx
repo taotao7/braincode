@@ -3,7 +3,7 @@ import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
-import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
+import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
 import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
@@ -14,12 +14,14 @@ import { usePetWatcher, type PetWatcherSnapshotItem } from "./pet-watcher"
 
 type TranscriptItem = {
   id: string
-  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "queued"
+  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "todo" | "queued"
   text: string
   plan?: RuntimePlan
   toolName?: string
   toolStatus?: "running" | "ok" | "failed"
   workerStatus?: "running" | "completed" | "failed"
+  todoStatus?: "pending" | "running" | "completed" | "blocked" | "failed"
+  todoId?: string
   startedAt?: number
   finishedAt?: number
   queueId?: string
@@ -1050,6 +1052,43 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     const workerItems = new Map<string, { itemId: string; startedAt: number }>()
+    const todoItems = new Map<string, string>()
+    const upsertTodoItem = (event: TodoLifecycleEvent) => {
+      const itemId = todoItems.get(event.todo.id)
+      const summary = event.summary || event.error
+      const text = `${event.todo.role} · ${event.todo.title}${summary ? ` · ${truncate(summary.replace(/\s+/g, " ").trim(), 120)}` : ""}`
+      if (itemId) {
+        updateItem(itemId, {
+          todoStatus: event.status,
+          finishedAt: event.status === "completed" || event.status === "failed" || event.status === "blocked" ? Date.now() : undefined,
+          text,
+        })
+        return
+      }
+      const nextItemId = crypto.randomUUID()
+      todoItems.set(event.todo.id, nextItemId)
+      appendItemRaw({
+        id: nextItemId,
+        kind: "todo",
+        todoId: event.todo.id,
+        todoStatus: event.status,
+        startedAt: event.status === "running" ? Date.now() : undefined,
+        finishedAt: event.status === "completed" || event.status === "failed" || event.status === "blocked" ? Date.now() : undefined,
+        text,
+      })
+    }
+    const onPlan = (plan: RuntimePlan) => {
+      if (plan.todos.length === 0) return
+      finalizeStreamingBuffers()
+      appendItemRaw({ id: crypto.randomUUID(), kind: "panel", text: `Todo · ${plan.todos.length} planned task${plan.todos.length === 1 ? "" : "s"}` })
+      for (const todo of plan.todos) {
+        upsertTodoItem({ type: "todo_update", todo, status: todo.status, phase: "planning", role: todo.role })
+      }
+    }
+    const onTodoEvent = (event: TodoLifecycleEvent) => {
+      finalizeStreamingBuffers()
+      upsertTodoItem(event)
+    }
     const workerKey = (event: WorkerLifecycleEvent) => `${event.phase}:${event.role}`
     const onWorkerEvent = (event: WorkerLifecycleEvent) => {
       finalizeStreamingBuffers()
@@ -1098,7 +1137,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     try {
-      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onEvent, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
+      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
       finalizeStreamingBuffers()
       setItems((previous) => {
         const next = previous.filter((item) => item.id !== statusId)
@@ -1490,6 +1529,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             <Box key={item.id} flexDirection="column" marginBottom={1}>
               <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
               {item.plan ? <Text color="gray">mode={item.plan.mode} routing={item.plan.routing.source} toolExecution={item.plan.toolExecution}</Text> : null}
+              {item.plan?.todos.length ? (
+                <Box flexDirection="column" marginLeft={2}>
+                  {item.plan.todos.map((todo) => (
+                    <Text key={todo.id} color={todo.status === "completed" ? "green" : todo.status === "failed" || todo.status === "blocked" ? "red" : todo.status === "running" ? "yellow" : "gray"}>
+                      {todoGlyph(todo.status)} {todo.role} · {todo.title}
+                    </Text>
+                  ))}
+                </Box>
+              ) : null}
             </Box>
           ))}
         </Box>
@@ -1847,6 +1895,7 @@ function labelFor(item: TranscriptItem): string {
         default: return "◎"
       }
     }
+    case "todo": return todoGlyph(item.todoStatus ?? "pending")
     case "queued": return "»"
   }
 }
@@ -1874,7 +1923,26 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
         default: return "yellow"
       }
     }
+    case "todo": {
+      switch (item.todoStatus) {
+        case "completed": return "green"
+        case "failed":
+        case "blocked": return "red"
+        case "running": return "yellow"
+        default: return "gray"
+      }
+    }
     case "queued": return "yellow"
+  }
+}
+
+function todoGlyph(status: "pending" | "running" | "completed" | "blocked" | "failed"): string {
+  switch (status) {
+    case "completed": return "☑"
+    case "failed": return "✗"
+    case "blocked": return "!"
+    case "running": return "◐"
+    case "pending": return "☐"
   }
 }
 

@@ -267,15 +267,35 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
   ].join("\n"),
 }
 
+export type AgentTodoStatus = "pending" | "running" | "completed" | "blocked" | "failed"
+
+export type AgentTodoItem = {
+  id: string
+  title: string
+  role: RoutedAgentRole
+  status: AgentTodoStatus
+  reason?: string
+  summary?: string
+}
+
+export type AgentTodoDependency = {
+  fromTodoId: string
+  toTodoId: string
+  reason?: string
+}
+
 export type AgentWorkerPlan = {
   role: RoutedAgentRole
   goal: string
   reason: string
+  todoIds?: string[]
 }
 
 export type AgentRoutingPlan = {
   primaryRole: RoutedAgentRole
   workers: AgentWorkerPlan[]
+  todos: AgentTodoItem[]
+  dependencies: AgentTodoDependency[]
   requiresReview: boolean
   reason: string
 }
@@ -352,26 +372,141 @@ const implementationPattern = /\b(implement|build|create|add|fix|change|modify|r
 const simpleConversationPattern = /\b(hi|hello|thanks|thank you|你好|谢谢)\b/
 const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
 
+export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
+  return `todo-${String(index + 1).padStart(2, "0")}-${role}`
+}
+
+function isAgentTodoStatus(value: unknown): value is AgentTodoStatus {
+  return value === "pending" || value === "running" || value === "completed" || value === "blocked" || value === "failed"
+}
+
+function normalizeTodoId(value: unknown, role: RoutedAgentRole, index: number, used: Set<string>): string {
+  const normalized = typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
+    : ""
+  const base = normalized || createAgentTodoId(role, index)
+  let candidate = base
+  let suffix = 2
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  used.add(candidate)
+  return candidate
+}
+
+export function normalizeAgentTodos(workers: AgentWorkerPlan[], todos: AgentTodoItem[] = []): { workers: AgentWorkerPlan[]; todos: AgentTodoItem[] } {
+  const used = new Set<string>()
+  const normalizedTodos: AgentTodoItem[] = []
+
+  for (const [index, todo] of todos.entries()) {
+    if (!todo.title.trim()) continue
+    const id = normalizeTodoId(todo.id, todo.role, index, used)
+    normalizedTodos.push({
+      id,
+      title: todo.title.trim(),
+      role: todo.role,
+      status: isAgentTodoStatus(todo.status) ? todo.status : "pending",
+      ...(todo.reason?.trim() ? { reason: todo.reason.trim() } : {}),
+      ...(todo.summary?.trim() ? { summary: todo.summary.trim() } : {}),
+    })
+  }
+
+  const normalizedWorkers = workers.map((worker, index) => {
+    const existingTodoIds = (worker.todoIds ?? []).filter((id) => normalizedTodos.some((todo) => todo.id === id))
+    const roleTodoIds = normalizedTodos.filter((todo) => todo.role === worker.role).map((todo) => todo.id)
+    const todoIds = existingTodoIds.length > 0 ? existingTodoIds : roleTodoIds
+    if (todoIds.length > 0) return { ...worker, todoIds }
+
+    const id = normalizeTodoId(undefined, worker.role, normalizedTodos.length || index, used)
+    normalizedTodos.push({
+      id,
+      title: worker.goal,
+      role: worker.role,
+      status: "pending",
+      reason: worker.reason,
+    })
+    return { ...worker, todoIds: [id] }
+  })
+
+  return { workers: normalizedWorkers, todos: normalizedTodos }
+}
+
+function normalizeAgentTodoDependencies(plan: Pick<AgentRoutingPlan, "primaryRole" | "workers"> & { todos: AgentTodoItem[]; dependencies?: AgentTodoDependency[] }): AgentTodoDependency[] {
+  const validTodoIds = new Set(plan.todos.map((todo) => todo.id))
+  const explicit = (plan.dependencies ?? [])
+    .filter((dependency) => validTodoIds.has(dependency.fromTodoId) && validTodoIds.has(dependency.toTodoId) && dependency.fromTodoId !== dependency.toTodoId)
+    .map((dependency) => ({
+      fromTodoId: dependency.fromTodoId,
+      toTodoId: dependency.toTodoId,
+      ...(dependency.reason?.trim() ? { reason: dependency.reason.trim() } : {}),
+    }))
+  if (explicit.length > 0) return dedupeAgentTodoDependencies(explicit)
+
+  const workerRoles = new Set(plan.workers.map((worker) => worker.role))
+  const primaryTodoIds = plan.todos.filter((todo) => todo.role === plan.primaryRole).map((todo) => todo.id)
+  const supportTodoIds = plan.todos.filter((todo) => workerRoles.has(todo.role) && todo.role !== plan.primaryRole && todo.role !== "review").map((todo) => todo.id)
+  const reviewTodoIds = plan.todos.filter((todo) => todo.role === "review").map((todo) => todo.id)
+  const dependencies: AgentTodoDependency[] = []
+
+  for (const supportTodoId of supportTodoIds) {
+    for (const primaryTodoId of primaryTodoIds) {
+      dependencies.push({ fromTodoId: supportTodoId, toTodoId: primaryTodoId, reason: "Support worker output feeds the primary task." })
+    }
+  }
+
+  const reviewInputs = primaryTodoIds.length > 0 ? primaryTodoIds : plan.todos.filter((todo) => todo.role !== "review").map((todo) => todo.id)
+  for (const reviewInputId of reviewInputs) {
+    for (const reviewTodoId of reviewTodoIds) {
+      dependencies.push({ fromTodoId: reviewInputId, toTodoId: reviewTodoId, reason: "Review runs after implementation output exists." })
+    }
+  }
+
+  return dedupeAgentTodoDependencies(dependencies)
+}
+
+function dedupeAgentTodoDependencies(dependencies: AgentTodoDependency[]): AgentTodoDependency[] {
+  const seen = new Set<string>()
+  const deduped: AgentTodoDependency[] = []
+  for (const dependency of dependencies) {
+    const key = `${dependency.fromTodoId}->${dependency.toTodoId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(dependency)
+  }
+  return deduped
+}
+
+export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" | "dependencies"> & { todos?: AgentTodoItem[]; dependencies?: AgentTodoDependency[] }): AgentRoutingPlan {
+  const normalized = normalizeAgentTodos(plan.workers, plan.todos ?? [])
+  return {
+    ...plan,
+    workers: normalized.workers,
+    todos: normalized.todos,
+    dependencies: normalizeAgentTodoDependencies({ primaryRole: plan.primaryRole, workers: normalized.workers, todos: normalized.todos, dependencies: plan.dependencies }),
+  }
+}
+
 export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRoutingPlan {
   const normalized = prompt.toLowerCase()
   const matched = roleSignals.filter((signal) => signal.pattern.test(normalized))
 
   if (matched.length === 0 && simpleConversationPattern.test(normalized) && normalized.length < 120) {
-    return {
+    return normalizeAgentRoutingPlan({
       primaryRole: "fastReply",
       workers: [{ role: "fastReply", goal: "Answer the simple conversational prompt directly.", reason: "The prompt is short conversational text." }],
       requiresReview: false,
       reason: "Short conversational prompt routed to fastReply.",
-    }
+    })
   }
 
   if (matched.length === 0) {
-    return {
+    return normalizeAgentRoutingPlan({
       primaryRole: "coding",
       workers: [{ role: "coding", goal: "Implement or modify code according to the user's request.", reason: "No specialized role signal was stronger than the default coding path." }],
       requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
       reason: "No specialized signal matched; defaulting to coding.",
-    }
+    })
   }
 
   const implementationRequested = implementationPattern.test(normalized)
@@ -387,12 +522,12 @@ export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRouti
   const workers = Array.from(workersByRole.values()).slice(0, maxWorkers)
   const primaryRole = workers.find((worker) => worker.role === "coding")?.role ?? workers[0]?.role ?? "coding"
 
-  return {
+  return normalizeAgentRoutingPlan({
     primaryRole,
     workers,
     requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
     reason: workers.length > 1 ? "Multiple specialized role signals matched the prompt." : workers[0]?.reason ?? "Routed by role signal.",
-  }
+  })
 }
 
 export function selectAgentRole(prompt: string): RoutedAgentRole {

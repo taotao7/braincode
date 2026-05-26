@@ -106,7 +106,8 @@ The orchestrator is `executePromptFromConfig` in `packages/agent-runtime/src/ind
 4. **Worker run** — `runWorkerFromPlan` creates a brand-new Pi `Agent` for the worker. Its prompt is composed by `buildSupportWorkerPrompt`: project support section + original user request + the handoff packet (as JSON) + the expected reply shape. The worker has no access to the orchestrator's `Agent` state.
 5. **Result normalization** — `normalizeWorkerResultText` parses the worker's reply into a `WorkerResult`. If the reply is plain text instead of JSON, it is wrapped into a completed `WorkerResult` with `summary` = the text. This is intentional resilience: provider drift should not break orchestration.
 6. **Primary prompt** — `buildPrimaryPrompt` gives the primary agent the user request plus a formatted list of worker summaries (role, status, goal, progress, summary, risks, open questions). It does *not* hand the primary any worker transcripts.
-7. **Optional review** — if the plan requires review and the primary isn't already the review role, `buildReviewPrompt` runs a review worker with the primary's summary, the worker results, and a fresh handoff packet.
+7. **Todo updates** — the runtime marks the primary/worker/review todos as running, completed, blocked, or failed as each owner starts or finishes.
+8. **Optional review** — if the plan requires review and the primary isn't already the review role, `buildReviewPrompt` runs a review worker with the primary's summary, the worker results, and a fresh handoff packet.
 
 The constraint list baked into every support handoff (from `createWorkerHandoff`) is:
 
@@ -139,6 +140,8 @@ If you add a new reference kind, follow the same compaction discipline: a snapsh
 | `run_start` | `executePromptFromConfig` | prompt, plan, project support summary, attempt number |
 | `run_end` | same | final summary + worker results |
 | `run_error` | same | error message, retry intent |
+| `todo_plan` | same | the checkable tasks produced by routing |
+| `todo_update` | same / `runWorkerFromPlan` | status changes for todo ids owned by primary or worker roles |
 | `worker_start` | `runWorkerFromPlan` | phase, role, goal, handoff, model, attempt |
 | `worker_end` | same | the executed `WorkerResult` |
 | `worker_error` | same | error, fallback intent |

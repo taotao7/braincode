@@ -49,10 +49,12 @@ Runtime responsibilities are split into four layers:
 User task
   -> root orchestrator
     -> classify task and select Brain Model policy
-    -> choose one or more agent roles
+    -> choose one or more agent roles and create a checkable todo plan
     -> create isolated context for each worker
       -> worker uses selected model + tools
+      -> worker completion marks its assigned todo items complete or failed
       -> worker returns structured result
+    -> primary agent completion marks its assigned todo items complete or failed
     -> merge selected summaries/artifacts/facts
   -> final answer or code change
 ```
@@ -136,6 +138,8 @@ Routing has two inputs:
 - the configured `routeBrain`/`planner` model, used during real execution when credentials are available.
 
 Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned.
+
+Routing also produces a todo plan. Each todo has a stable id, title, assigned routed role, status, and optional summary. Worker plans carry the todo ids they own. During execution the runtime records `todo_plan` and `todo_update` session JSONL events, emits live todo updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
 
 ## Layered context ownership
 

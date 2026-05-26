@@ -242,6 +242,14 @@ test("readSessionContext returns compact session records", async () => {
     attempt: 1,
   }, home)
   await appendSessionRecord("context-session", {
+    type: "todo_update",
+    phase: "support",
+    role: "research",
+    status: "completed",
+    todos: [{ id: "todo-01-research", title: "Find prior work", role: "research", status: "completed" }],
+    summary: "found relevant prior work",
+  }, home)
+  await appendSessionRecord("context-session", {
     type: "run_end",
     summary: "implemented feature",
     attempt: 1,
@@ -252,6 +260,7 @@ test("readSessionContext returns compact session records", async () => {
   expect(context?.sessionId).toBe("context-session")
   expect(context?.prompt).toBe("implement feature")
   expect(context?.summary).toBe("implemented feature")
-  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "run"])
+  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "run"])
+  expect(context?.entries.find((entry) => entry.type === "todo")?.status).toBe("completed")
   expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("coding")
 })

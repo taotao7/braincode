@@ -767,6 +767,16 @@ export type SessionContextEntry =
       attempt?: number;
     }
   | {
+      type: "todo";
+      timestamp?: number;
+      phase?: string;
+      role?: string;
+      status: "pending" | "running" | "completed" | "blocked" | "failed";
+      title?: string;
+      summary?: string;
+      error?: string;
+    }
+  | {
       type: "error";
       timestamp?: number;
       error: string;
@@ -991,6 +1001,33 @@ export async function readSessionContext(
         error: stringField(record, "error") ?? "unknown worker error",
         attempt,
       });
+    } else if (record.type === "todo_update") {
+      const todosValue = record.todos;
+      const todoRecords = Array.isArray(todosValue)
+        ? todosValue.filter((todo): todo is Record<string, unknown> => Boolean(todo) && typeof todo === "object" && !Array.isArray(todo))
+        : [];
+      const rawStatus = stringField(record, "status");
+      const status: Extract<SessionContextEntry, { type: "todo" }>["status"] = rawStatus === "pending" || rawStatus === "running" || rawStatus === "completed" || rawStatus === "blocked" || rawStatus === "failed" ? rawStatus : "pending";
+      const shared = {
+        timestamp,
+        phase: stringField(record, "phase"),
+        status,
+        summary: stringField(record, "summary"),
+        error: stringField(record, "error"),
+      };
+      if (todoRecords.length === 0) {
+        entries.push({ type: "todo", ...shared, role: stringField(record, "role") });
+      } else {
+        for (const todo of todoRecords) {
+          entries.push({
+            type: "todo",
+            ...shared,
+            role: stringField(record, "role") ?? stringField(todo, "role"),
+            title: stringField(todo, "title"),
+            summary: shared.summary ?? stringField(todo, "summary"),
+          });
+        }
+      }
     } else if (record.type === "handoff") {
       const summary = stringField(record, "summary");
       if (summary) {

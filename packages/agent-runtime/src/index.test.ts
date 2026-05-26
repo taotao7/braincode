@@ -275,6 +275,7 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     expect(plan.mode).toBe("radical")
     expect(plan.role).toBe("review")
     expect(plan.workers.map((worker) => worker.role)).toEqual(["review"])
+    expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["review", "pending"]])
     expect(plan.toolExecution).toBe("parallel")
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
   } finally {
@@ -340,6 +341,8 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
     expect(plan.role).toBe("coding")
     expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
     expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend", "review"])
+    expect(plan.todos.map((todo) => todo.role)).toEqual(["coding", "frontend", "review"])
+    expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-03-review"])
     expect(plan.workers.find((worker) => worker.role === "frontend")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
   } finally {
     await rm(home, { recursive: true, force: true })

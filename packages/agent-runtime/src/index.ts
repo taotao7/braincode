@@ -6,7 +6,7 @@ import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./m
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { Model } from "@earendil-works/pi-ai"
-import { formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
@@ -19,14 +19,26 @@ export type AgentRunRequest = {
   sessionId?: string
   projectRoot?: string
   forceRoles?: RoutedAgentRole[]
+  onPlan?: (plan: RuntimePlan) => void | Promise<void>
+  onTodoEvent?: (event: TodoLifecycleEvent) => void | Promise<void>
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
 }
 
 export type WorkerLifecycleEvent =
-  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string }
-  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "failed"; summary?: string; error?: string }
+  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string; todoIds?: string[] }
+  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "failed"; summary?: string; error?: string; todoIds?: string[] }
+
+export type TodoLifecycleEvent = {
+  type: "todo_update"
+  todo: AgentTodoItem
+  status: AgentTodoStatus
+  phase: "planning" | "support" | "primary" | "review"
+  role?: RoutedAgentRole
+  summary?: string
+  error?: string
+}
 
 export type AgentRunResult = {
   sessionId: string
@@ -74,6 +86,7 @@ export type RuntimeWorkerPlan = AgentWorkerPlan & {
 export type ExecutedWorkerResult = WorkerResult & {
   role: RoutedAgentRole
   goal: string
+  todoIds: string[]
   status: "completed" | "failed"
   error?: string
 }
@@ -84,6 +97,8 @@ export type RuntimePlan = {
   brain: Pick<BrainModel, "id" | "name" | "description">
   role: RoutedAgentRole
   agentPlan: AgentRoutingPlan
+  todos: AgentTodoItem[]
+  dependencies: AgentTodoDependency[]
   workers: RuntimeWorkerPlan[]
   routing: {
     source: "router-brain" | "heuristic"
@@ -100,6 +115,13 @@ export type RuntimePlan = {
 type RouterPlanDecision = AgentRoutingPlan & {
   confidence?: number
 }
+
+type WorkerTodoStatusHandler = (
+  worker: RuntimeWorkerPlan,
+  phase: "support" | "review",
+  status: AgentTodoStatus,
+  detail?: { summary?: string; error?: string },
+) => void | Promise<void>
 
 export type HookPermissionMode = "default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions"
 
@@ -497,7 +519,7 @@ function isAgentRole(value: unknown): value is AgentRole {
   return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
-function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
+function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
   const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
   const workersByRole = new Map<RoutedAgentRole, AgentRoutingPlan["workers"][number]>()
   if (Array.isArray(value.workers)) {
@@ -524,14 +546,65 @@ function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; con
   if (!cappedWorkers.some((worker) => worker.role === primaryRole)) {
     cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, { role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
   }
+  const todoInputs = normalizeRouterTodos(value.todos, primaryRole)
+  const workerRoles = new Set(cappedWorkers.map((worker) => worker.role))
+  const routedTodoInputs = todoInputs.map((todo) => workerRoles.has(todo.role) ? todo : { ...todo, role: primaryRole })
+  const normalized = normalizeAgentRoutingPlan({
+    primaryRole,
+    workers: cappedWorkers,
+    todos: routedTodoInputs,
+    dependencies: normalizeRouterDependencies(value.dependencies),
+    requiresReview: fallback.requiresReview,
+    reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
+  })
 
   return {
     primaryRole,
-    workers: cappedWorkers,
+    workers: normalized.workers,
+    todos: normalized.todos,
+    dependencies: normalized.dependencies,
     requiresReview: fallback.requiresReview,
     confidence: typeof value.confidence === "number" ? value.confidence : undefined,
     reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
   }
+}
+
+function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole): AgentTodoItem[] {
+  if (!Array.isArray(value)) return []
+  const todos: AgentTodoItem[] = []
+  for (const [index, item] of value.entries()) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const candidate = item as { id?: unknown; title?: unknown; task?: unknown; goal?: unknown; role?: unknown; reason?: unknown }
+    const title = [candidate.title, candidate.task, candidate.goal].find((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    if (!title) continue
+    const role = isRoutedAgentRole(candidate.role) ? candidate.role : fallbackRole
+    todos.push({
+      id: typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : createAgentTodoId(role, index),
+      title,
+      role,
+      status: "pending",
+      ...(typeof candidate.reason === "string" && candidate.reason.trim() ? { reason: candidate.reason } : {}),
+    })
+  }
+  return todos
+}
+
+function normalizeRouterDependencies(value: unknown): AgentTodoDependency[] {
+  if (!Array.isArray(value)) return []
+  const dependencies: AgentTodoDependency[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const candidate = item as { from?: unknown; to?: unknown; fromTodoId?: unknown; toTodoId?: unknown; reason?: unknown }
+    const fromTodoId = typeof candidate.fromTodoId === "string" ? candidate.fromTodoId.trim() : typeof candidate.from === "string" ? candidate.from.trim() : ""
+    const toTodoId = typeof candidate.toTodoId === "string" ? candidate.toTodoId.trim() : typeof candidate.to === "string" ? candidate.to.trim() : ""
+    if (!fromTodoId || !toTodoId || fromTodoId === toTodoId) continue
+    dependencies.push({
+      fromTodoId,
+      toTodoId,
+      ...(typeof candidate.reason === "string" && candidate.reason.trim() ? { reason: candidate.reason.trim() } : {}),
+    })
+  }
+  return dependencies
 }
 
 function extractJsonObject(text: string): unknown {
@@ -556,17 +629,21 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
       getApiKey: (provider) => (provider === routerSelection.piModel.provider ? apiKey : undefined),
     })
 
-    await runtime.agent.prompt(`Choose the best primary role and any useful worker agents for this user prompt.
+    await runtime.agent.prompt(`Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
 
 Allowed roles:
 ${formatRoutedAgentRoleCatalog()}
 
 Return only JSON in this shape:
-{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","workers":[{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","goal":"short worker goal","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
+{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","workers":[{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
 
 Constraints:
 - Pick exactly one primary role in "role".
 - Include only workers that would materially improve the task.
+- Break the work into 1-6 concrete todos in execution order.
+- Assign every todo to the agent role that should complete it.
+- Use short lowercase todo ids with letters, numbers, dashes, or underscores.
+- Include dependencies only when one todo materially needs another todo's output.
 - Do not include routeBrain as a role.
 - Prefer no more than ${brain.routing.maxParallelAgents} workers.
 - If implementation is needed, include coding as a worker and usually as the primary role.
@@ -575,7 +652,7 @@ User prompt:
 ${prompt}`)
 
     const text = extractAssistantText(runtime.agent.state.messages)
-    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; confidence?: unknown; reason?: unknown }
+    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }
 
     const decision = normalizeRouterDecision(parsed, fallback, brain.routing.maxParallelAgents)
     debugLog("runtime", "router brain selected role", decision)
@@ -596,7 +673,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, home)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
-  const agentPlan = forceRoles && forceRoles.length > 0
+  const agentPlan = normalizeAgentRoutingPlan(forceRoles && forceRoles.length > 0
     ? {
         ...baseAgentPlan,
         primaryRole: forceRoles[0]!,
@@ -605,10 +682,11 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
           goal: `Respond independently as the ${role} agent.${index === 0 ? " (primary)" : ""}`,
           reason: "Forced multi-agent invocation via /team.",
         })),
+        todos: [],
         requiresReview: false,
         reason: `Forced multi-agent run across ${forceRoles.join(", ")}.`,
       }
-    : baseAgentPlan
+    : baseAgentPlan)
   const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
   const selection = selectRuntimeModel(policy, models as BraincodeModel[])
@@ -620,7 +698,8 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
       reason: "Brain policy requires review for risky file-editing work.",
     })
   }
-  const workers = runtimeWorkerInputs.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
+  const runtimeTodoPlan = normalizeAgentRoutingPlan({ ...agentPlan, workers: runtimeWorkerInputs, todos: agentPlan.todos, dependencies: agentPlan.dependencies })
+  const workers = runtimeTodoPlan.workers.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
   const modePolicy = getModePolicy(settings.mode)
   const maxParallelAgents = brain.routing?.maxParallelAgents
   const routing = routerDecision
@@ -638,6 +717,8 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     },
     role,
     agentPlan,
+    todos: runtimeTodoPlan.todos,
+    dependencies: runtimeTodoPlan.dependencies,
     workers,
     routing,
     model: selection.configured,
@@ -933,6 +1014,7 @@ function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, e
     },
     role: worker.role,
     goal: worker.goal,
+    todoIds: worker.todoIds ?? [],
     status: "failed",
     summary: `${worker.role} worker failed: ${message}`,
     artifacts: [],
@@ -953,6 +1035,7 @@ async function runWorkerFromPlan(
   projectSupport?: ProjectSupport,
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
+  onTodoStatus?: WorkerTodoStatusHandler,
 ): Promise<ExecutedWorkerResult> {
   const emit = async (event: WorkerLifecycleEvent) => {
     if (!onWorkerEvent) return
@@ -966,14 +1049,16 @@ async function runWorkerFromPlan(
   } catch (error) {
     const result = failedWorkerResult(worker, handoff, error)
     await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, handoff, error: result.error }, home)
-    await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: result.error })
+    await onTodoStatus?.(worker, phase, "failed", { error: result.error })
+    await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: result.error, todoIds: worker.todoIds })
     return result
   }
 
   let lastError: unknown
   for (const [attempt, { selection, apiKey }] of candidates.entries()) {
     const agentSessionId = `${handoff.task.id}-${attempt + 1}`
-    await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id })
+    await onTodoStatus?.(worker, phase, "running")
+    await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, todoIds: worker.todoIds })
     await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
     const subagentHookContext: HookRuntimeContext = hookContext
       ? {
@@ -1014,9 +1099,10 @@ async function runWorkerFromPlan(
       await runtime.agent.prompt(workerPrompt)
       const text = extractAssistantText(runtime.agent.state.messages)
       const result = normalizeWorkerResultText(text, handoff)
-      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, status: "completed" }
+      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status: "completed" }
       await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
-      await emit({ type: "worker_end", role: worker.role, phase, status: "completed", summary: text.trim() })
+      await onTodoStatus?.(worker, phase, "completed", { summary: result.summary })
+      await emit({ type: "worker_end", role: worker.role, phase, status: "completed", summary: text.trim(), todoIds: worker.todoIds })
       await runAndRecordHooks(
         "SubagentStop",
         {
@@ -1040,7 +1126,8 @@ async function runWorkerFromPlan(
   }
 
   const failure = failedWorkerResult(worker, handoff, lastError)
-  await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: failure.error })
+  await onTodoStatus?.(worker, phase, "failed", { error: failure.error })
+  await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: failure.error, todoIds: worker.todoIds })
   return failure
 }
 
@@ -1056,6 +1143,7 @@ async function runSupportWorkers(
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   concurrencyCap?: number,
+  onTodoStatus?: WorkerTodoStatusHandler,
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
   void toolExecution // tool execution governs intra-agent tool calls; worker scheduling is independent.
@@ -1080,11 +1168,56 @@ async function runSupportWorkers(
       projectSupport,
       hookContext,
       onWorkerEvent,
+      onTodoStatus,
     )
     return runOne(slot)
   }
   await Promise.all(Array.from({ length: limit }, (_, slot) => runOne(slot)))
   return results
+}
+
+function todoIdsForRole(plan: RuntimePlan, role: RoutedAgentRole): string[] {
+  return plan.todos.filter((todo) => todo.role === role).map((todo) => todo.id)
+}
+
+function setTodoStatus(plan: RuntimePlan, todoIds: string[], status: AgentTodoStatus, detail?: { summary?: string; error?: string }): AgentTodoItem[] {
+  const todoIdSet = new Set(todoIds)
+  const update = (todo: AgentTodoItem): AgentTodoItem => {
+    if (!todoIdSet.has(todo.id)) return todo
+    return {
+      ...todo,
+      status,
+      ...(detail?.summary ? { summary: detail.summary } : {}),
+      ...(detail?.error ? { summary: detail.error } : {}),
+    }
+  }
+  plan.todos = plan.todos.map(update)
+  plan.agentPlan.todos = plan.agentPlan.todos.map(update)
+  return plan.todos.filter((todo) => todoIdSet.has(todo.id))
+}
+
+async function updateTodoStatus(
+  plan: RuntimePlan,
+  todoIds: string[],
+  status: AgentTodoStatus,
+  phase: TodoLifecycleEvent["phase"],
+  sessionId: string,
+  home: string | undefined,
+  onTodoEvent: AgentRunRequest["onTodoEvent"],
+  detail?: { role?: RoutedAgentRole; summary?: string; error?: string },
+): Promise<void> {
+  if (todoIds.length === 0) return
+  const updatedTodos = setTodoStatus(plan, todoIds, status, detail)
+  if (updatedTodos.length === 0) return
+  await appendSessionRecord(sessionId, { type: "todo_update", phase, role: detail?.role, status, todoIds, todos: updatedTodos, summary: detail?.summary, error: detail?.error }, home)
+  if (!onTodoEvent) return
+  for (const todo of updatedTodos) {
+    try {
+      await onTodoEvent({ type: "todo_update", todo, status, phase, role: detail?.role ?? todo.role, summary: detail?.summary, error: detail?.error })
+    } catch {
+      // ignore listener errors
+    }
+  }
 }
 
 function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undefined): string {
@@ -1122,6 +1255,14 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
+  await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos }, home)
+  if (request.onPlan) {
+    try {
+      await request.onPlan(plan)
+    } catch {
+      // ignore listener errors
+    }
+  }
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
   const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home)
@@ -1131,7 +1272,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents)
+  const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
+    updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
+  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()
@@ -1165,6 +1308,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       plan.model = selection.configured
       plan.piModel = toPiModelSummary(selection)
       await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
+      const primaryTodoIds = todoIdsForRole(plan, plan.role)
+      await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
 
       const runtime = createBraincodeAgentRuntime({
         mode: plan.mode,
@@ -1180,9 +1325,10 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       try {
         await runtime.agent.prompt(primaryPrompt)
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
+        await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus)
             : undefined
         if (reviewResult) workerResults.push(reviewResult)
 
@@ -1207,6 +1353,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       }
     }
 
+    await updateTodoStatus(plan, todoIdsForRole(plan, plan.role), "failed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, error: lastError instanceof Error ? lastError.message : String(lastError) })
     throw lastError instanceof Error ? lastError : new Error(String(lastError))
   } finally {
     mcpHub.shutdown()
@@ -1329,6 +1476,12 @@ function formatSessionContext(context: SessionContext): string {
         const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, 2000)}` : ""
         const error = entry.error ? `\n  error: ${clipContextText(entry.error, 1200)}` : ""
         lines.push(`${label}${summary}${error}`)
+      } else if (entry.type === "todo") {
+        const label = `- todo${entry.phase ? `/${entry.phase}` : ""}${entry.role ? ` ${entry.role}` : ""} (${entry.status})`
+        const title = entry.title ? `\n  task: ${clipContextText(entry.title, 600)}` : ""
+        const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, 1200)}` : ""
+        const error = entry.error ? `\n  error: ${clipContextText(entry.error, 1200)}` : ""
+        lines.push(`${label}${title}${summary}${error}`)
       } else if (entry.type === "handoff") {
         const label = `- handoff${entry.trigger ? ` (${entry.trigger})` : ""}`
         const focus = entry.focus ? `\n  focus: ${clipContextText(entry.focus, 400)}` : ""

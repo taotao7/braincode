@@ -164,13 +164,14 @@ The two paths normalize into the same shape:
 ```ts
 type AgentRoutingPlan = {
   primaryRole: RoutedAgentRole
-  workers: AgentWorkerPlan[]    // { role, goal, reason }
+  workers: AgentWorkerPlan[]    // { role, goal, reason, todoIds }
+  todos: AgentTodoItem[]        // checkable tasks assigned to routed roles
   requiresReview: boolean
   reason: string
 }
 ```
 
-`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan` by resolving its model + Pi model summary via `createRuntimeWorkerPlan`. The final `RuntimePlan` is what the rest of the orchestrator consumes.
+`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan` by resolving its model + Pi model summary via `createRuntimeWorkerPlan`. It also builds the runtime todo list, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
 If you add a new role:
 
@@ -244,15 +245,18 @@ The TUI (`apps/cli`) drives the BrainPet status panel and live progress display 
 ```ts
 type WorkerLifecycleEvent =
   | { type: "worker_start"; role: RoutedAgentRole; goal: string;
-      phase: "support" | "review"; modelId: string }
+      phase: "support" | "review"; modelId: string; todoIds?: string[] }
   | { type: "worker_end";   role: RoutedAgentRole;
       phase: "support" | "review";
-      status: "completed" | "failed"; summary?: string; error?: string }
+      status: "completed" | "failed"; summary?: string; error?: string;
+      todoIds?: string[] }
 ```
 
 Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` after the result is normalized. The CLI uses these to populate the spawn/finish lines under BrainPet and to drive the queued-tasks list.
 
-When you add a new lifecycle moment that the UI should know about, prefer extending `WorkerLifecycleEvent` over leaking a new callback through the `AgentRunRequest`. One typed stream is easier to render than five callbacks.
+- **`onPlan` / `TodoLifecycleEvent`** from `AgentRunRequest` — Braincode-level todo planning and status updates. `onPlan` gives the UI the initial todo list; `TodoLifecycleEvent` moves each item through pending/running/completed/blocked/failed as the primary, support workers, and review workers finish.
+
+When you add a new lifecycle moment that the UI should know about, prefer extending an existing typed event (`AgentEvent`, `WorkerLifecycleEvent`, or `TodoLifecycleEvent`) before adding another callback surface.
 
 ## Multi-agent runs: `/team` and the forced-roles path
 
