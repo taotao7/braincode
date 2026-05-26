@@ -772,11 +772,27 @@ export type SessionContextEntry =
       error: string;
       attempt?: number;
       willFallback?: boolean;
+    }
+  | {
+      type: "handoff";
+      timestamp?: number;
+      summary: string;
+      focus?: string;
+      trigger?: "manual" | "auto";
     };
+
+export type SessionHandoffSnapshot = {
+  summary: string;
+  timestamp?: number;
+  focus?: string;
+  trigger?: "manual" | "auto";
+  fresh: boolean;
+};
 
 export type SessionContext = SessionSummary & {
   entries: SessionContextEntry[];
   truncated: boolean;
+  latestHandoff?: SessionHandoffSnapshot;
 };
 
 export async function listSessions(
@@ -896,6 +912,8 @@ export async function readSessionContext(
 
   const entries: SessionContextEntry[] = [];
   let currentRun: Extract<SessionContextEntry, { type: "run" }> | undefined;
+  let latestHandoffEntry: Extract<SessionContextEntry, { type: "handoff" }> | undefined;
+  let handoffSupersededByActivity = false;
   const text = await Bun.file(target.path).text();
   for (const line of text.split("\n")) {
     const trimmedLine = line.trim();
@@ -923,6 +941,7 @@ export async function readSessionContext(
         status: "incomplete",
         attempt,
       };
+      if (latestHandoffEntry) handoffSupersededByActivity = true;
     } else if (record.type === "run_end") {
       const entry: Extract<SessionContextEntry, { type: "run" }> = {
         ...(currentRun ?? { type: "run", status: "completed" as const }),
@@ -972,15 +991,41 @@ export async function readSessionContext(
         error: stringField(record, "error") ?? "unknown worker error",
         attempt,
       });
+    } else if (record.type === "handoff") {
+      const summary = stringField(record, "summary");
+      if (summary) {
+        const trigger = record.trigger === "manual" || record.trigger === "auto" ? record.trigger : undefined;
+        latestHandoffEntry = {
+          type: "handoff",
+          timestamp,
+          summary,
+          focus: stringField(record, "focus"),
+          trigger,
+        };
+        handoffSupersededByActivity = false;
+        entries.push(latestHandoffEntry);
+      }
     }
   }
-  if (currentRun) entries.push(currentRun);
+  if (currentRun) {
+    entries.push(currentRun);
+    if (latestHandoffEntry) handoffSupersededByActivity = true;
+  }
 
   const bounded = Math.max(1, Math.floor(maxEntries));
   const runEntries = entries.filter((entry): entry is Extract<SessionContextEntry, { type: "run" }> => entry.type === "run");
   const latestRun = [...runEntries].reverse()[0];
   const latestError = [...entries].reverse().find((entry): entry is Extract<SessionContextEntry, { type: "error" }> => entry.type === "error");
   const firstPrompt = runEntries.find((entry) => entry.prompt)?.prompt;
+  const latestHandoff: SessionHandoffSnapshot | undefined = latestHandoffEntry
+    ? {
+        summary: latestHandoffEntry.summary,
+        timestamp: latestHandoffEntry.timestamp,
+        focus: latestHandoffEntry.focus,
+        trigger: latestHandoffEntry.trigger,
+        fresh: !handoffSupersededByActivity,
+      }
+    : undefined;
   return {
     ...target,
     prompt: target.prompt ?? firstPrompt,
@@ -990,6 +1035,7 @@ export async function readSessionContext(
     status: target.status === "incomplete" ? latestRun?.status ?? target.status : target.status,
     entries: entries.slice(-bounded),
     truncated: entries.length > bounded,
+    latestHandoff,
   };
 }
 

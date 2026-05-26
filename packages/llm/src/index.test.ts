@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, toBraincodeModel } from "./index"
+import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, testModelConnection, toBraincodeModel, type BraincodeModel } from "./index"
 
 test("listBuiltInProviders exposes Pi providers", () => {
   expect(listBuiltInProviders()).toContain("anthropic")
@@ -52,4 +52,34 @@ test("resolvePiModel maps legacy OpenAI chat completions API id", () => {
   })
 
   expect(piModel.api).toBe("openai-completions")
+})
+
+test("testModelConnection returns a diagnostic result for unsupported locations", async () => {
+  const originalFetch = globalThis.fetch
+  const model: BraincodeModel = {
+    id: "clipro/gemini-3.1-pro-low",
+    provider: "clipro",
+    modelId: "gemini-3.1-pro-low",
+    name: "Gemini 3.1 Pro Low",
+    baseUrl: "https://example.test/v1",
+    contextWindow: 128000,
+    supportsTools: true,
+  }
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: { message: "User location is not supported for the API use." } }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+
+  try {
+    const result = await testModelConnection(model, "test-key", "high")
+
+    expect(result.reachable).toBe(false)
+    expect(result.failureKind).toBe("unsupported-location")
+    expect(result.detail).toContain("User location is not supported")
+    expect(result.message).toContain("request location is not supported")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

@@ -143,6 +143,75 @@ test("expandPromptReferences inlines compact session references", async () => {
   }
 })
 
+test("expandPromptReferences reuses a cached handoff brief without re-summarizing", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-cache-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-cache-project-test-"))
+  try {
+    await appendSessionRecord("handoff-cache-test", {
+      type: "run_start",
+      prompt: "earlier task",
+      plan: { brain: { id: "brain" }, role: "coding" },
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("handoff-cache-test", {
+      type: "run_end",
+      summary: "earlier summary",
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("handoff-cache-test", {
+      type: "handoff",
+      timestamp: Date.now(),
+      summary: "BRIEF_MARKER cached handoff bullets",
+      trigger: "manual",
+    }, home)
+
+    const result = await expandPromptReferences("continue from @@handoff-cache-test", projectRoot, home)
+
+    expect(result.references[0]?.kind).toBe("session")
+    expect(result.prompt).toContain("handoff brief")
+    expect(result.prompt).toContain("BRIEF_MARKER cached handoff bullets")
+    expect(result.prompt).not.toContain("compact session context only")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("expandPromptReferences regenerates a handoff if newer activity supersedes the cached brief", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-stale-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-stale-project-test-"))
+  try {
+    await appendSessionRecord("handoff-stale-test", {
+      type: "handoff",
+      timestamp: Date.now() - 1000,
+      summary: "STALE_MARKER older brief",
+      trigger: "manual",
+    }, home)
+    await appendSessionRecord("handoff-stale-test", {
+      type: "run_start",
+      prompt: "new activity after handoff",
+      plan: { brain: { id: "brain" }, role: "coding" },
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("handoff-stale-test", {
+      type: "run_end",
+      summary: "new activity summary",
+      attempt: 1,
+    }, home)
+
+    const result = await expandPromptReferences("continue from @@handoff-stale-test", projectRoot, home)
+
+    // ensureSessionHandoff will attempt to regenerate; without API keys in the test env it throws.
+    // The fallback path uses formatSessionContext, which exposes the mechanical context marker
+    // and does NOT inline the stale brief as if it were fresh.
+    expect(result.prompt).toContain("compact session context only")
+    expect(result.prompt).not.toContain("handoff brief:\nSession handoff-stale-test")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("planRuntimeFromConfig loads settings, brain, and model without executing a provider call", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-test-"))
   try {

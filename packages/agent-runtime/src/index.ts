@@ -1213,6 +1213,69 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
 }
 
+export const HANDOFF_SUMMARY_PROMPT = [
+  "You are producing a handoff brief so the next agent can continue this session.",
+  "Read the prior turns of this session and output a concise brief covering:",
+  "  1. The user's overall goal.",
+  "  2. Key actions, decisions, and findings so far.",
+  "  3. Current state / progress.",
+  "  4. What remains to be done or any open questions.",
+  "Format as short bullet points. Do not narrate that you are summarizing — output only the brief.",
+].join("\n")
+
+export type EnsureSessionHandoffOptions = {
+  focus?: string
+  force?: boolean
+  trigger?: "manual" | "auto"
+}
+
+export type EnsureSessionHandoffResult = {
+  summary: string
+  reused: boolean
+  trigger: "manual" | "auto"
+  timestamp: number
+}
+
+export async function ensureSessionHandoff(
+  sessionId: string,
+  options: EnsureSessionHandoffOptions = {},
+  home?: string,
+): Promise<EnsureSessionHandoffResult> {
+  const trigger = options.trigger ?? "auto"
+  if (!options.force) {
+    const context = await readSessionContext(sessionId, home)
+    if (context?.latestHandoff?.fresh) {
+      return {
+        summary: context.latestHandoff.summary,
+        reused: true,
+        trigger: context.latestHandoff.trigger ?? trigger,
+        timestamp: context.latestHandoff.timestamp ?? Date.now(),
+      }
+    }
+  }
+  const prompt = options.focus
+    ? `${HANDOFF_SUMMARY_PROMPT}\n\nExtra focus requested by the user: ${options.focus}`
+    : HANDOFF_SUMMARY_PROMPT
+  const result = await executePromptFromConfig({ prompt, sessionId }, home)
+  const summary = (result.summary ?? "").trim()
+  if (!summary) {
+    throw new Error("Handoff summarization returned no text.")
+  }
+  const timestamp = Date.now()
+  await appendSessionRecord(
+    sessionId,
+    {
+      type: "handoff",
+      timestamp,
+      summary,
+      focus: options.focus,
+      trigger,
+    },
+    home,
+  )
+  return { summary, reused: false, trigger, timestamp }
+}
+
 export type PromptReference = {
   token: string
   path: string
@@ -1266,6 +1329,10 @@ function formatSessionContext(context: SessionContext): string {
         const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, 2000)}` : ""
         const error = entry.error ? `\n  error: ${clipContextText(entry.error, 1200)}` : ""
         lines.push(`${label}${summary}${error}`)
+      } else if (entry.type === "handoff") {
+        const label = `- handoff${entry.trigger ? ` (${entry.trigger})` : ""}`
+        const focus = entry.focus ? `\n  focus: ${clipContextText(entry.focus, 400)}` : ""
+        lines.push(`${label}${focus}\n  summary: ${clipContextText(entry.summary, MAX_SESSION_FIELD_CHARS)}`)
       } else {
         lines.push(`- error${entry.attempt ? ` attempt ${entry.attempt}` : ""}: ${clipContextText(entry.error, 1200)}`)
       }
@@ -1279,6 +1346,7 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
   const references: PromptReference[] = []
   const tokens = new Map<string, PromptReference>()
   const sessionContexts = new Map<string, SessionContext>()
+  const sessionBriefs = new Map<string, string>()
   const pattern = /(^|\s)(@@?)([^\s@]+)/g
   let match: RegExpExecArray | null
   while ((match = pattern.exec(prompt)) !== null) {
@@ -1299,6 +1367,13 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
       tokens.set(token, ref)
       sessionContexts.set(token, context)
       references.push(ref)
+      try {
+        const handoff = await ensureSessionHandoff(context.sessionId, { trigger: "auto" }, home)
+        sessionBriefs.set(token, handoff.summary)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        debugLog("expandPromptReferences", `handoff for @@${context.sessionId} failed, falling back to mechanical context`, { error: detail })
+      }
       continue
     }
 
@@ -1345,8 +1420,16 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
       const rel = relativePath(projectRoot, ref.path) || ref.path
       sections.push(`Image ${ref.token} attached at ${rel}.`)
     } else if (ref.kind === "session") {
+      const brief = sessionBriefs.get(ref.token)
       const context = sessionContexts.get(ref.token)
-      sections.push(context ? `Session reference ${ref.token}:\n${formatSessionContext(context)}` : `Session reference ${ref.token} could not be inlined.`)
+      if (brief) {
+        const header = context ? `Session ${context.sessionId} (status: ${context.status})` : `Session ${ref.token.slice(2)}`
+        sections.push(`Session reference ${ref.token} — handoff brief:\n${header}\n\n${brief}`)
+      } else if (context) {
+        sections.push(`Session reference ${ref.token}:\n${formatSessionContext(context)}`)
+      } else {
+        sections.push(`Session reference ${ref.token} could not be inlined.`)
+      }
     } else {
       sections.push(`Reference ${ref.token} could not be inlined: ${ref.reason ?? "unknown"}.`)
     }

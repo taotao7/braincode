@@ -24,7 +24,11 @@ export type ModelConnectionTestResult = {
   provider: string
   reachable: boolean
   message: string
+  failureKind?: ModelConnectionFailureKind
+  detail?: string
 }
+
+export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
 
 export type ModelResolutionResult = {
   braincodeModel: BraincodeModel
@@ -121,37 +125,74 @@ export function toOpenAICompatibleBraincodeModel(input: { provider: string; base
 
 export async function testModelConnection(model: BraincodeModel, apiKey?: string, thinkingLevel?: ModelThinkingLevel): Promise<ModelConnectionTestResult> {
   if (!apiKey) {
-    throw new Error(`Missing API key for provider '${model.provider}'`)
+    return connectionFailure(model, `Missing API key for provider '${model.provider}'`)
   }
 
   const reasoning = thinkingLevel && thinkingLevel !== "off" ? (thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
 
-  if (!model.baseUrl) {
-    const { piModel } = resolvePiModel(model)
-    await completeSimple(
-      piModel,
-      {
-        systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
-        messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }],
-      },
-      { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
-    )
-    return {
-      modelId: model.id,
-      provider: model.provider,
-      reachable: true,
-      message: thinkingLevel ? `Model generated a test response successfully (thinking=${thinkingLevel}).` : "Model generated a test response successfully.",
+  try {
+    if (!model.baseUrl) {
+      const { piModel } = resolvePiModel(model)
+      await completeSimple(
+        piModel,
+        {
+          systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
+          messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }],
+        },
+        { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
+      )
+      return connectionSuccess(model, thinkingLevel)
     }
+
+    await testOpenAICompatibleGeneration(model, apiKey, thinkingLevel)
+    return connectionSuccess(model, thinkingLevel)
+  } catch (error) {
+    return connectionFailure(model, error)
   }
+}
 
-  await testOpenAICompatibleGeneration(model, apiKey, thinkingLevel)
-
+function connectionSuccess(model: BraincodeModel, thinkingLevel?: ModelThinkingLevel): ModelConnectionTestResult {
   return {
     modelId: model.id,
     provider: model.provider,
     reachable: true,
     message: thinkingLevel ? `Model generated a test response successfully (thinking=${thinkingLevel}).` : "Model generated a test response successfully.",
   }
+}
+
+function connectionFailure(model: BraincodeModel, error: unknown): ModelConnectionTestResult {
+  const detail = error instanceof Error ? error.message : String(error)
+  const failureKind = classifyConnectionFailure(detail)
+  return {
+    modelId: model.id,
+    provider: model.provider,
+    reachable: false,
+    failureKind,
+    detail,
+    message: explainConnectionFailure(failureKind, detail),
+  }
+}
+
+function classifyConnectionFailure(message: string): ModelConnectionFailureKind {
+  if (/missing api key/i.test(message)) return "missing-api-key"
+  if (/user location is not supported|location.*not supported|unsupported.*region|region.*unsupported/i.test(message)) return "unsupported-location"
+  if (/\b(401|403)\b|unauthorized|forbidden|invalid api key|incorrect api key|permission denied/i.test(message)) return "auth"
+  if (/\b429\b|rate limit|quota exceeded|too many requests/i.test(message)) return "rate-limit"
+  if (/empty response|invalid response|response must contain/i.test(message)) return "invalid-response"
+  if (/fetch failed|network|timeout|timed out|econnrefused|enotfound|econnreset/i.test(message)) return "network"
+  return "unknown"
+}
+
+function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: string): string {
+  if (kind === "missing-api-key") return detail
+  if (kind === "unsupported-location") {
+    return "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy."
+  }
+  if (kind === "auth") return "The provider rejected the request. Check the API key, provider account permissions, and model access."
+  if (kind === "rate-limit") return "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model."
+  if (kind === "invalid-response") return "The provider responded, but the test response was empty or malformed."
+  if (kind === "network") return "The provider could not be reached. Check the base URL, network, and local proxy settings."
+  return detail
 }
 
 async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string, thinkingLevel?: ModelThinkingLevel): Promise<void> {

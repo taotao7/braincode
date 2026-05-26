@@ -3,7 +3,7 @@ import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
-import { executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
+import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
 import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
@@ -50,7 +50,7 @@ const COMMANDS: CommandDefinition[] = [
   { name: "sessions", label: "/sessions", hint: "Browse recent sessions" },
   { name: "resume", label: "/resume", hint: "Resume a session by id", insert: "/resume " },
   { name: "new", label: "/new", hint: "Start a fresh session (clears transcript)" },
-  { name: "handoff", label: "/handoff", hint: "Fork a new session, carrying a brief of the current one", insert: "/handoff " },
+  { name: "handoff", label: "/handoff", hint: "Fork a new session (or pass <session-id> to summarize another)", insert: "/handoff " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
   { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
   { name: "skill", label: "/skill", hint: "List project skills (.agents/skill)" },
@@ -629,41 +629,54 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       appendItem({ kind: "error", text: "Cannot hand off while a task is running." })
       return
     }
-    if (items.length === 0) {
+
+    const tokens = argument.trim().split(/\s+/).filter(Boolean)
+    let targetSessionId = sessionId
+    let focus = argument.trim()
+    let mode: "current" | "other" = "current"
+    if (tokens.length > 0 && isLikelySessionId(tokens[0]!)) {
+      const candidate = tokens[0]!
+      try {
+        const sessions = await listSessions(undefined, 100)
+        const hit = sessions.find((entry) => entry.sessionId === candidate || entry.sessionId.startsWith(candidate))
+        if (!hit) {
+          appendItem({ kind: "error", text: `Session '${candidate}' not found.` })
+          return
+        }
+        targetSessionId = hit.sessionId
+        focus = tokens.slice(1).join(" ").trim()
+        mode = "other"
+      } catch (error) {
+        appendItem({ kind: "error", text: `Handoff lookup failed: ${formatError(error)}` })
+        return
+      }
+    }
+
+    if (mode === "current" && items.length === 0) {
       appendItem({ kind: "error", text: "Nothing to hand off yet — current session is empty." })
       return
     }
 
-    const previousId = sessionId
-    const focus = argument.trim()
-    const summarizePrompt = [
-      "You are producing a handoff brief so the next agent can continue this session.",
-      "Read the prior turns of this session and output a concise brief covering:",
-      "  1. The user's overall goal.",
-      "  2. Key actions, decisions, and findings so far.",
-      "  3. Current state / progress.",
-      "  4. What remains to be done or any open questions.",
-      "Format as short bullet points. Do not narrate that you are summarizing — output only the brief.",
-      focus ? `\nExtra focus requested by the user: ${focus}` : "",
-    ].filter(Boolean).join("\n")
-
+    const previousId = targetSessionId
     const statusId = crypto.randomUUID()
     setItems((previous) => [
       ...previous,
       { id: crypto.randomUUID(), kind: "user", text: focus ? `/handoff ${focus}` : "/handoff" },
-      { id: statusId, kind: "status", text: "Summarizing this session for handoff..." },
+      {
+        id: statusId,
+        kind: "status",
+        text: mode === "other"
+          ? `Summarizing session ${previousId.slice(0, 8)} for handoff...`
+          : "Summarizing this session for handoff...",
+      },
     ])
     applyDraftChange("")
     setRunning(true)
 
     let summary = ""
     try {
-      const result = await executePromptFromConfig({
-        prompt: summarizePrompt,
-        sessionId: previousId,
-        projectRoot,
-      })
-      summary = (result.summary ?? "").trim()
+      const result = await ensureSessionHandoff(previousId, { focus: focus || undefined, force: true, trigger: "manual" })
+      summary = result.summary
     } catch (error) {
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
@@ -674,11 +687,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     setRunning(false)
 
-    if (!summary) {
+    if (mode === "other") {
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
-        { id: crypto.randomUUID(), kind: "error", text: "Summarization returned no text — aborting handoff." },
+        { id: crypto.randomUUID(), kind: "panel", text: `Handoff brief for session ${previousId.slice(0, 8)}\n\n${summary}` },
       ])
+      flash(`Handoff brief written to ${previousId.slice(0, 8)}`)
       return
     }
 
@@ -1926,6 +1940,10 @@ function describeHealth(entry: McpPanelEntry): string {
 function truncate(text: string, limit: number): string {
   if (text.length <= limit) return text
   return `${text.slice(0, limit - 1)}…`
+}
+
+function isLikelySessionId(token: string): boolean {
+  return /^[0-9a-fA-F-]{8,}$/.test(token)
 }
 
 function truncateForStatus(text: string): string {

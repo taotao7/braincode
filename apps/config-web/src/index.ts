@@ -335,7 +335,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
-          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations",
+          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations",
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
           roleLabel_routeBrain: "Router Brain", roleLabel_coding: "Coding", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_research: "Research", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_fastReply: "Fast reply", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
@@ -363,7 +363,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
-          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "联通测试", testing: "测试中", testOk: "联通正常", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认",
+          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认",
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
           roleLabel_routeBrain: "路由大脑", roleLabel_coding: "代码", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_research: "研究", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_fastReply: "快速回复", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
@@ -745,6 +745,29 @@ export const configWebHtml = `<!doctype html>
         renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models"
       }
 
+      function connectionFailureMessage(result) {
+        const failureKeys = {
+          "missing-api-key": "testFailure_missingApiKey",
+          "unsupported-location": "testFailure_unsupportedLocation",
+          auth: "testFailure_auth",
+          "rate-limit": "testFailure_rateLimit",
+          "invalid-response": "testFailure_invalidResponse",
+          network: "testFailure_network",
+        }
+        const failureKey = failureKeys[result?.failureKind]
+        const translated = translations[currentLang][failureKey] || translations.en[failureKey]
+        return translated || result?.message || t("failed")
+      }
+
+      function renderConnectionTestResult(result, resultElement) {
+        const reachable = Boolean(result?.reachable)
+        const detail = !reachable && result?.detail && result.detail !== result.message ? "\\n" + result.detail : ""
+        const message = reachable ? t("testOk") + ": " + result.message : t("failed") + ": " + connectionFailureMessage(result) + detail
+        resultElement.className = "test-result " + (reachable ? "ok" : "fail")
+        resultElement.textContent = message
+        status.textContent = message
+      }
+
       async function testModel(modelId, button, resultElement) {
         const previous = button.textContent
         button.disabled = true
@@ -755,10 +778,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("testing") + " " + modelId
         try {
           const result = await postJson("/api/models/test", { modelId })
-          const message = t("testOk") + ": " + result.message
-          resultElement.className = "test-result ok"
-          resultElement.textContent = message
-          status.textContent = message
+          renderConnectionTestResult(result, resultElement)
         } catch (error) {
           const message = t("failed") + ": " + String(error?.message || error)
           resultElement.className = "test-result fail"
@@ -782,10 +802,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("testing") + " " + model.id
         try {
           const result = await postJson("/api/models/test-config", { model, apiKey: manualApiKeyInput.value.trim(), thinkingLevel: manualThinkingInput.value })
-          const message = t("testOk") + ": " + result.message
-          manualTestResult.className = "test-result ok"
-          manualTestResult.textContent = message
-          status.textContent = message
+          renderConnectionTestResult(result, manualTestResult)
         } catch (error) {
           const message = t("failed") + ": " + String(error?.message || error)
           manualTestResult.className = "test-result fail"
@@ -815,10 +832,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("testing") + " " + role + " / " + modelId + " (" + thinkingLevel + ")"
         try {
           const result = await postJson("/api/models/test", { modelId, thinkingLevel })
-          const message = t("testOk") + ": " + result.message
-          resultElement.className = "test-result ok"
-          resultElement.textContent = message
-          status.textContent = message
+          renderConnectionTestResult(result, resultElement)
         } catch (error) {
           const message = t("failed") + ": " + String(error?.message || error)
           resultElement.className = "test-result fail"
