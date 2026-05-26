@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { createBraincodeAgentRuntime, executePromptFromConfig, planRuntimeFromConfig, runConfiguredHooks, selectRuntimeModel } from "./index"
+import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
+import { createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, planRuntimeFromConfig, runConfiguredHooks, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -107,6 +107,36 @@ test("runConfiguredHooks executes trusted project command hooks", async () => {
     expect(result.blockedReason).toBeUndefined()
     expect(result.additionalContext).toEqual(["checked hello"])
     expect(result.records[0]?.status).toBe("completed")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("expandPromptReferences inlines compact session references", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-session-ref-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-session-ref-project-test-"))
+  try {
+    await appendSessionRecord("session-ref-test", {
+      type: "run_start",
+      prompt: "old task",
+      plan: { brain: { id: "brain" }, role: "coding" },
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("session-ref-test", {
+      type: "run_end",
+      summary: "old summary",
+      attempt: 1,
+    }, home)
+
+    const result = await expandPromptReferences("continue from @@session-ref-test", projectRoot, home)
+
+    expect(result.references[0]?.kind).toBe("session")
+    expect(result.references[0]?.sessionId).toBe("session-ref-test")
+    expect(result.prompt).toContain("Session reference @@session-ref-test")
+    expect(result.prompt).toContain("old task")
+    expect(result.prompt).toContain("old summary")
+    expect(result.prompt).toContain("compact session context only")
   } finally {
     await rm(home, { recursive: true, force: true })
     await rm(projectRoot, { recursive: true, force: true })

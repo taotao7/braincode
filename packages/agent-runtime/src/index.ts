@@ -7,7 +7,7 @@ export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { Model } from "@earendil-works/pi-ai"
 import { formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
@@ -651,6 +651,34 @@ export async function planRuntimeFromConfig(prompt: string, home?: string): Prom
   return buildRuntimePlan(prompt, home, false)
 }
 
+export type ResolvedPetRuntime = {
+  model: BraincodeModel
+  apiKey: string
+  policy: ModelPolicy
+  systemPrompt: string
+}
+
+export async function resolvePetRuntime(home?: string): Promise<ResolvedPetRuntime | null> {
+  try {
+    const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
+    const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
+    const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
+    const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
+    const policy = brain.roles.pet
+    if (!policy?.modelId) return null
+    const { selection, apiKey } = await selectRuntimeModelWithApiKey(policy, models as BraincodeModel[], home)
+    return {
+      model: selection.configured,
+      apiKey,
+      policy,
+      systemPrompt: getAgentRoleSystemPrompt("pet", policy),
+    }
+  } catch (error) {
+    debugLog("runtime", "pet runtime unavailable", { error: error instanceof Error ? error.message : String(error) })
+    return null
+  }
+}
+
 function extractAssistantText(messages: unknown[]): string {
   const assistantMessages = messages.filter((message) => {
     return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "assistant"
@@ -1091,7 +1119,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   if (promptHooks.blockedReason) {
     throw new Error(`UserPromptSubmit hook blocked the prompt: ${promptHooks.blockedReason}`)
   }
-  const expanded = await expandPromptReferences(request.prompt, cwd)
+  const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
   const modelDocument = await readModels(home)
@@ -1188,7 +1216,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 export type PromptReference = {
   token: string
   path: string
-  kind: "text" | "image" | "missing"
+  kind: "text" | "image" | "session" | "missing"
+  sessionId?: string
   size?: number
   reason?: string
 }
@@ -1200,6 +1229,8 @@ export type ExpandedPromptResult = {
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"])
 const MAX_INLINE_FILE_BYTES = 64 * 1024
+const MAX_INLINE_SESSION_CHARS = 24 * 1024
+const MAX_SESSION_FIELD_CHARS = 6 * 1024
 
 function inlineCodeFence(path: string): string {
   const dot = path.lastIndexOf(".")
@@ -1208,16 +1239,71 @@ function inlineCodeFence(path: string): string {
   return ext.replace(/[^a-z0-9]/g, "")
 }
 
-export async function expandPromptReferences(prompt: string, projectRoot: string): Promise<ExpandedPromptResult> {
+function clipContextText(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  return `${text.slice(0, Math.max(0, limit - 1))}…`
+}
+
+function formatSessionContext(context: SessionContext): string {
+  const lines: string[] = [
+    `Session ${context.sessionId}`,
+    `Status: ${context.status}`,
+    `Updated: ${new Date(context.updatedAt).toISOString()}`,
+    "Scope: compact session context only; full transcripts and private worker internals are not included.",
+  ]
+  if (context.prompt) lines.push(`Initial prompt:\n${clipContextText(context.prompt, MAX_SESSION_FIELD_CHARS)}`)
+  if (context.summary) lines.push(`Latest summary:\n${clipContextText(context.summary, MAX_SESSION_FIELD_CHARS)}`)
+  if (context.entries.length > 0) {
+    lines.push("Relevant records:")
+    for (const entry of context.entries) {
+      if (entry.type === "run") {
+        const label = `- run${entry.attempt ? ` attempt ${entry.attempt}` : ""} (${entry.status}${entry.role ? `, ${entry.role}` : ""})`
+        const prompt = entry.prompt ? `\n  prompt: ${clipContextText(entry.prompt.replace(/\s+/g, " ").trim(), 600)}` : ""
+        const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, MAX_SESSION_FIELD_CHARS)}` : ""
+        lines.push(`${label}${prompt}${summary}`)
+      } else if (entry.type === "worker") {
+        const label = `- worker${entry.phase ? `/${entry.phase}` : ""}${entry.role ? ` ${entry.role}` : ""} (${entry.status})`
+        const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, 2000)}` : ""
+        const error = entry.error ? `\n  error: ${clipContextText(entry.error, 1200)}` : ""
+        lines.push(`${label}${summary}${error}`)
+      } else {
+        lines.push(`- error${entry.attempt ? ` attempt ${entry.attempt}` : ""}: ${clipContextText(entry.error, 1200)}`)
+      }
+    }
+    if (context.truncated) lines.push("- earlier records omitted")
+  }
+  return clipContextText(lines.join("\n"), MAX_INLINE_SESSION_CHARS)
+}
+
+export async function expandPromptReferences(prompt: string, projectRoot: string, home?: string): Promise<ExpandedPromptResult> {
   const references: PromptReference[] = []
   const tokens = new Map<string, PromptReference>()
-  const pattern = /(^|\s)@([^\s@]+)/g
+  const sessionContexts = new Map<string, SessionContext>()
+  const pattern = /(^|\s)(@@?)([^\s@]+)/g
   let match: RegExpExecArray | null
   while ((match = pattern.exec(prompt)) !== null) {
-    const rawPath = match[2]
-    if (!rawPath || rawPath === "image" || rawPath.startsWith("image:")) continue
-    const token = `@${rawPath}`
+    const marker = match[2]
+    const rawTarget = match[3]
+    if (!marker || !rawTarget) continue
+    const token = `${marker}${rawTarget}`
     if (tokens.has(token)) continue
+    if (marker === "@@") {
+      const context = await readSessionContext(rawTarget, home)
+      if (!context) {
+        const ref: PromptReference = { token, path: rawTarget, kind: "missing", reason: "session not found" }
+        tokens.set(token, ref)
+        references.push(ref)
+        continue
+      }
+      const ref: PromptReference = { token, path: context.path, kind: "session", sessionId: context.sessionId }
+      tokens.set(token, ref)
+      sessionContexts.set(token, context)
+      references.push(ref)
+      continue
+    }
+
+    const rawPath = rawTarget
+    if (rawPath === "image" || rawPath.startsWith("image:")) continue
     const absolute = isAbsolute(rawPath) ? rawPath : resolvePath(projectRoot, rawPath)
     const file = Bun.file(absolute)
     if (!(await file.exists())) {
@@ -1258,6 +1344,9 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
     } else if (ref.kind === "image") {
       const rel = relativePath(projectRoot, ref.path) || ref.path
       sections.push(`Image ${ref.token} attached at ${rel}.`)
+    } else if (ref.kind === "session") {
+      const context = sessionContexts.get(ref.token)
+      sections.push(context ? `Session reference ${ref.token}:\n${formatSessionContext(context)}` : `Session reference ${ref.token} could not be inlined.`)
     } else {
       sections.push(`Reference ${ref.token} could not be inlined: ${ref.reason ?? "unknown"}.`)
     }
@@ -1267,4 +1356,3 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
     references,
   }
 }
-

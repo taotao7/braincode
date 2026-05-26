@@ -222,6 +222,93 @@ function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
   } as Model<Api>
 }
 
+export type PetCompletionInput = {
+  model: BraincodeModel
+  apiKey: string
+  systemPrompt: string
+  userPrompt: string
+  thinkingLevel?: ModelThinkingLevel
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxTokens?: number
+}
+
+export async function callPetCompletion(input: PetCompletionInput): Promise<string> {
+  const reasoning = input.thinkingLevel && input.thinkingLevel !== "off" ? (input.thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
+  const timeoutMs = input.timeoutMs ?? 12000
+  const maxTokens = input.maxTokens ?? 200
+
+  if (!input.model.baseUrl) {
+    const { piModel } = resolvePiModel(input.model)
+    const result = await completeSimple(
+      piModel,
+      {
+        systemPrompt: input.systemPrompt,
+        messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }],
+      },
+      { apiKey: input.apiKey, maxTokens, timeoutMs, maxRetries: 0, cacheRetention: "none", reasoning },
+    )
+    const text = typeof result === "string" ? result : extractCompletionText(result)
+    if (!text || !text.trim()) {
+      throw new Error("Pet completion returned an empty response")
+    }
+    return text.trim()
+  }
+
+  const baseUrl = normalizeOpenAICompatibleBaseUrl(input.model.baseUrl)
+  const reasoningEffort = mapThinkingLevelToReasoningEffort(input.thinkingLevel)
+  const controller = new AbortController()
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs)
+  const linkedSignal = input.signal
+  const onAbort = () => controller.abort()
+  if (linkedSignal) {
+    if (linkedSignal.aborted) controller.abort()
+    else linkedSignal.addEventListener("abort", onAbort, { once: true })
+  }
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${input.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: input.model.modelId,
+        messages: [
+          { role: "system", content: input.systemPrompt },
+          { role: "user", content: input.userPrompt },
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.2,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      }),
+      signal: controller.signal,
+    })
+    const body = await response.json().catch(() => undefined)
+    if (!response.ok) {
+      const message = typeof body?.error?.message === "string" ? body.error.message : `HTTP ${response.status}`
+      throw new Error(`Pet completion failed: ${message}`)
+    }
+    const text = body?.choices?.[0]?.message?.content
+    if (typeof text !== "string" || !text.trim()) {
+      throw new Error("Pet completion returned an empty response")
+    }
+    return text.trim()
+  } finally {
+    clearTimeout(timeoutHandle)
+    if (linkedSignal) linkedSignal.removeEventListener("abort", onAbort)
+  }
+}
+
+function extractCompletionText(result: unknown): string {
+  if (!result || typeof result !== "object") return ""
+  const candidate = (result as { text?: unknown; content?: unknown; message?: { content?: unknown } })
+  if (typeof candidate.text === "string") return candidate.text
+  if (typeof candidate.content === "string") return candidate.content
+  if (candidate.message && typeof candidate.message.content === "string") return candidate.message.content
+  return ""
+}
+
 export function toBraincodeModel(model: Model<Api>): BraincodeModel {
   return {
     id: `${model.provider}/${model.id}`,

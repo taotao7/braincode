@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
-import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -198,4 +198,35 @@ test("appendSessionRecord writes jsonl session records", async () => {
 
   const text = await Bun.file(join(paths.sessions, "test-session.jsonl")).text()
   expect(text.trim()).toContain('"type":"run_start"')
+})
+
+test("readSessionContext returns compact session records", async () => {
+  const home = await makeTempHome()
+
+  await appendSessionRecord("context-session", {
+    type: "run_start",
+    prompt: "implement feature",
+    plan: { brain: { id: "brain" }, role: "coding" },
+    attempt: 1,
+  }, home)
+  await appendSessionRecord("context-session", {
+    type: "worker_end",
+    phase: "support",
+    worker: "research",
+    result: { status: "completed", summary: "found relevant prior work" },
+    attempt: 1,
+  }, home)
+  await appendSessionRecord("context-session", {
+    type: "run_end",
+    summary: "implemented feature",
+    attempt: 1,
+  }, home)
+
+  const context = await readSessionContext("context-", home)
+
+  expect(context?.sessionId).toBe("context-session")
+  expect(context?.prompt).toBe("implement feature")
+  expect(context?.summary).toBe("implemented feature")
+  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "run"])
+  expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("coding")
 })

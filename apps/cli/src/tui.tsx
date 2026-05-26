@@ -10,6 +10,7 @@ import { readClipboardImageOrText } from "./clipboard"
 import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
 import { fuzzyFilter, listProjectFiles } from "./project-files"
 import { BrainPet } from "./brain-pet"
+import { usePetWatcher, type PetWatcherSnapshotItem } from "./pet-watcher"
 
 type TranscriptItem = {
   id: string
@@ -60,6 +61,7 @@ const COMMANDS: CommandDefinition[] = [
 type Overlay =
   | { kind: "command"; filter: string; selected: number }
   | { kind: "file"; filter: string; selected: number; anchor: number }
+  | { kind: "session"; filter: string; selected: number; anchor: number }
   | null
 
 type McpPanelEntry = {
@@ -151,6 +153,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [projectSupport, setProjectSupport] = useState<ProjectSupport | null>(null)
   const [userSupport, setUserSupport] = useState<UserSupport | null>(null)
   const [projectFiles, setProjectFiles] = useState<string[]>([])
+  const [sessionSuggestions, setSessionSuggestions] = useState<SessionSummary[]>([])
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [mcpPanel, setMcpPanel] = useState<McpPanelState | null>(null)
   const [hookPanel, setHookPanel] = useState<HookPanelState | null>(null)
@@ -163,6 +166,21 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const queueRef = useRef<QueuedTask[]>([])
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion((value) => value + 1)
+
+  const petSnapshotItems = useMemo<PetWatcherSnapshotItem[]>(() => {
+    return items.slice(-12).map((item) => ({
+      kind: item.kind,
+      text: item.text,
+      toolName: item.toolName,
+      toolStatus: item.toolStatus,
+      workerStatus: item.workerStatus,
+    }))
+  }, [items])
+  const petState = usePetWatcher({
+    thinking: running,
+    recentItems: petSnapshotItems,
+    queueLength: queueRef.current.length,
+  })
 
   const dynamicCommands = useMemo<CommandDefinition[]>(() => {
     const skills: CommandDefinition[] = []
@@ -212,6 +230,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         setProjectFiles(files)
       } catch (error) {
         appendItem({ kind: "error", text: `Failed to list project files: ${formatError(error)}` })
+      }
+      try {
+        await refreshSessionSuggestions()
+      } catch (error) {
+        appendItem({ kind: "error", text: `Failed to list sessions: ${formatError(error)}` })
       }
     })()
   }, [projectRoot])
@@ -302,6 +325,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     } catch (error) {
       appendItem({ kind: "error", text: `File index failed: ${formatError(error)}` })
     }
+  }
+
+  async function refreshSessionSuggestions(limit = 50): Promise<SessionSummary[]> {
+    const sessions = await listSessions(undefined, limit)
+    setSessionSuggestions(sessions)
+    return sessions
   }
 
   function showAgentsPanel() {
@@ -516,7 +545,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   async function showSessionPanel() {
     let sessions: SessionSummary[]
     try {
-      sessions = await listSessions(undefined, 25)
+      sessions = (await refreshSessionSuggestions(50)).slice(0, 25)
     } catch (error) {
       appendItem({ kind: "error", text: `Sessions failed: ${formatError(error)}` })
       return
@@ -720,6 +749,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ])
     } finally {
       setRunning(false)
+      void refreshSessionSuggestions()
     }
   }
 
@@ -1066,6 +1096,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       applyDraftChange(`${before}${insertion}${tail}`, before.length + insertion.length)
       return true
     }
+    if (overlay.kind === "session") {
+      const matches = filterSessions(sessionSuggestions, overlay.filter, 12)
+      const target = matches[overlay.selected] ?? matches[0]
+      if (!target) {
+        void refreshSessionSuggestions()
+        return false
+      }
+      const before = draft.slice(0, overlay.anchor)
+      const tail = draft.slice(overlay.anchor + 2 + overlay.filter.length)
+      const insertion = `@@${target.sessionId} `
+      applyDraftChange(`${before}${insertion}${tail}`, before.length + insertion.length)
+      return true
+    }
     return false
   }
 
@@ -1210,7 +1253,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (overlay) {
       const total = overlay.kind === "command"
         ? filteredCommandsDynamic(overlay.filter).length
-        : fuzzyFilter(projectFiles, overlay.filter, 12).length
+        : overlay.kind === "file"
+          ? fuzzyFilter(projectFiles, overlay.filter, 12).length
+          : filterSessions(sessionSuggestions, overlay.filter, 12).length
       const moveNext = key.downArrow || (key.ctrl && input === "n")
       const movePrev = key.upArrow || (key.ctrl && input === "p")
       if (total > 0 && (moveNext || movePrev)) {
@@ -1289,6 +1334,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   const commandMatches = overlay?.kind === "command" ? filteredCommandsDynamic(overlay.filter) : []
   const fileMatches = overlay?.kind === "file" ? fuzzyFilter(projectFiles, overlay.filter, 12) : []
+  const sessionMatches = overlay?.kind === "session" ? filterSessions(sessionSuggestions, overlay.filter, 12) : []
   const projectMcpCount = projectSupport?.mcp?.serverNames.length ?? 0
   const userMcpCount = userSupport?.mcp?.serverNames.length ?? 0
   const projectSkillCount = projectSupport?.skills.length ?? 0
@@ -1318,7 +1364,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             <Text key={`logo-${index}`} color="cyan" bold>{line}</Text>
           ))}
           <Box marginTop={1}>
-            <Text color="gray">type a prompt to begin · / for commands · @ for files</Text>
+            <Text color="gray">type a prompt to begin · / for commands · @ for files · @@ for sessions</Text>
           </Box>
         </Box>
       ) : (
@@ -1430,6 +1476,26 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
+      {overlay?.kind === "session" ? (
+        <Box borderStyle="single" borderColor="blue" flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color="blue">Sessions {overlay.filter ? `(@@${overlay.filter})` : ""}</Text>
+          {sessionMatches.length === 0 ? (
+            <Text color="gray">{sessionSuggestions.length === 0 ? "No sessions indexed yet" : "No matches"}</Text>
+          ) : (
+            sessionMatches.map((entry, index) => (
+              <Box key={entry.sessionId} flexDirection="column">
+                <Text color={index === overlay.selected ? "green" : undefined}>
+                  {index === overlay.selected ? "› " : "  "}
+                  {entry.sessionId.slice(0, 8)} · {sessionStatusGlyph(entry.status)} · {formatTimestamp(entry.updatedAt)}{entry.role ? ` · ${entry.role}` : ""}
+                </Text>
+                {entry.prompt ? <Text color="gray">    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 110)}</Text> : null}
+              </Box>
+            ))
+          )}
+          <Text color="gray">Tab / Enter to insert · Esc to dismiss</Text>
+        </Box>
+      ) : null}
+
       <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="column">
         {running ? (
           <Text color="gray">… wait for the current run to finish</Text>
@@ -1450,7 +1516,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         )}
       </Box>
       <Text color="gray">
-        Enter submits · / for commands · @ for files · ↑ edits queued · Ctrl+V pastes image/text · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · @ files · @@ sessions · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color="yellow">
@@ -1460,7 +1526,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       {statusFlash ? <Text color="cyan">{statusFlash}</Text> : null}
       </Box>
       <Box flexDirection="column" marginLeft={2} paddingTop={1}>
-        <BrainPet thinking={running} />
+        <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
       </Box>
     </Box>
   )
@@ -1479,27 +1545,54 @@ function computeOverlay(draft: string, cursor: number, current: Overlay): Overla
     const previous = current?.kind === "command" ? current.selected : 0
     return { kind: "command", filter, selected: Math.max(0, previous) }
   }
-  const atIndex = lastAtIndex(head)
-  if (atIndex !== -1) {
-    const segment = head.slice(atIndex + 1)
+  const ref = lastReferenceTrigger(head)
+  if (ref) {
+    const segment = head.slice(ref.anchor + ref.marker.length)
     if (!segment.includes(" ")) {
+      if (ref.marker === "@@") {
+        const previous = current?.kind === "session" ? current.selected : 0
+        return { kind: "session", filter: segment, selected: previous, anchor: ref.anchor }
+      }
       const previous = current?.kind === "file" ? current.selected : 0
-      return { kind: "file", filter: segment, selected: previous, anchor: atIndex }
+      return { kind: "file", filter: segment, selected: previous, anchor: ref.anchor }
     }
   }
   return null
 }
 
-function lastAtIndex(head: string): number {
+function lastReferenceTrigger(head: string): { anchor: number; marker: "@" | "@@" } | null {
   for (let index = head.length - 1; index >= 0; index--) {
     const ch = head[index]
-    if (ch === " ") return -1
+    if (ch === " ") return null
     if (ch === "@") {
-      if (index === 0 || head[index - 1] === " ") return index
-      return -1
+      if (index > 0 && head[index - 1] === "@") {
+        const anchor = index - 1
+        if (anchor === 0 || head[anchor - 1] === " ") return { anchor, marker: "@@" }
+        return null
+      }
+      if (index === 0 || head[index - 1] === " ") return { anchor: index, marker: "@" }
+      return null
     }
   }
-  return -1
+  return null
+}
+
+function sessionSearchText(entry: SessionSummary): string {
+  return [
+    entry.sessionId,
+    entry.sessionId.slice(0, 8),
+    entry.prompt,
+    entry.summary,
+    entry.role,
+    entry.brainId,
+    entry.status,
+  ].filter(Boolean).join(" ").toLowerCase()
+}
+
+function filterSessions(sessions: SessionSummary[], filter: string, limit: number): SessionSummary[] {
+  if (!filter) return sessions.slice(0, limit)
+  const lower = filter.toLowerCase()
+  return sessions.filter((entry) => sessionSearchText(entry).includes(lower)).slice(0, limit)
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -1638,7 +1731,7 @@ function labelFor(item: TranscriptItem): string {
         default: return "◎"
       }
     }
-    case "queued": return "⏳"
+    case "queued": return "»"
   }
 }
 
@@ -1677,6 +1770,7 @@ function formatHelp(): string {
     "Tips:",
     "  • Start typing / to open the command palette.",
     "  • Use @<path> to attach project files (Tab to accept).",
+    "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n")

@@ -744,6 +744,40 @@ export type SessionSummary = {
   status: "completed" | "failed" | "incomplete";
 };
 
+export type SessionContextEntry =
+  | {
+      type: "run";
+      timestamp?: number;
+      prompt?: string;
+      brainId?: string;
+      role?: string;
+      summary?: string;
+      status: SessionSummary["status"];
+      attempt?: number;
+    }
+  | {
+      type: "worker";
+      timestamp?: number;
+      phase?: string;
+      role?: string;
+      status: "completed" | "failed";
+      summary?: string;
+      error?: string;
+      attempt?: number;
+    }
+  | {
+      type: "error";
+      timestamp?: number;
+      error: string;
+      attempt?: number;
+      willFallback?: boolean;
+    };
+
+export type SessionContext = SessionSummary & {
+  entries: SessionContextEntry[];
+  truncated: boolean;
+};
+
 export async function listSessions(
   home = getBraincodeHome(),
   limit = 25,
@@ -800,6 +834,162 @@ export async function listSessions(
   }
   records.sort((left, right) => right.sortKey - left.sortKey);
   return records.slice(0, limit).map(({ sortKey: _drop, ...rest }) => rest);
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function objectField(record: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = record[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function planFields(plan: unknown): { brainId?: string; role?: string } {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return {};
+  const record = plan as Record<string, unknown>;
+  const brain = objectField(record, "brain");
+  return {
+    brainId: brain ? stringField(brain, "id") : undefined,
+    role: stringField(record, "role"),
+  };
+}
+
+function sessionStatus(value: unknown, fallback: SessionSummary["status"]): SessionSummary["status"] {
+  return value === "completed" || value === "failed" || value === "incomplete" ? value : fallback;
+}
+
+export async function readSessionContext(
+  sessionRef: string,
+  home = getBraincodeHome(),
+  maxEntries = 24,
+): Promise<SessionContext | undefined> {
+  const trimmed = sessionRef.trim();
+  if (!trimmed) return undefined;
+
+  const sessions = await listSessions(home, 100);
+  let target = sessions.find((entry) => entry.sessionId === trimmed)
+    ?? sessions.find((entry) => entry.sessionId.startsWith(trimmed));
+  if (!target && /^[a-zA-Z0-9._-]+$/.test(trimmed)) {
+    const paths = await ensureBraincodeHome(home);
+    const fullPath = join(paths.sessions, `${trimmed}.jsonl`);
+    const file = Bun.file(fullPath);
+    if (await file.exists()) {
+      target = {
+        sessionId: trimmed,
+        path: fullPath,
+        updatedAt: file.lastModified,
+        status: "incomplete",
+      };
+    }
+  }
+  if (!target) return undefined;
+
+  const entries: SessionContextEntry[] = [];
+  let currentRun: Extract<SessionContextEntry, { type: "run" }> | undefined;
+  const text = await Bun.file(target.path).text();
+  for (const line of text.split("\n")) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    let record: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(trimmedLine);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      record = parsed as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const timestamp = numberField(record, "timestamp");
+    const attempt = numberField(record, "attempt");
+    if (record.type === "run_start") {
+      if (currentRun) entries.push(currentRun);
+      const plan = planFields(record.plan);
+      currentRun = {
+        type: "run",
+        timestamp,
+        prompt: stringField(record, "prompt"),
+        brainId: plan.brainId,
+        role: plan.role,
+        status: "incomplete",
+        attempt,
+      };
+    } else if (record.type === "run_end") {
+      const entry: Extract<SessionContextEntry, { type: "run" }> = {
+        ...(currentRun ?? { type: "run", status: "completed" as const }),
+        summary: stringField(record, "summary"),
+        status: "completed",
+        attempt: attempt ?? currentRun?.attempt,
+      };
+      entries.push(entry);
+      currentRun = undefined;
+    } else if (record.type === "run_error") {
+      const error = stringField(record, "error") ?? "unknown error";
+      if (currentRun) {
+        entries.push({
+          ...currentRun,
+          summary: error,
+          status: "failed",
+          attempt: attempt ?? currentRun.attempt,
+        });
+        currentRun = undefined;
+      } else {
+        entries.push({
+          type: "error",
+          timestamp,
+          error,
+          attempt,
+          willFallback: typeof record.willFallback === "boolean" ? record.willFallback : undefined,
+        });
+      }
+    } else if (record.type === "worker_end") {
+      const result = objectField(record, "result");
+      entries.push({
+        type: "worker",
+        timestamp,
+        phase: stringField(record, "phase"),
+        role: stringField(record, "worker"),
+        status: sessionStatus(result?.status, "completed") === "failed" ? "failed" : "completed",
+        summary: result ? stringField(result, "summary") : undefined,
+        attempt,
+      });
+    } else if (record.type === "worker_error") {
+      entries.push({
+        type: "worker",
+        timestamp,
+        phase: stringField(record, "phase"),
+        role: stringField(record, "worker"),
+        status: "failed",
+        error: stringField(record, "error") ?? "unknown worker error",
+        attempt,
+      });
+    }
+  }
+  if (currentRun) entries.push(currentRun);
+
+  const bounded = Math.max(1, Math.floor(maxEntries));
+  const runEntries = entries.filter((entry): entry is Extract<SessionContextEntry, { type: "run" }> => entry.type === "run");
+  const latestRun = [...runEntries].reverse()[0];
+  const latestError = [...entries].reverse().find((entry): entry is Extract<SessionContextEntry, { type: "error" }> => entry.type === "error");
+  const firstPrompt = runEntries.find((entry) => entry.prompt)?.prompt;
+  return {
+    ...target,
+    prompt: target.prompt ?? firstPrompt,
+    brainId: target.brainId ?? latestRun?.brainId,
+    role: target.role ?? latestRun?.role,
+    summary: target.summary ?? latestRun?.summary ?? latestError?.error,
+    status: target.status === "incomplete" ? latestRun?.status ?? target.status : target.status,
+    entries: entries.slice(-bounded),
+    truncated: entries.length > bounded,
+  };
 }
 
 export async function setHookHandlerEnabled(
@@ -1024,6 +1214,19 @@ function migrateBrains(document: BraincodeBrains): boolean {
     if (record.name === "Default Brain") {
       record.name = "Brain";
       changed = true;
+    }
+    const roles = record.roles as Record<string, unknown> | undefined;
+    if (roles && typeof roles === "object" && !roles.pet) {
+      const fallback = (roles.fastReply ?? roles.summarize ?? roles.coding) as Record<string, unknown> | undefined;
+      if (fallback) {
+        roles.pet = {
+          modelId: fallback.modelId,
+          fallbackModelIds: fallback.fallbackModelIds,
+          thinkingLevel: "minimal",
+          systemPrompt: agentRoleSystemPrompts.pet,
+        };
+        changed = true;
+      }
     }
   }
   return changed;

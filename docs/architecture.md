@@ -167,6 +167,8 @@ Core packet types:
 
 The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries, project facts, and thread references remain future extensions of the same packet boundary.
 
+Prompt references follow the same boundary. `@<path>` attaches project files or images to the root user request. `@@<session-id>` attaches a compact session context snapshot built from session JSONL records: user prompts, final summaries, worker summaries, and errors. It must not inline a full transcript or worker-private context; workers receive only the expanded root request plus their own handoff packet.
+
 Agent-to-agent communication should use protocol types from `packages/protocol`.
 
 Example shape:

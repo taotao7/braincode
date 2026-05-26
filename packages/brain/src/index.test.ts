@@ -23,6 +23,7 @@ const brain: BrainModel = {
     oracle: { modelId: "oracle", thinkingLevel: "xhigh" },
     librarian: { modelId: "librarian", thinkingLevel: "high" },
     rush: { modelId: "rush", thinkingLevel: "low" },
+    pet: { modelId: "pet", thinkingLevel: "minimal" },
   },
   routing: {
     maxParallelAgents: 2,
