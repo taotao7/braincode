@@ -535,6 +535,13 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
   border: 1px solid var(--border);
   padding: 1px 5px;
 }
+.docs-body .code-block code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--bg);
+  font-size: 14px;
+}
 .docs-body pre {
   background: var(--fg);
   color: var(--bg);
