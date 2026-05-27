@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDefaultToolConfiguration, createLocalCodingTools } from "./index"
+import { createDefaultToolConfiguration, createLocalCodingTools, normalizeToolConfiguration } from "./index"
 
 function getTool(name: string, projectRoot: string) {
   const tool = createLocalCodingTools({ projectRoot }).find((candidate) => candidate.name === name)
@@ -28,6 +29,31 @@ test("default tool configuration enables the first-party local coding toolset", 
   expect(byName.get("git_diff")?.enabled).toBe(true)
   expect(byName.get("get_changed_files")?.enabled).toBe(true)
   expect(byName.get("run_script")?.enabled).toBe(true)
+  expect(config.checks).toEqual({
+    enabled: true,
+    scripts: [],
+    timeoutMs: 180_000,
+    maxOutputBytes: 24_000,
+  })
+})
+
+test("normalizeToolConfiguration preserves and clamps check runner configuration", () => {
+  const config = normalizeToolConfiguration({
+    tools: [],
+    checks: {
+      enabled: false,
+      scripts: ["test", " test ", "", "lint"],
+      timeoutMs: "2500",
+      maxOutputBytes: 999_999,
+    },
+  } as never)
+
+  expect(config.checks).toEqual({
+    enabled: false,
+    scripts: ["test", "lint"],
+    timeoutMs: 2_500,
+    maxOutputBytes: 512_000,
+  })
 })
 
 test("createLocalCodingTools respects disabled tools from tools.json", async () => {
@@ -121,6 +147,131 @@ test("edit_file replace rejects oversized files instead of truncating", async ()
     const content = await Bun.file(join(projectRoot, "large.txt")).text()
     expect(content).toContain("needle")
     expect(content.length).toBeGreaterThan(8)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("list_files supports globs and maxFiles", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-list-test-"))
+  try {
+    await Bun.write(join(projectRoot, "a.ts"), "export {}\n")
+    await Bun.write(join(projectRoot, "b.md"), "# b\n")
+    await Bun.write(join(projectRoot, "c.ts"), "export const c = 1\n")
+
+    const listFiles = getTool("list_files", projectRoot)
+    const result = await listFiles.execute("list-1", { glob: "*.ts", maxFiles: 1 } as never)
+
+    expect(textContent(result).split("\n")).toHaveLength(1)
+    expect(textContent(result)).toEndWith(".ts")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("read_file truncates large text and rejects binary content", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-test-"))
+  try {
+    await Bun.write(join(projectRoot, "long.txt"), "abcdef")
+    await Bun.write(join(projectRoot, "binary.bin"), new Uint8Array([1, 0, 2]))
+    const readFile = createLocalCodingTools({ projectRoot, maxReadBytes: 4 }).find((tool) => tool.name === "read_file")
+    if (!readFile) throw new Error("Missing read_file")
+
+    const result = await readFile.execute("read-long", { path: "long.txt", limit: 3 } as never)
+
+    expect(textContent(result)).toContain("truncated")
+    expect(textContent(result)).toContain("abc")
+    await expect(readFile.execute("read-binary", { path: "binary.bin" } as never)).rejects.toThrow("binary")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("edit_file writes new files and replaces all matches", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-write-test-"))
+  try {
+    const editFile = getTool("edit_file", projectRoot)
+    await editFile.execute("write-1", { path: "nested/file.txt", content: "one one two" } as never)
+    const replaceResult = await editFile.execute("write-2", {
+      path: "nested/file.txt",
+      oldString: "one",
+      newString: "1",
+      replaceAll: true,
+    } as never)
+
+    expect(textContent(replaceResult)).toContain("replace nested/file.txt")
+    expect(await Bun.file(join(projectRoot, "nested/file.txt")).text()).toBe("1 1 two")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("apply_patch applies project-local diffs and rejects escaping paths", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-patch-test-"))
+  try {
+    await Bun.write(join(projectRoot, "file.txt"), "before\n")
+    const applyPatch = getTool("apply_patch", projectRoot)
+
+    await applyPatch.execute("patch-1", {
+      patch: [
+        "diff --git a/file.txt b/file.txt",
+        "--- a/file.txt",
+        "+++ b/file.txt",
+        "@@ -1 +1 @@",
+        "-before",
+        "+after",
+        "",
+      ].join("\n"),
+    } as never)
+
+    expect(await Bun.file(join(projectRoot, "file.txt")).text()).toBe("after\n")
+    await expect(applyPatch.execute("patch-escape", {
+      patch: "diff --git a/../escape.txt b/../escape.txt\n--- a/../escape.txt\n+++ b/../escape.txt\n",
+    } as never)).rejects.toThrow("escapes project root")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("shell and run_script return process results without throwing on nonzero exits", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-process-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        echoargs: "bun -e \"console.log(process.argv.slice(2).join(','))\"",
+      },
+    }))
+    const shell = getTool("shell", projectRoot)
+    const runScript = getTool("run_script", projectRoot)
+
+    const shellResult = await shell.execute("shell-1", { command: "exit 7" } as never)
+    const scriptResult = await runScript.execute("script-1", { script: "echoargs", args: ["a", "b"] } as never)
+
+    expect(textContent(shellResult)).toContain("exit: 7")
+    expect(textContent(scriptResult)).toContain("a,b")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("git_diff and get_changed_files report git working tree state", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-git-test-"))
+  try {
+    expect(spawnSync("git", ["init"], { cwd: projectRoot }).status).toBe(0)
+    await Bun.write(join(projectRoot, "tracked.txt"), "before\n")
+    expect(spawnSync("git", ["add", "tracked.txt"], { cwd: projectRoot }).status).toBe(0)
+    expect(spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"], { cwd: projectRoot }).status).toBe(0)
+    await Bun.write(join(projectRoot, "tracked.txt"), "after\n")
+    await Bun.write(join(projectRoot, "new.txt"), "new\n")
+
+    const gitDiff = getTool("git_diff", projectRoot)
+    const changedFiles = getTool("get_changed_files", projectRoot)
+    const diffResult = await gitDiff.execute("diff-1", { path: "tracked.txt", stat: true } as never)
+    const changedResult = await changedFiles.execute("changed-1", {} as never)
+
+    expect(textContent(diffResult)).toContain("tracked.txt")
+    expect(textContent(changedResult)).toContain("tracked.txt")
+    expect(textContent(changedResult)).toContain("new.txt")
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

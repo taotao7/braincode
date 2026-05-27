@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -109,6 +109,12 @@ test("default tool configuration enables local coding tools with approval for wr
   expect(tools.tools.find((tool) => tool.name === "git_diff")?.approvalPolicy).toBe("allow")
   expect(tools.tools.find((tool) => tool.name === "get_changed_files")?.approvalPolicy).toBe("allow")
   expect(tools.tools.find((tool) => tool.name === "run_script")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(tools.checks).toEqual({
+    enabled: true,
+    scripts: [],
+    timeoutMs: 180_000,
+    maxOutputBytes: 24_000,
+  })
 })
 
 test("legacy tool approval fields migrate to approval policies", async () => {
@@ -181,6 +187,7 @@ test("non-secret config documents can be read and written from an explicit home"
   const tools = await readTools(home)
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
   expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(true)
+  expect(tools.checks?.enabled).toBe(true)
 })
 
 test("readModels migrates legacy OpenAI chat completions API ids", async () => {

@@ -15,7 +15,7 @@ function printHelp() {
 
 Usage:
   braincode [tui]
-  braincode config [--port <port>] [--host <host>]
+  braincode config [--port <port>] [--host <host>] [--no-open]
   braincode run [--dry-run] <prompt>
   braincode help
 
@@ -31,6 +31,7 @@ async function runConfig(args: string[]) {
   const portText = readFlag(args, "--port")
   const host = readFlag(args, "--host") ?? "127.0.0.1"
   const parsedPort = portText ? Number(portText) : undefined
+  const shouldOpen = !args.includes("--no-open")
 
   if (parsedPort !== undefined && (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65535)) {
     throw new Error(`Invalid --port value: ${portText}`)
@@ -42,7 +43,30 @@ async function runConfig(args: string[]) {
   console.log("Configuration is stored under ~/.braincode/")
   console.log("Press Ctrl+C to stop.")
 
+  if (shouldOpen) {
+    await openInBrowser(server.url)
+  }
+
   await new Promise<void>(() => {})
+}
+
+async function openInBrowser(url: string): Promise<void> {
+  const platform = process.platform
+  const command =
+    platform === "darwin" ? ["open", url]
+    : platform === "win32" ? ["cmd", "/c", "start", "", url]
+    : ["xdg-open", url]
+
+  try {
+    const proc = Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      console.log(`Could not open browser automatically (exit ${exitCode}). Open ${url} manually.`)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.log(`Could not open browser automatically: ${message}. Open ${url} manually.`)
+  }
 }
 
 async function runTask(args: string[]) {

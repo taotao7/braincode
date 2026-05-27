@@ -1,5 +1,11 @@
-import { expect, test } from "bun:test"
-import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, testModelConnection, toBraincodeModel, toOpenAICompatibleBraincodeModel, type BraincodeModel } from "./index"
+import { afterEach, expect, test } from "bun:test"
+import { callPetCompletion, listBuiltInModelCatalog, listBuiltInProviders, listOpenAICompatibleModels, resolvePiModel, testModelConnection, toBraincodeModel, toOpenAICompatibleBraincodeModel, type BraincodeModel } from "./index"
+
+const originalFetch = globalThis.fetch
+
+afterEach(() => {
+  globalThis.fetch = originalFetch
+})
 
 test("listBuiltInProviders exposes Pi providers", () => {
   expect(listBuiltInProviders()).toContain("anthropic")
@@ -70,7 +76,6 @@ test("OpenAI-compatible catalog models default to text-only input", () => {
 })
 
 test("testModelConnection returns a diagnostic result for unsupported locations", async () => {
-  const originalFetch = globalThis.fetch
   const model: BraincodeModel = {
     id: "clipro/gemini-3.1-pro-low",
     provider: "clipro",
@@ -87,14 +92,115 @@ test("testModelConnection returns a diagnostic result for unsupported locations"
       headers: { "content-type": "application/json" },
     })) as unknown as typeof fetch
 
-  try {
-    const result = await testModelConnection(model, "test-key", "high")
+  const result = await testModelConnection(model, "test-key", "high")
 
-    expect(result.reachable).toBe(false)
-    expect(result.failureKind).toBe("unsupported-location")
-    expect(result.detail).toContain("User location is not supported")
-    expect(result.message).toContain("request location is not supported")
-  } finally {
-    globalThis.fetch = originalFetch
+  expect(result.reachable).toBe(false)
+  expect(result.failureKind).toBe("unsupported-location")
+  expect(result.detail).toContain("User location is not supported")
+  expect(result.message).toContain("request location is not supported")
+})
+
+test("listOpenAICompatibleModels normalizes base URL and maps valid model entries", async () => {
+  const requests: string[] = []
+  globalThis.fetch = (async (input) => {
+    requests.push(String(input))
+    return new Response(JSON.stringify({ data: [{ id: "alpha", name: "Alpha" }, { id: "" }, { id: "beta" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }) as unknown as typeof fetch
+
+  const models = await listOpenAICompatibleModels({
+    provider: "proxy",
+    baseUrl: "https://proxy.example/",
+    apiKey: "key",
+  })
+
+  expect(requests[0]).toBe("https://proxy.example/v1/models")
+  expect(models.map((model) => [model.id, model.name, model.baseUrl])).toEqual([
+    ["proxy/alpha", "Alpha", "https://proxy.example/v1"],
+    ["proxy/beta", "beta", "https://proxy.example/v1"],
+  ])
+})
+
+test("listOpenAICompatibleModels rejects invalid inputs and malformed responses", async () => {
+  await expect(listOpenAICompatibleModels({ provider: "", baseUrl: "https://proxy.example" })).rejects.toThrow("provider is required")
+  await expect(listOpenAICompatibleModels({ provider: "proxy", baseUrl: " " })).rejects.toThrow("baseUrl is required")
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ object: "list" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+
+  await expect(listOpenAICompatibleModels({ provider: "proxy", baseUrl: "https://proxy.example" })).rejects.toThrow("data array")
+})
+
+test("testModelConnection reports OpenAI-compatible success and failed response classes", async () => {
+  const model: BraincodeModel = {
+    id: "proxy/model",
+    provider: "proxy",
+    modelId: "model",
+    name: "Model",
+    baseUrl: "https://proxy.example",
+    contextWindow: 128000,
+    supportsTools: true,
   }
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+  await expect(testModelConnection(model, undefined)).resolves.toMatchObject({ reachable: false, failureKind: "missing-api-key" })
+  await expect(testModelConnection(model, "key", "low")).resolves.toMatchObject({ reachable: true, message: "Model generated a test response successfully (thinking=low)." })
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+  await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "invalid-response" })
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: { message: "429 rate limit exceeded" } }), {
+      status: 429,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+  await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "rate-limit" })
+})
+
+test("callPetCompletion handles OpenAI-compatible success and errors", async () => {
+  const model: BraincodeModel = {
+    id: "proxy/model",
+    provider: "proxy",
+    modelId: "model",
+    name: "Model",
+    baseUrl: "https://proxy.example/v1",
+    contextWindow: 128000,
+    supportsTools: true,
+  }
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: " pet ok " } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+
+  await expect(callPetCompletion({
+    model,
+    apiKey: "key",
+    systemPrompt: "system",
+    userPrompt: "user",
+    thinkingLevel: "xhigh",
+    timeoutMs: 1000,
+  })).resolves.toBe("pet ok")
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: { message: "bad key" } }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch
+
+  await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).rejects.toThrow("bad key")
 })

@@ -279,7 +279,7 @@ Near-term work should prioritize:
 - Richer patch ledger records for tool calls and snapshots. Minimal changed-file/diff-stat `patch_summary`, package-script `check_summary`, and typed `review_decision` records are in place.
 - Stronger review gate enforcement and TUI surfacing for typed review decisions.
 - Path-aware and command-aware permission policy.
-- Configurable check selection, timeouts, and command policy for project-specific verification.
+- Command policy for shell and script execution.
 - Router-plan UX that clearly distinguishes heuristic dry-runs from routeBrain execution plans.
 - Benchmarks and demo cases that prove the orchestration improves real coding outcomes.
 
@@ -343,6 +343,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
 - Done: minimal patch ledger record with changed files and git diff stats.
 - Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
+- Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` `review_decision` session records.
 - Active: richer tool-call/snapshot ledger records.
 - Active: granular permission rules for paths, commands, critical files, and review requirements.

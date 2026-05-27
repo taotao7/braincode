@@ -185,6 +185,33 @@ test("runPatchChecks skips projects without recognized check scripts", async () 
   }
 })
 
+test("runPatchChecks supports configured script selection and disabled checks", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-config-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        check: "bun -e \"console.log('default check')\"",
+        custom: "bun -e \"console.log('custom check')\"",
+      },
+    }))
+
+    const configured = await runPatchChecks(projectRoot, {
+      scripts: ["custom"],
+      timeoutMs: 10_000,
+      maxOutputBytes: 4_000,
+    })
+    const disabled = await runPatchChecks(projectRoot, { enabled: false })
+
+    expect(configured.status).toBe("passed")
+    expect(configured.results.map((result) => result.name)).toEqual(["custom"])
+    expect(configured.results[0]?.stdout).toContain("custom check")
+    expect(disabled.status).toBe("skipped")
+    expect(disabled.reason).toContain("disabled")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("normalizeReviewDecisionText parses typed decisions and gates failed checks", () => {
   const review = {
     summary: "No code issue found.",

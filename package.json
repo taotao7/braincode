@@ -13,6 +13,7 @@
     "config": "bun run apps/cli/src/index.ts config",
     "check": "bunx tsc --noEmit -p tsconfig.json",
     "test": "bun test",
+    "coverage": "bun test --coverage",
     "build:binaries": "bash scripts/build-binaries.sh",
     "build:site": "bun run --filter @braincode/site build",
     "site": "bun run --filter @braincode/site dev"

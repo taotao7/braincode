@@ -13,7 +13,7 @@ import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog } from "@braincode/shared"
-import { createLocalCodingTools } from "@braincode/tools"
+import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration } from "@braincode/tools"
 
 export type AgentRunRequest = {
   prompt: string
@@ -109,6 +109,7 @@ export type PatchCheckSummary = {
 }
 
 export type PatchCheckOptions = {
+  enabled?: boolean
   scripts?: string[]
   timeoutMs?: number
   maxOutputBytes?: number
@@ -671,6 +672,9 @@ function hasPatchActivity(summary: PatchSummary | undefined): summary is PatchSu
 }
 
 export async function runPatchChecks(projectRoot: string, options: PatchCheckOptions = {}): Promise<PatchCheckSummary> {
+  if (options.enabled === false) {
+    return { status: "skipped", reason: "checks disabled in tools configuration", results: [] }
+  }
   const packageScripts = await readPackageScripts(projectRoot)
   if (!packageScripts) {
     return { status: "skipped", reason: "package.json not found or has no scripts", results: [] }
@@ -1831,6 +1835,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   await appendSessionRecord(sessionId, { type: "mcp_connect", report: mcpReport }, home)
   const mcpTools = mcpHub.getTools()
   const toolConfig = await readTools(home)
+  const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
   const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: request.onToolApproval ? "all" : "read-only" })
   const runtimeTools = [...localTools, ...mcpTools]
 
@@ -1860,7 +1865,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
         const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
-        const checks = hasPatchActivity(patchAfterPrimary) ? await runPatchChecks(cwd) : undefined
+        const checks = hasPatchActivity(patchAfterPrimary) ? await runPatchChecks(cwd, checkOptions) : undefined
         if (checks) {
           await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
         }

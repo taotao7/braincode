@@ -1,5 +1,11 @@
 # Braincode
 
+![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-67.01%25%20lines-yellow)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 A multi-model coding agent orchestrator.
 
 Braincode turns one coding request into a coordinated engineering workflow:
@@ -74,13 +80,14 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
 - Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, append `check_summary`, and pass patch/check artifacts to review workers.
+- Check runner policy in `tools.json`: checks can be disabled, pinned to explicit package scripts, and bounded by timeout/output limits.
 - Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked`; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 
 ## In Progress
 
 - Richer patch ledger records for tool calls and file snapshots.
-- Configurable check selection, timeouts, and command policy for project-specific verification.
+- Command-aware permission policy for shell and script execution.
 - Stronger review gate enforcement and TUI surfacing for typed review decisions.
 - Path-aware, command-aware, and risk-aware permission policy beyond tool-level approval.
 - Router-plan UX so `/plan` can show actual `routeBrain` decisions or clearly label heuristic previews.
@@ -88,7 +95,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Roadmap
 
-- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch/check records, and approval-aware write/execute flows. First local tool wiring, `patch_summary`, and `check_summary` records are in place; richer tool-call/snapshot/review ledger records remain.
+- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch/check records, configurable check scripts, and approval-aware write/execute flows. First local tool wiring, `patch_summary`, `check_summary`, and check-runner configuration are in place; richer tool-call/snapshot ledger records remain.
 - **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`. First typed `review_decision` records are in place; enforcement and UI polish remain.
 - **v0.5 Permission Policy v2**: project-root read policy, path rules, critical-file review requirements, dangerous-command deny rules, and configurable safe command allowlists.
 - **v0.6 Router Plan UX**: `/plan --router`, routing source labels, confidence/reason display, and clearer TUI intent views.
@@ -147,6 +154,7 @@ Runtime user configuration belongs under `~/.braincode/`, not inside the reposit
 bun install
 bun run check
 bun test
+bun run coverage
 bun run braincode -- help
 bun run braincode
 bun run config

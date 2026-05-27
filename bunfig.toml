@@ -1,0 +1,6 @@
+[test]
+coveragePathIgnorePatterns = [
+  "packages/agent-runtime/src/index.ts",
+  "packages/agent-runtime/src/mcp.ts"
+]
+coverageThreshold = { lines = 0.95, functions = 0.95 }
