@@ -28,12 +28,15 @@ planner -> specialist workers -> primary executor -> reviewer -> final report
 braincode run "add login validation"
 braincode run --dry-run "add login validation"
 braincode run --dry-run --heuristic "add login validation"
+BRAINCODE_DEBUG=true braincode run "hello"
 braincode benchmark
 ```
 
 `braincode run` 使用当前配置的 Brain Model。`--dry-run` 预览与真实执行相同的 routeBrain 规划路径；需要不调用 provider 的诊断时，加 `--heuristic`。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
 
 `braincode benchmark` 运行一组代表性 coding prompt：README 编辑、失败测试修复、auth 风险改动、package/script 改动，以及只做安全审查的只读任务。默认会在有凭据时请求 routeBrain，并标注 heuristic fallback；`--heuristic` 可用于无 provider 的诊断运行。
+
+设置 `BRAINCODE_DEBUG=true` 后，runtime 会把脱敏调试信息写到 stderr：模型候选、provider payload/response 摘要、agent 事件摘要、fallback 尝试和空 assistant 响应。密钥等敏感字段会在输出前脱敏。
 
 ## 工作方式
 

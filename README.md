@@ -154,6 +154,7 @@ bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
 bun run braincode -- run --dry-run --heuristic "review this patch"
 bun run braincode -- run "hello"
+BRAINCODE_DEBUG=true bun run braincode -- run "hello"
 bun run benchmark
 bun run benchmark -- --heuristic
 bun run braincode -- benchmark --task auth-risk-change --json
@@ -162,3 +163,5 @@ bun run braincode -- benchmark --task auth-risk-change --json
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.
 Real `run` and TUI prompts require a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.
 Inside the TUI, use `/help` for commands and `/plan <task>` to preview the configured `routeBrain` decision. If the router is unavailable, the plan falls back to the heuristic route and labels that source. Use `/plan --heuristic <task>` only for no-provider diagnostics. The TUI intentionally has no direct model-switching command.
+
+Set `BRAINCODE_DEBUG=true` to write redacted runtime diagnostics to stderr: model candidate selection, provider payload/response summaries, agent event summaries, fallback attempts, and empty assistant responses. Secrets are redacted before logging.

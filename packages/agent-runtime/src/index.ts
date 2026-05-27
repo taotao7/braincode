@@ -14,7 +14,7 @@ import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTa
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
-import { debugLog } from "@braincode/shared"
+import { debugLog, isDebugEnabled } from "@braincode/shared"
 import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration } from "@braincode/tools"
 
 export type AgentRunRequest = {
@@ -579,6 +579,17 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
     }
   }
 
+  debugLog("runtime", "runtime model candidates", {
+    requestedModelIds: explicitIds,
+    candidates: candidates.map(({ selection }) => ({
+      configuredModelId: selection.configured.id,
+      provider: selection.piModel.provider,
+      modelId: selection.piModel.id,
+      api: selection.configured.api,
+    })),
+    errors,
+  })
+
   if (candidates.length > 0) return candidates
   throw new Error(`No usable model with API key for policy. Tried: ${errors.join("; ")}`)
 }
@@ -595,6 +606,28 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       messages: [],
     },
     getApiKey: options.getApiKey,
+    onPayload: (payload, model) => {
+      if (!isDebugEnabled()) return undefined
+      debugLog("runtime", "provider payload", {
+        configuredModelId: options.model.id,
+        provider: model.provider,
+        modelId: model.id,
+        api: model.api,
+        payload: summarizeProviderPayload(payload),
+      })
+      return undefined
+    },
+    onResponse: (response, model) => {
+      if (!isDebugEnabled()) return
+      debugLog("runtime", "provider response", {
+        configuredModelId: options.model.id,
+        provider: model.provider,
+        modelId: model.id,
+        api: model.api,
+        status: response.status,
+        headers: summarizeProviderResponseHeaders(response.headers),
+      })
+    },
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
     beforeToolCall: async (context, signal) => {
       if (options.onToolApproval) {
@@ -615,9 +648,12 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     },
   })
 
-  if (options.onEvent) {
-    agent.subscribe((event) => options.onEvent?.(event))
-  }
+  agent.subscribe((event) => {
+    if (isDebugEnabled()) {
+      debugLog("runtime", "agent event", summarizeAgentEvent(event))
+    }
+    return options.onEvent?.(event)
+  })
 
   return {
     agent,
@@ -626,6 +662,149 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       configured: options.model,
       piModel,
     },
+  }
+}
+
+function summarizeProviderPayload(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== "object") return { type: typeof payload }
+  const record = payload as Record<string, unknown>
+  return {
+    model: record.model,
+    stream: record.stream,
+    input: summarizeProviderMessageList(record.input),
+    messages: summarizeProviderMessageList(record.messages),
+    tools: Array.isArray(record.tools)
+      ? record.tools.map((tool) => summarizeProviderTool(tool)).slice(0, 30)
+      : undefined,
+    toolCount: Array.isArray(record.tools) ? record.tools.length : undefined,
+    reasoning: record.reasoning,
+    temperature: record.temperature,
+    maxTokens: record.max_tokens ?? record.max_completion_tokens ?? record.max_output_tokens,
+    store: record.store,
+  }
+}
+
+function summarizeProviderMessageList(value: unknown): unknown {
+  if (!Array.isArray(value)) return undefined
+  return {
+    count: value.length,
+    items: value.slice(0, 12).map((item) => summarizeProviderMessageItem(item)),
+    truncated: value.length > 12,
+  }
+}
+
+function summarizeProviderMessageItem(item: unknown): Record<string, unknown> {
+  if (!item || typeof item !== "object") return { type: typeof item }
+  const record = item as Record<string, unknown>
+  return {
+    role: record.role,
+    type: record.type,
+    content: summarizeProviderContent(record.content),
+    outputLength: typeof record.output === "string" ? record.output.length : undefined,
+    name: record.name,
+  }
+}
+
+function summarizeProviderContent(content: unknown): unknown {
+  if (typeof content === "string") return { kind: "string", length: content.length }
+  if (!Array.isArray(content)) return content === undefined ? undefined : { kind: typeof content }
+  return {
+    kind: "array",
+    count: content.length,
+    items: content.slice(0, 12).map((item) => {
+      if (!item || typeof item !== "object") return { type: typeof item }
+      const record = item as Record<string, unknown>
+      return {
+        type: record.type,
+        textLength: typeof record.text === "string" ? record.text.length : undefined,
+        image: typeof record.image_url === "string" ? "present" : undefined,
+      }
+    }),
+    truncated: content.length > 12,
+  }
+}
+
+function summarizeProviderTool(tool: unknown): Record<string, unknown> {
+  if (!tool || typeof tool !== "object") return { type: typeof tool }
+  const record = tool as Record<string, unknown>
+  return {
+    type: record.type,
+    name: record.name,
+    functionName: typeof record.function === "object" && record.function
+      ? (record.function as Record<string, unknown>).name
+      : undefined,
+  }
+}
+
+function summarizeProviderResponseHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([key]) => {
+      return /request|trace|content-type|ratelimit|cache|openai|cf-ray|x-/i.test(key)
+    }),
+  )
+}
+
+function summarizeAgentEvent(event: AgentEvent): Record<string, unknown> {
+  switch (event.type) {
+    case "agent_start":
+    case "turn_start":
+      return { type: event.type }
+    case "agent_end":
+      return { type: event.type, messageCount: event.messages.length }
+    case "turn_end":
+      return {
+        type: event.type,
+        message: summarizeAgentMessage(event.message),
+        toolResultCount: event.toolResults.length,
+      }
+    case "message_start":
+    case "message_end":
+      return { type: event.type, message: summarizeAgentMessage(event.message) }
+    case "message_update":
+      return {
+        type: event.type,
+        update: summarizeAssistantMessageEvent(event.assistantMessageEvent),
+        message: summarizeAgentMessage(event.message),
+      }
+    case "tool_execution_start":
+      return {
+        type: event.type,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        argKeys: event.args && typeof event.args === "object" ? Object.keys(event.args) : undefined,
+      }
+    case "tool_execution_update":
+      return { type: event.type, toolCallId: event.toolCallId, toolName: event.toolName }
+    case "tool_execution_end":
+      return {
+        type: event.type,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        isError: event.isError,
+        result: summarizeToolResultForDebug(event.result),
+      }
+  }
+}
+
+function summarizeAssistantMessageEvent(event: unknown): Record<string, unknown> {
+  if (!event || typeof event !== "object") return { type: typeof event }
+  const record = event as Record<string, unknown>
+  return {
+    type: record.type,
+    contentIndex: record.contentIndex,
+    deltaLength: typeof record.delta === "string" ? record.delta.length : undefined,
+    reason: record.reason,
+  }
+}
+
+function summarizeToolResultForDebug(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== "object") return { type: typeof result }
+  const record = result as Record<string, unknown>
+  return {
+    isError: record.isError,
+    content: summarizeProviderContent(record.content),
+    detailsType: record.details === undefined ? undefined : typeof record.details,
+    terminate: record.terminate,
   }
 }
 
@@ -1117,7 +1296,13 @@ Output constraints:
 User prompt:
 ${prompt}`, images.length > 0 ? images : undefined)
 
-    const text = extractAssistantText(runtime.agent.state.messages)
+    const text = requireAssistantText(runtime.agent.state.messages, {
+      stage: "router",
+      role: "routeBrain",
+      modelId: routerSelection.configured.id,
+      provider: routerSelection.piModel.provider,
+      api: routerSelection.configured.api,
+    })
     const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }
 
     const decision = normalizeRouterDecision(parsed, fallback, routingLimits)
@@ -1242,12 +1427,18 @@ export async function resolvePetRuntime(home?: string): Promise<ResolvedPetRunti
   }
 }
 
-function extractAssistantText(messages: unknown[]): string {
+function extractAssistantText(messages: unknown[], debugContext: Record<string, unknown> = {}): string {
   const assistantMessages = messages.filter((message) => {
     return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "assistant"
   })
 
   const lastAssistant = assistantMessages.at(-1) as { content?: unknown; errorMessage?: unknown; stopReason?: unknown } | undefined
+  debugLog("runtime", "extract assistant text", {
+    ...debugContext,
+    messageCount: messages.length,
+    assistantMessageCount: assistantMessages.length,
+    assistant: summarizeAgentMessage(lastAssistant),
+  })
   if (typeof lastAssistant?.errorMessage === "string" && lastAssistant.errorMessage.trim()) {
     throw new Error(lastAssistant.errorMessage)
   }
@@ -1262,6 +1453,84 @@ function extractAssistantText(messages: unknown[]): string {
     })
     .map((content) => content.text)
     .join("\n")
+}
+
+function requireAssistantText(messages: unknown[], debugContext: Record<string, unknown>): string {
+  const text = extractAssistantText(messages, debugContext)
+  if (text.trim()) return text
+
+  debugLog("runtime", "empty assistant response", {
+    ...debugContext,
+    messageCount: messages.length,
+    messages: messages.slice(-4).map((message) => summarizeAgentMessage(message)),
+  })
+
+  const model = [debugContext.provider, debugContext.modelId].filter(Boolean).join("/")
+  const api = debugContext.api ? ` via ${String(debugContext.api)}` : ""
+  throw new Error(`Provider returned an empty assistant response${model ? ` from ${model}` : ""}${api}.`)
+}
+
+function summarizeAgentMessage(message: unknown): Record<string, unknown> {
+  if (!message || typeof message !== "object") return { type: typeof message }
+  const record = message as Record<string, unknown>
+  const content = Array.isArray(record.content) ? record.content : undefined
+  return {
+    role: record.role,
+    api: record.api,
+    provider: record.provider,
+    model: record.model,
+    stopReason: record.stopReason,
+    errorMessage: typeof record.errorMessage === "string" ? record.errorMessage : undefined,
+    content: content ? summarizeAgentContent(content) : summarizeProviderContent(record.content),
+    usage: summarizeUsage(record.usage),
+  }
+}
+
+function summarizeAgentContent(content: unknown[]): Record<string, unknown> {
+  return {
+    count: content.length,
+    types: content.map((block) => {
+      if (!block || typeof block !== "object") return typeof block
+      return (block as { type?: unknown }).type
+    }),
+    textLength: content.reduce<number>((total, block) => {
+      if (!block || typeof block !== "object") return total
+      const text = (block as { text?: unknown }).text
+      return total + (typeof text === "string" ? text.length : 0)
+    }, 0),
+    thinkingLength: content.reduce<number>((total, block) => {
+      if (!block || typeof block !== "object") return total
+      const thinking = (block as { thinking?: unknown }).thinking
+      return total + (typeof thinking === "string" ? thinking.length : 0)
+    }, 0),
+    toolCalls: content
+      .filter((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "toolCall")
+      .map((block) => {
+        const record = block as Record<string, unknown>
+        return {
+          id: record.id,
+          name: record.name,
+          argKeys: record.arguments && typeof record.arguments === "object" ? Object.keys(record.arguments) : undefined,
+        }
+      }),
+  }
+}
+
+function summarizeUsage(usage: unknown): Record<string, unknown> | undefined {
+  if (!usage || typeof usage !== "object") return undefined
+  const record = usage as Record<string, unknown>
+  return {
+    input: readDebugNumber(record.input),
+    output: readDebugNumber(record.output),
+    cacheRead: readDebugNumber(record.cacheRead),
+    cacheWrite: readDebugNumber(record.cacheWrite),
+    totalTokens: readDebugNumber(record.totalTokens),
+    total: readDebugNumber(record.total),
+  }
+}
+
+function readDebugNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
 function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string, phase: "support" | "review", projectSupport?: ProjectSupport): HandoffPacket {
@@ -1654,6 +1923,14 @@ async function runWorkerFromPlan(
     await onTodoStatus?.(worker, phase, "running")
     await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: { ...handoff.task.progress, status: "running" }, todoIds: worker.todoIds })
     await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
+    debugLog("runtime", "worker attempt start", {
+      phase,
+      role: worker.role,
+      attempt: attempt + 1,
+      modelId: selection.configured.id,
+      provider: selection.piModel.provider,
+      api: selection.configured.api,
+    })
     const subagentHookContext: HookRuntimeContext = hookContext
       ? {
           ...hookContext,
@@ -1691,7 +1968,15 @@ async function runWorkerFromPlan(
         ],
       )
       await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
-      const text = extractAssistantText(runtime.agent.state.messages)
+      const text = requireAssistantText(runtime.agent.state.messages, {
+        stage: "worker",
+        phase,
+        role: worker.role,
+        attempt: attempt + 1,
+        modelId: selection.configured.id,
+        provider: selection.piModel.provider,
+        api: selection.configured.api,
+      })
       const result = normalizeWorkerResultText(text, handoff)
       const reviewDecision = phase === "review" ? normalizeReviewDecisionText(text, result) : undefined
       const status = workerResultStatus(result)
@@ -1718,6 +2003,15 @@ async function runWorkerFromPlan(
     } catch (error) {
       lastError = error
       const message = error instanceof Error ? error.message : String(error)
+      debugLog("runtime", "worker attempt failed", {
+        phase,
+        role: worker.role,
+        attempt: attempt + 1,
+        modelId: selection.configured.id,
+        provider: selection.piModel.provider,
+        error: message,
+        willFallback: attempt < candidates.length - 1,
+      })
       await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
     }
   }
@@ -1958,6 +2252,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
       plan.model = selection.configured
       plan.piModel = toPiModelSummary(selection)
+      debugLog("runtime", "primary attempt start", {
+        attempt: attempt + 1,
+        role: plan.role,
+        modelId: selection.configured.id,
+        provider: selection.piModel.provider,
+        api: selection.configured.api,
+        workerResultCount: workerResults.length,
+        toolCount: runtimeTools.length,
+      })
       await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
@@ -1991,7 +2294,14 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
       try {
         await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
-        const primarySummary = extractAssistantText(runtime.agent.state.messages)
+        const primarySummary = requireAssistantText(runtime.agent.state.messages, {
+          stage: "primary",
+          role: plan.role,
+          attempt: attempt + 1,
+          modelId: selection.configured.id,
+          provider: selection.piModel.provider,
+          api: selection.configured.api,
+        })
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
         await emitWorkerEvent({
           type: "worker_end",
@@ -2049,6 +2359,14 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
+        debugLog("runtime", "primary attempt failed", {
+          attempt: attempt + 1,
+          role: plan.role,
+          modelId: selection.configured.id,
+          provider: selection.piModel.provider,
+          error: message,
+          willFallback: attempt < candidates.length - 1,
+        })
         await emitWorkerEvent({
           type: "worker_end",
           role: plan.role,
