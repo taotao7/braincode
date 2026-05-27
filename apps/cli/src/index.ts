@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { demoBenchmarkTasks, executePromptFromConfig, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -216,6 +216,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error)
+  console.error(humanizeAgentRuntimeError(error))
   process.exitCode = 1
 })

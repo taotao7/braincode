@@ -3,12 +3,16 @@ export const DEFAULT_CONFIG_HOST = "127.0.0.1"
 export const DEFAULT_CONFIG_PORT = 14580
 export const OPENAI_COMPLETIONS_API = "openai-completions"
 export const LEGACY_OPENAI_CHAT_COMPLETIONS_API = "openai-chat-completions"
+export const ANTHROPIC_MESSAGES_API = "anthropic-messages"
+export const GOOGLE_GENERATIVE_AI_API = "google-generative-ai"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
 export function normalizeModelApi(api: string | undefined): string | undefined {
   if (api === LEGACY_OPENAI_CHAT_COMPLETIONS_API) return OPENAI_COMPLETIONS_API
+  if (api === "anthropic") return ANTHROPIC_MESSAGES_API
+  if (api === "google") return GOOGLE_GENERATIVE_AI_API
   return api
 }
 

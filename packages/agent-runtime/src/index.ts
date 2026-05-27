@@ -66,6 +66,28 @@ export type AgentRunResult = {
   reviewDecision?: ReviewDecision
 }
 
+export function humanizeAgentRuntimeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/Kimi For Coding is currently only available for Coding Agents/i.test(message)) {
+    return [
+      message,
+      "",
+      "Hint: Kimi rejected this request because the configured kimi-for-coding endpoint only accepts supported coding-agent clients. Braincode could reach the provider, but this model access mode is not usable for the current runtime request.",
+      "Fix: choose a model/provider that accepts Braincode in `braincode config`, or remove `kimi/kimi-for-coding` from the affected role's `fallbackModelIds` in ~/.braincode/brains.json.",
+    ].join("\n")
+  }
+  if (/User location is not supported/i.test(message) || /region is not supported/i.test(message)) {
+    return `${message}\n\nHint: The upstream provider rejected the request because of geographic restrictions. Either set a usable proxy baseUrl for the provider in ~/.braincode/models.json or configure a Brain role that maps to a different provider.`
+  }
+  if (/missing API key for provider/i.test(message)) {
+    return `${message}\n\nHint: Add the provider API key with \`braincode config\` or write it to ~/.braincode/auth.json.`
+  }
+  if (/Provider returned an empty assistant response/i.test(message)) {
+    return `${message}\n\nHint: The provider returned HTTP success but no assistant content. Check the model API type in ~/.braincode/models.json; for OpenAI-compatible proxies, try switching this model between \`openai-responses\` and \`openai-completions\` in \`braincode config\`.`
+  }
+  return message
+}
+
 export type PatchFileChange = {
   path: string
   status: string

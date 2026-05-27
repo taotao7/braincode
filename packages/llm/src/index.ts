@@ -29,7 +29,7 @@ export type ModelConnectionTestResult = {
   detail?: string
 }
 
-export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
+export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "unsupported-client" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
 
 export type ModelResolutionResult = {
   braincodeModel: BraincodeModel
@@ -136,27 +136,26 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
   const reasoning = thinkingLevel && thinkingLevel !== "off" ? (thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
 
   try {
-    if (!model.baseUrl) {
-      const { piModel } = resolvePiModel(model)
-      const includeImage = model.supportsVision !== false && piModel.input?.includes("image")
-      const userContent = includeImage
-        ? [
-            { type: "text" as const, text: "Reply with exactly: OK" },
-            { type: "image" as const, data: TEST_IMAGE_PNG_BASE64, mimeType: "image/png" },
-          ]
-        : "Reply with exactly: OK"
-      await completeSimple(
-        piModel,
-        {
-          systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
-          messages: [{ role: "user", content: userContent, timestamp: Date.now() }],
-        },
-        { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
-      )
-      return connectionSuccess(model, thinkingLevel)
+    const { piModel } = resolvePiModel(model)
+    const includeImage = model.supportsVision !== false && piModel.input?.includes("image")
+    const userContent = includeImage
+      ? [
+          { type: "text" as const, text: "Reply with exactly: OK" },
+          { type: "image" as const, data: TEST_IMAGE_PNG_BASE64, mimeType: "image/png" },
+        ]
+      : "Reply with exactly: OK"
+    const result = await completeSimple(
+      piModel,
+      {
+        systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
+        messages: [{ role: "user", content: userContent, timestamp: Date.now() }],
+      },
+      { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
+    )
+    const text = typeof result === "string" ? result : extractCompletionText(result)
+    if (!text.trim()) {
+      throw new Error("Model generation test returned an empty response")
     }
-
-    await testOpenAICompatibleGeneration(model, apiKey, thinkingLevel)
     return connectionSuccess(model, thinkingLevel)
   } catch (error) {
     return connectionFailure(model, error)
@@ -173,7 +172,10 @@ function connectionSuccess(model: BraincodeModel, thinkingLevel?: ModelThinkingL
 }
 
 function connectionFailure(model: BraincodeModel, error: unknown): ModelConnectionTestResult {
-  const detail = error instanceof Error ? error.message : String(error)
+  const rawDetail = error instanceof Error ? error.message : String(error)
+  const detail = model.supportsVision === true && /image|vision|multimodal|content type/i.test(rawDetail)
+    ? `${rawDetail} (vision input rejected — uncheck Vision in the model form if this model is text-only)`
+    : rawDetail
   const failureKind = classifyConnectionFailure(detail)
   return {
     modelId: model.id,
@@ -188,6 +190,7 @@ function connectionFailure(model: BraincodeModel, error: unknown): ModelConnecti
 function classifyConnectionFailure(message: string): ModelConnectionFailureKind {
   if (/missing api key/i.test(message)) return "missing-api-key"
   if (/user location is not supported|location.*not supported|unsupported.*region|region.*unsupported/i.test(message)) return "unsupported-location"
+  if (/Kimi For Coding is currently only available for Coding Agents/i.test(message)) return "unsupported-client"
   if (/\b(401|403)\b|unauthorized|forbidden|invalid api key|incorrect api key|permission denied/i.test(message)) return "auth"
   if (/\b429\b|rate limit|quota exceeded|too many requests/i.test(message)) return "rate-limit"
   if (/empty response|invalid response|response must contain/i.test(message)) return "invalid-response"
@@ -200,6 +203,9 @@ function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: stri
   if (kind === "unsupported-location") {
     return "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy."
   }
+  if (kind === "unsupported-client") {
+    return "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks."
+  }
   if (kind === "auth") return "The provider rejected the request. Check the API key, provider account permissions, and model access."
   if (kind === "rate-limit") return "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model."
   if (kind === "invalid-response") return "The provider responded, but the test response was empty or malformed."
@@ -209,58 +215,6 @@ function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: stri
 
 const TEST_IMAGE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
-
-async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string, thinkingLevel?: ModelThinkingLevel): Promise<void> {
-  const baseUrl = normalizeOpenAICompatibleBaseUrl(model.baseUrl ?? "")
-  const kimiCoding = isKimiCodingModel(model, baseUrl)
-  const reasoningEffort = mapThinkingLevelToReasoningEffort(thinkingLevel)
-  const includeImage = model.supportsVision === true && !kimiCoding
-  const userContent = includeImage
-    ? [
-        { type: "text", text: "Reply with exactly: OK" },
-        { type: "image_url", image_url: { url: `data:image/png;base64,${TEST_IMAGE_PNG_BASE64}` } },
-      ]
-    : "Reply with exactly: OK"
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-      "user-agent": kimiCoding ? "claude-code/0.1.0" : "BrainCode",
-    },
-    body: JSON.stringify({
-      model: model.modelId,
-      messages: [
-        { role: "system", content: "You are testing model connectivity. Reply with exactly: OK" },
-        { role: "user", content: userContent },
-      ],
-      max_tokens: kimiCoding ? 32 : 8,
-      temperature: kimiCoding ? 0.6 : 0,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    }),
-  })
-
-  const body = await response.json().catch(() => undefined)
-  if (!response.ok) {
-    const message = typeof body?.error?.message === "string" ? body.error.message : `HTTP ${response.status}`
-    const hint = includeImage && /image|vision|multimodal|content type/i.test(message)
-      ? " (vision input rejected — uncheck Vision in the model form if this model is text-only)"
-      : ""
-    throw new Error(`Model generation test failed: ${message}${hint}`)
-  }
-
-  if (kimiCoding) {
-    return
-  }
-  const text = body?.choices?.[0]?.message?.content
-  if (typeof text !== "string" || !text.trim()) {
-    throw new Error("Model generation test returned an empty response")
-  }
-}
-
-function isKimiCodingModel(model: BraincodeModel, baseUrl: string): boolean {
-  return baseUrl === "https://api.kimi.com/coding/v1" || model.provider.toLowerCase().includes("kimi") || model.modelId.toLowerCase().includes("kimi-for-coding")
-}
 
 function mapThinkingLevelToReasoningEffort(thinkingLevel: ModelThinkingLevel | undefined): string | undefined {
   if (!thinkingLevel || thinkingLevel === "off") return undefined

@@ -3,7 +3,7 @@ import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
-import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type ToolApprovalDecision, type ToolApprovalRequest, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
+import { ensureSessionHandoff, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type ToolApprovalDecision, type ToolApprovalRequest, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
 import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
@@ -144,6 +144,19 @@ type IntentPanelState = {
   plan: RuntimePlan
 }
 
+type RuntimeErrorPanelState = {
+  title: string
+  message: string
+}
+
+type ToastTone = "info" | "error"
+
+type ToastState = {
+  id: string
+  text: string
+  tone: ToastTone
+}
+
 type PlanCommandArgument = {
   prompt: string
   useRouterBrain: boolean
@@ -222,9 +235,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [brainPanel, setBrainPanel] = useState<BrainPanelState | null>(null)
   const [intentPlan, setIntentPlan] = useState<RuntimePlan | null>(null)
   const [intentPanel, setIntentPanel] = useState<IntentPanelState | null>(null)
+  const [runtimeErrorPanel, setRuntimeErrorPanel] = useState<RuntimeErrorPanelState | null>(null)
   const [decisionPanel, setDecisionPanel] = useState<DecisionPanelState | null>(null)
   const [runStatus, setRunStatus] = useState<RunStatusState | null>(null)
-  const [statusFlash, setStatusFlash] = useState<string>("")
+  const [toast, setToast] = useState<ToastState | null>(null)
   const initialRan = useRef(false)
   const lastEscapeAt = useRef(0)
   const DOUBLE_ESC_MS = 500
@@ -327,9 +341,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setItems((previous) => [...previous, { id: crypto.randomUUID(), ...item }])
   }
 
-  function flash(text: string) {
-    setStatusFlash(text)
-    setTimeout(() => setStatusFlash((current) => (current === text ? "" : current)), 2500)
+  function flash(text: string, tone: ToastTone = "info", durationMs = 2500) {
+    const next: ToastState = { id: crypto.randomUUID(), text, tone }
+    setToast(next)
+    setTimeout(() => setToast((current) => (current?.id === next.id ? null : current)), durationMs)
   }
 
   function startRunStatus(label: string) {
@@ -348,6 +363,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function stopRunStatus() {
     activeUsageKey.current = null
     setRunStatus(null)
+  }
+
+  function showRuntimeErrorPanel(error: unknown, title = "Runtime Error"): string {
+    const message = humanizeRuntimeError(error)
+    setRuntimeErrorPanel({ title, message })
+    const firstLine = message.split(/\r?\n/).find((line) => line.trim())?.trim() ?? title
+    flash(firstLine === title ? title : `${title}: ${firstLine}`, "error", 6000)
+    return message
   }
 
   function beginUsageTurn() {
@@ -761,6 +784,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setSessionPanel(null)
     setBrainPanel(null)
     setIntentPanel(null)
+    setRuntimeErrorPanel(null)
     setOverlay(null)
   }
 
@@ -836,9 +860,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const result = await ensureSessionHandoff(previousId, { focus: focus || undefined, force: true, trigger: "manual" })
       summary = result.summary
     } catch (error) {
+      const message = showRuntimeErrorPanel(error, "Handoff Failed")
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
-        { id: crypto.randomUUID(), kind: "error", text: `Handoff summarization failed: ${humanizeRuntimeError(error)}` },
+        { id: crypto.randomUUID(), kind: "error", text: `Handoff summarization failed: ${message}` },
       ])
       setRunning(false)
       stopRunStatus()
@@ -1052,9 +1077,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         },
       ])
     } catch (error) {
+      const message = showRuntimeErrorPanel(error, "Plan Failed")
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
-        { id: crypto.randomUUID(), kind: "error", text: formatError(error) },
+        { id: crypto.randomUUID(), kind: "error", text: message },
       ])
     } finally {
       setRunning(false)
@@ -1473,9 +1499,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       })
     } catch (error) {
       finalizeStreamingBuffers()
+      const message = showRuntimeErrorPanel(error, "Run Failed")
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
-        { id: crypto.randomUUID(), kind: "error", text: humanizeRuntimeError(error) },
+        { id: crypto.randomUUID(), kind: "error", text: message },
       ])
     } finally {
       setRunning(false)
@@ -1682,6 +1709,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
 
+    if (runtimeErrorPanel) {
+      if (key.return || key.escape || input === "q") {
+        setRuntimeErrorPanel(null)
+      }
+      return
+    }
+
     if (key.ctrl && input === "o") {
       if (intentPanel) {
         setIntentPanel(null)
@@ -1693,13 +1727,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     if (key.escape) {
       const now = Date.now()
-      const closedOverlay = mcpPanel || hookPanel || sessionPanel || brainPanel || intentPanel || overlay
+      const closedOverlay = mcpPanel || hookPanel || sessionPanel || brainPanel || intentPanel || runtimeErrorPanel || overlay
       if (closedOverlay) {
         setMcpPanel(null)
         setHookPanel(null)
         setSessionPanel(null)
         setBrainPanel(null)
         setIntentPanel(null)
+        setRuntimeErrorPanel(null)
         setOverlay(null)
         lastEscapeAt.current = now
         return
@@ -2122,6 +2157,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
+      {runtimeErrorPanel ? (
+        <Box borderStyle="double" borderColor="red" flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color="red" bold>{runtimeErrorPanel.title}</Text>
+          {runtimeErrorPanel.message.split(/\r?\n/).map((line, index) => (
+            <Text key={index} color={line.startsWith("Hint:") || line.startsWith("Fix:") ? "yellow" : undefined}>
+              {line || " "}
+            </Text>
+          ))}
+          <Text color="gray">Enter / Esc / q closes</Text>
+        </Box>
+      ) : null}
+
       <Box justifyContent="flex-end">
         <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
       </Box>
@@ -2141,7 +2188,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           {queueRef.current.length} task{queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit the most recent
         </Text>
       ) : null}
-      {statusFlash ? <Text color="cyan">{statusFlash}</Text> : null}
+      {toast ? <ToastView toast={toast} /> : null}
     </Box>
   )
 }
@@ -2425,6 +2472,18 @@ function EditRowLine({ row, widthOld, widthNew }: { row: EditRow; widthOld: numb
     <Text backgroundColor="green" color="black">
       {padLineNum(null, widthOld)} {padLineNum(row.newLine, widthNew)} + {row.text}
     </Text>
+  )
+}
+
+function ToastView({ toast }: { toast: ToastState }) {
+  const isError = toast.tone === "error"
+  const color = isError ? "red" : "cyan"
+  return (
+    <Box borderStyle="single" borderColor={color} paddingX={1}>
+      <Text color={color} bold={isError} wrap="truncate-end">
+        {isError ? "Error: " : ""}{toast.text}
+      </Text>
+    </Box>
   )
 }
 
@@ -3116,12 +3175,5 @@ function formatError(error: unknown): string {
 }
 
 function humanizeRuntimeError(error: unknown): string {
-  const message = formatError(error)
-  if (/User location is not supported/i.test(message) || /region is not supported/i.test(message)) {
-    return `${message}\n\nHint: The upstream provider rejected the request because of geographic restrictions. Either set a usable proxy baseUrl for the provider in ~/.braincode/models.json or configure a Brain role that maps to a different provider (e.g. kimi).`
-  }
-  if (/missing API key for provider/i.test(message)) {
-    return `${message}\n\nHint: Add the provider API key with \`braincode config\` or write it to ~/.braincode/auth.json.`
-  }
-  return message
+  return humanizeAgentRuntimeError(error)
 }

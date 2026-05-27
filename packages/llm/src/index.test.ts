@@ -155,6 +155,18 @@ test("resolvePiModel maps legacy OpenAI chat completions API id", () => {
 
   expect(piModel.api).toBe("openai-completions")
   expect(piModel.input).toEqual(["text"])
+
+  const anthropic = resolvePiModel({
+    id: "proxy/claude",
+    provider: "proxy",
+    modelId: "claude",
+    name: "Claude via proxy",
+    api: "anthropic",
+    baseUrl: "http://localhost:9999",
+    contextWindow: 128000,
+    supportsTools: true,
+  })
+  expect(anthropic.piModel.api).toBe("anthropic-messages")
 })
 
 test("resolvePiModel resolves built-ins and reports missing catalog models", () => {
@@ -228,11 +240,7 @@ test("testModelConnection returns a diagnostic result for unsupported locations"
     supportsTools: true,
   }
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: { message: "User location is not supported for the API use." } }), {
-      status: 403,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleError = new Error("User location is not supported for the API use.")
 
   const result = await testModelConnection(model, "test-key", "high")
 
@@ -305,52 +313,27 @@ test("testModelConnection reports OpenAI-compatible success and failed response 
     supportsTools: true,
   }
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
   await expect(testModelConnection(model, undefined)).resolves.toMatchObject({ reachable: false, failureKind: "missing-api-key" })
+  completeSimpleResult = "OK"
   await expect(testModelConnection(model, "key", "low")).resolves.toMatchObject({ reachable: true, message: "Model generated a test response successfully (thinking=low)." })
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleResult = ""
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "invalid-response" })
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: { message: "429 rate limit exceeded" } }), {
-      status: 429,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleResult = "OK"
+  completeSimpleError = new Error("429 rate limit exceeded")
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "rate-limit" })
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: { message: "forbidden" } }), {
-      status: 403,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleError = new Error("forbidden")
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "auth" })
 
-  globalThis.fetch = (async () => {
-    throw new Error("fetch failed network timeout")
-  }) as unknown as typeof fetch
+  completeSimpleError = new Error("fetch failed network timeout")
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "network" })
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: { message: "strange failure" } }), {
-      status: 418,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleError = new Error("strange failure")
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "unknown", message: expect.stringContaining("strange failure") })
 
-  globalThis.fetch = (async () =>
-    new Response("not json", {
-      status: 502,
-      headers: { "content-type": "application/json" },
-    })) as unknown as typeof fetch
+  completeSimpleError = new Error("HTTP 502")
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "unknown", detail: expect.stringContaining("HTTP 502") })
 })
 
@@ -365,18 +348,11 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
     supportsTools: true,
     supportsVision: true,
   }
-  const requests: Array<{ body?: string; userAgent?: string }> = []
 
-  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    requests.push({ body: String(init?.body), userAgent: new Headers(init?.headers).get("user-agent") ?? undefined })
-    return new Response(JSON.stringify({ error: { message: "image content type unsupported" } }), {
-      status: 400,
-      headers: { "content-type": "application/json" },
-    })
-  }) as unknown as typeof fetch
+  completeSimpleError = new Error("image content type unsupported")
 
   const visionResult = await testModelConnection(visionModel, "key", "medium")
-  expect(requests[0]?.body).toContain("image_url")
+  expect(((completeSimpleCalls[0]?.[1] as { messages: Array<{ content: unknown }> }).messages[0]?.content)).toBeArray()
   expect(visionResult.detail).toContain("vision input rejected")
 
   const kimiModel: BraincodeModel = {
@@ -386,17 +362,15 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
     modelId: "kimi-for-coding",
     baseUrl: "https://api.kimi.com/coding/v1",
   }
-  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    requests.push({ body: String(init?.body), userAgent: new Headers(init?.headers).get("user-agent") ?? undefined })
-    return new Response(JSON.stringify({}), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    })
-  }) as unknown as typeof fetch
+  completeSimpleError = new Error("Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc.")
 
-  await expect(testModelConnection(kimiModel, "key", "low")).resolves.toMatchObject({ reachable: true })
-  expect(requests.at(-1)?.body).toContain('"max_tokens":32')
-  expect(requests.at(-1)?.userAgent).toBe("claude-code/0.1.0")
+  await expect(testModelConnection(kimiModel, "key", "low")).resolves.toMatchObject({
+    reachable: false,
+    failureKind: "unsupported-client",
+    message: expect.stringContaining("specific coding-agent clients"),
+    detail: expect.stringContaining("Kimi For Coding is currently only available"),
+  })
+  expect((completeSimpleCalls.at(-1)?.[2] as { maxTokens?: number }).maxTokens).toBe(8)
 })
 
 test("callPetCompletion handles OpenAI-compatible success and errors", async () => {

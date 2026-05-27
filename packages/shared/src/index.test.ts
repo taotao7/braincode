@@ -11,6 +11,8 @@ afterEach(() => {
 test("normalizeModelApi migrates legacy OpenAI chat completions id", () => {
   expect(normalizeModelApi("openai-chat-completions")).toBe(OPENAI_COMPLETIONS_API)
   expect(normalizeModelApi("openai-responses")).toBe("openai-responses")
+  expect(normalizeModelApi("anthropic")).toBe("anthropic-messages")
+  expect(normalizeModelApi("google")).toBe("google-generative-ai")
   expect(normalizeModelApi(undefined)).toBeUndefined()
 })
 

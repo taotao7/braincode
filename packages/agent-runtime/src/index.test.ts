@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -86,6 +86,11 @@ test("createBraincodeAgentRuntime blocks risky tools when no approval callback e
 
   expect(decision?.block).toBe(true)
   expect(decision?.reason).toContain("approval callback is required")
+})
+
+test("humanizeAgentRuntimeError gives actionable provider configuration guidance", () => {
+  expect(humanizeAgentRuntimeError(new Error("403 Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc."))).toContain("only accepts supported coding-agent clients")
+  expect(humanizeAgentRuntimeError(new Error("Provider returned an empty assistant response from cliproxyapi/gpt-5.3-codex-spark via openai-responses."))).toContain("switching this model between `openai-responses` and `openai-completions`")
 })
 
 test("collectPatchSummary captures changed files and diff stats", async () => {
