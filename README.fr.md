@@ -1,14 +1,44 @@
 # Braincode
 
-Braincode est **un harness, pas un agent**. C'est un monorepo basé sur Bun dont le travail est de router chaque partie d'une tâche vers le modèle et le rôle spécialisé les mieux adaptés — pas d'attacher un seul LLM à votre terminal en espérant qu'il fasse tout bien.
+Un orchestrateur d'agents de code multi-modèles.
 
-Son idée centrale est un **Brain Model** sélectionnable par l'utilisateur : un profil de stratégie de haut niveau, à l'intérieur du harness, qui planifie dynamiquement quel modèle sous-jacent, quel rôle d'agent, quels outils et quel budget de contexte chaque sous-tâche doit recevoir.
+Braincode transforme une demande de code en workflow d'ingénierie coordonné :
 
-Le cadrage « harness » compte : Braincode ne suppose pas qu'un modèle est bon partout. Il suppose l'inverse — un LLM est une capacité puissante mais étroite, et c'est le **harness** autour (routage, contextes worker isolés, handoffs structurés, garde-fous de revue, config locale) qui transforme ces capacités en travail d'ingénierie fiable.
+```text
+planner -> specialist workers -> primary executor -> reviewer -> final report
+```
 
-Le projet réutilise l'infrastructure Pi lorsque cela a du sens, tout en gardant l'orchestration et l'interface produit Braincode séparées. L'interface terminal interactive appartient à Braincode et est construite avec Ink ; Pi reste une couche provider/runtime, pas l'interface produit.
+Ce n'est pas un autre CLI IA qui demande à un seul modèle de planifier, coder et se relire lui-même. Braincode est un moteur de workflow de code avec séparation des rôles, routage des modèles, contextes workers isolés, garde-fous de revue et rapports finaux structurés.
 
 **Langues** : [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
+
+## Pourquoi Braincode ?
+
+La plupart des agents de code demandent au même modèle de planifier, coder et revoir son propre travail. Braincode sépare ces rôles.
+
+- Router les tâches simples vers des modèles moins chers
+- Escalader le travail risqué vers des modèles plus forts
+- Garder les contextes workers isolés
+- Exiger une revue indépendante pour les éditions de fichiers risquées
+- Produire des rapports finaux structurés
+
+## Exemple
+
+```bash
+braincode run "add login validation"
+braincode run --dry-run "add login validation"
+```
+
+`braincode run` utilise le Brain Model configuré. `--dry-run` prévisualise le plan de routage sans appel provider. Utilisez `braincode config` pour changer le Brain Model actif et les réglages provider/modèle.
+
+## Fonctionnement
+
+1. `routeBrain` crée un plan structuré.
+2. Brain lance des workers spécialistes isolés.
+3. Les workers renvoient des résultats structurés, pas des transcripts complets.
+4. L'exécuteur principal applique le changement avec le contexte des workers.
+5. Un worker de revue vérifie le résultat quand la politique l'exige.
+6. Brain renvoie le rapport final et enregistre la session.
 
 ## Installation
 

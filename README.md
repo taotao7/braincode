@@ -1,16 +1,44 @@
 # Braincode
 
-<img width="1774" height="887" alt="ChatGPT Image 2026年5月25日 14_44_11" src="https://github.com/user-attachments/assets/d1d8a807-7438-470f-96a8-e7fc94c45cfe" />
+A multi-model coding agent orchestrator.
 
-Braincode is **a harness, not an agent**. It is a Bun-based monorepo whose job is to route each part of a task to the model and the specialist role best suited for it — not to bind a single LLM to your terminal and hope for the best.
+Braincode turns one coding request into a coordinated engineering workflow:
 
-Its main idea is a user-selectable **Brain Model**: a high-level strategy profile inside the harness that dynamically plans which underlying model, agent role, tools, and context budget each sub-task should get.
+```text
+planner -> specialist workers -> primary executor -> reviewer -> final report
+```
 
-The "harness" framing matters because Braincode does not assume one model is good at every job. It assumes the opposite: that an LLM is a powerful but narrow capability, and that the surrounding **harness** — routing, isolated worker contexts, structured handoffs, review gates, local config — is what turns those capabilities into reliable engineering work.
-
-The project reuses Pi infrastructure where it makes sense, while keeping Braincode's product-specific orchestration and UI separate. The interactive terminal UI is Braincode-owned and built with Ink; Pi remains a provider/runtime layer, not the product interface.
+It is not another AI CLI that asks one model to plan, code, and review itself. Braincode is a coding workflow engine with role separation, model routing, isolated worker contexts, review gates, and structured final reports.
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
+
+## Why Braincode?
+
+Most coding agents ask one model to plan, code, and review itself. Braincode separates these roles.
+
+- Route simple tasks to cheap models
+- Escalate risky work to stronger models
+- Keep worker contexts isolated
+- Require independent review for risky file edits
+- Produce structured final reports
+
+## Example
+
+```bash
+braincode run "add login validation"
+braincode run --dry-run "add login validation"
+```
+
+`braincode run` uses the configured Brain Model. `--dry-run` previews the routing plan without making provider calls. Use `braincode config` to change the active Brain Model and provider/model settings.
+
+## How It Works
+
+1. `routeBrain` creates a structured plan.
+2. Brain spawns isolated specialist workers.
+3. Workers return structured results, not full transcripts.
+4. The primary executor applies the change with worker context.
+5. A review worker checks the result when policy requires review.
+6. Brain returns a final report and records the session.
 
 ## Install
 
@@ -28,65 +56,74 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. After install, run `braincode` for the TUI or `braincode config` to open the local configuration page.
 
-## Core philosophy
+## Current Status
 
-At the current stage of AI, **smart orchestration of models matters more than any single model**. No individual LLM dominates every dimension — planning, coding, reviewing, summarizing, fast cheap replies — and locking a workflow to one model wastes both capability and money. Braincode is built on the belief that **leveraging each model's strengths through deliberate orchestration delivers the greatest gains in efficiency, quality, and cost**. The Brain Model is the concrete expression of this philosophy.
+- Bun workspace and package skeleton are in place.
+- `braincode` starts a Braincode-owned Ink TUI.
+- `braincode config` starts a local configuration service backed by `~/.braincode/`.
+- The config UI can edit settings, execution mode, brains, models, and tools; auth currently exposes status only and does not display secrets.
+- `braincode run` builds a runtime plan from the configured Brain Model.
+- Runtime execution can run support workers in isolated contexts, pass structured results to the primary executor, and run a review worker when policy requires it.
+- Session JSONL, project/user support files, hooks, MCP server loading, model fallback, and provider auth wiring are started.
 
-## Why this project
+## Roadmap
 
-Today's coding agents are not smart enough. A strong agent should pick **different models for different needs**, because every model has its own strengths — some are better at planning, some at writing code, some at reviewing, some at fast/cheap replies.
+- Stabilize Brain Model routing policy and role selection.
+- Tighten coding tool permissions, edit previews, and review gates.
+- Improve TUI workflows for intent graphs, worker progress, approvals, and final reports.
+- Expand config migrations, model catalog support, and provider setup.
+- Add focused tests for routing, context isolation, hooks, permissions, and failure recovery.
+- Keep packaging and release automation simple across npm, Homebrew, and prebuilt binaries.
 
-Braincode is built around this idea: instead of choosing one model for everything, the user picks a **Brain Model** that dispatches each sub-task to the model best suited for it.
+<img width="1774" height="887" alt="ChatGPT Image 2026年5月25日 14_44_11" src="https://github.com/user-attachments/assets/d1d8a807-7438-470f-96a8-e7fc94c45cfe" />
+
+## Brain Models and Roles
+
+A **Brain Model** is a routing policy, not a single LLM. It decides which model, role, tool budget, and context budget each part of a task should get.
 
 Braincode has two top-level modes:
 
-- `auto` — the main mode, automatically plans by intent and routes work to different agents/models.
-- `radical` — a more aggressive autonomous mode for users who want faster, broader execution.
+- `auto` - the main mode, automatically plans by intent and routes work to different agents/models.
+- `radical` - a more aggressive autonomous mode for users who want faster, broader execution.
 
-## Agent roles (v0.2.0)
-
-The harness exposes **14 roles**, organized as role-shaped specialists plus a small set of non-overlapping function helpers. The generic `coding` role has been removed — code work is split by domain so each role can be routed to a model that is actually strong at that domain.
+The runtime exposes **14 roles**:
 
 **Router**
-- `routeBrain` — LLM-driven planner. Reads the prompt and emits a structured routing decision (primary role, workers, todos, dependencies). The harness no longer relies on regex pattern matching for routing.
+- `routeBrain` - LLM-driven planner. Reads the prompt and emits a structured routing decision.
 
 **Domain specialists**
 - `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
 
-**Function helpers (non-overlapping)**
-- `librarian` — codebase mapping AND external fact-finding (absorbs the old `research` role)
-- `review` — defect inspection of existing code
-- `oracle` — hard reasoning, architecture tradeoffs
-- `summarize` — handoff compression
+**Function helpers**
+- `librarian` - codebase mapping and external fact-finding
+- `review` - defect inspection of existing code or generated changes
+- `oracle` - hard reasoning and architecture tradeoffs
+- `summarize` - handoff compression
 
 **Status display**
-- `pet` — read-only BrainPet status reporter
+- `pet` - read-only BrainPet status reporter
 
-Removed in this release: `coding`, `fastReply`, `research`. Existing user configs are migrated automatically — obsolete role entries are stripped on first load.
+Removed in v0.2.0: `coding`, `fastReply`, `research`. Existing user configs are migrated automatically.
+
+## Implementation Notes
+
+Braincode is a Bun-based monorepo, but that is an implementation detail rather than the product pitch. Product orchestration lives in Braincode packages; app entrypoints stay thin.
+
+The project reuses Pi infrastructure where it makes sense, while keeping Braincode's product-specific orchestration and UI separate. The interactive terminal UI is Braincode-owned and built with Ink; Pi remains a provider/runtime layer, not the product interface.
+
+Runtime user configuration belongs under `~/.braincode/`, not inside the repository. Secrets belong in `~/.braincode/auth.json` or a future secure credential store.
 
 ## Documentation
 
-- [Overview](./docs/overview.md) — high-level map of layers, packages, and end-to-end request flow. Start here.
-- [Architecture](./docs/architecture.md) — main system architecture, Brain Model design, context isolation, Pi integration, local config service.
-- [Context management](./docs/context-management.md) — Brain/worker isolation, handoff/result packets, prompt references, session JSONL.
-- [Agent communication](./docs/agent-communication.md) — worker lifecycle, routing, hooks, runtime events, multi-agent runs.
-- [Project structure and plan](./docs/project-structure.md) — goals, non-goals, workspace layout, package responsibilities, milestones.
-- [Visual style](./docs/visual-style.md) — Brutalist technical poster direction for UI and brand surfaces.
-- [References](./docs/references.md) — Amp and Pi reference material used for design decisions.
+- [Overview](./docs/overview.md) - high-level map of layers, packages, and end-to-end request flow. Start here.
+- [Architecture](./docs/architecture.md) - main system architecture, Brain Model design, context isolation, Pi integration, local config service.
+- [Context management](./docs/context-management.md) - Brain/worker isolation, handoff/result packets, prompt references, session JSONL.
+- [Agent communication](./docs/agent-communication.md) - worker lifecycle, routing, hooks, runtime events, multi-agent runs.
+- [Project structure and plan](./docs/project-structure.md) - goals, non-goals, workspace layout, package responsibilities, milestones.
+- [Visual style](./docs/visual-style.md) - Brutalist technical poster direction for UI and brand surfaces.
+- [References](./docs/references.md) - Amp and Pi reference material used for design decisions.
 
-## Current status
-
-- Bun workspace and package skeleton are in place.
-- `braincode` starts a minimal Braincode-owned Ink TUI.
-- `braincode config` starts a local configuration service backed by `~/.braincode/`.
-- The config UI can edit settings, execution mode, brains, models, and tools; auth currently exposes status only and does not display secrets.
-- Pi adapter boundaries are started:
-  - `packages/llm` maps Braincode model config to Pi model objects.
-  - `packages/agent-runtime` creates Pi-backed runtime instances from mode, model policy, and system prompt.
-- Single-prompt real model execution and Brain Model routing are wired through `braincode run` and the Ink TUI when provider auth is configured.
-- Multi-agent orchestration, coding tools, permissions, and richer TUI workflows are planned next.
-
-## Current development commands
+## Development Commands
 
 ```sh
 bun install

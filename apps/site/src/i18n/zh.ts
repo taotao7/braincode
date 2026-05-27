@@ -1,5 +1,5 @@
 export const zh = {
-  nav_arch: "架构",
+  nav_arch: "为什么",
   nav_intent: "意图图",
   nav_output: "输出",
   nav_handoff: "Handoff",
@@ -9,23 +9,29 @@ export const zh = {
   nav_docs: "文档",
   nav_home: "首页",
   release_label: "版本",
-  hero_title_1: "一套 harness，",
-  hero_title_2: "不是单个 agent。",
+  hero_title_1: "Braincode",
+  hero_title_2: "一个多模型 coding agent 编排器。",
   hero_lead:
-    "Braincode 是多 LLM 协作框架，不是单模型 agent。你挑「大脑」，它把每个子任务路由到合适的模型和擅长的角色。",
+    "Braincode 把一次编码请求变成规划、专家 Worker、主执行、独立审查和最终报告。",
+  workflow_label: "Braincode 工作流",
+  workflow_step_1: "规划",
+  workflow_step_2: "Worker",
+  workflow_step_3: "执行",
+  workflow_step_4: "审查",
+  workflow_step_5: "报告",
   btn_npm_install: "NPM 安装",
   btn_docs: "查看文档",
-  section_arch_eyebrow: "系统架构",
-  section_arch_title: "合适的场景，用合适的模型。",
-  feature_1_title: "Brain Model 路由",
+  section_arch_eyebrow: "为什么是 Braincode",
+  section_arch_title: "不是又一个 AI CLI，而是 coding workflow engine。",
+  feature_1_title: "角色分工",
   feature_1_body:
-    "没有一个 LLM 能同时把规划、编码、审查都做到最好。Brain Model 决定每个子任务交给谁，分多少上下文预算。",
-  feature_2_title: "多 Agent 隔离执行",
+    "大多数 agent 让同一个模型自己规划、自己写、自己审。Braincode 把规划、执行、审查和报告拆成明确职责。",
+  feature_2_title: "成本与风险路由",
   feature_2_body:
-    "一个主 Agent，多个 Worker 并行跑。Worker 之间上下文完全隔离，只通过结构化 packet 通信，主上下文始终干净。",
-  feature_3_title: "本地优先配置",
+    "简单任务交给便宜模型，风险高的改动升级到更强模型，并触发独立 Review。",
+  feature_3_title: "Worker 上下文隔离",
   feature_3_body:
-    "所有配置都放在 ~/.braincode/。在浏览器里改，所见即所得；API key 完全本地保存，不会出现在任何提示词里。",
+    "Worker 不继承完整对话，也不共享彼此状态。它们只返回结构化结果，供主执行器使用。",
   section_intent_eyebrow: "意图图 · CTRL+O",
   section_intent_title: "看见大脑的思考。",
   section_intent_lead:
@@ -86,7 +92,7 @@ export const zh = {
     "工具并行调用。路由自由度最高，牺牲一点稳定换极限速度。适合熟悉项目结构的硬核开发者。",
   radical_meta: "-> 谨慎使用",
   section_roles_eyebrow: "14 个角色 · 角色优先",
-  section_roles_title: "一套 harness，不是单个 agent。",
+  section_roles_title: "Workflow engine，不是单模型 CLI。",
   section_roles_lead:
     "没有通用的 coding 角色。代码工作按领域拆分，每个角色都能路由到真正擅长这个领域的模型。由 LLM 驱动的 routeBrain 决定哪个专家上场。",
   section_roles_removed:

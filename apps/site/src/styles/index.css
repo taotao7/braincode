@@ -64,6 +64,7 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 }
 .section { padding-block: clamp(48px, 8vw, var(--gap-2xl)); }
 .section + .section { border-top: var(--border-width) solid var(--border); }
+.hero + .section { padding-top: clamp(24px, 4vw, 48px); }
 .stack { display: flex; flex-direction: column; }
 .stack > * + * { margin-top: var(--gap-md); }
 .row { display: flex; align-items: center; gap: var(--gap-md); }
@@ -199,9 +200,19 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 .rule-strong { border: 0; border-top: 4px solid var(--fg); margin: 0; }
 
 /* Hero */
-.hero          { padding-block: clamp(60px, 10vw, 120px); border-bottom: 4px solid var(--fg); }
+.hero          { padding-block: clamp(28px, 4vw, 48px); border-bottom: 4px solid var(--fg); }
 .hero-center   { text-align: center; max-width: 32ch; margin-inline: auto; }
 .hero h1       { margin-bottom: var(--gap-md); }
+.hero-tagline  {
+  margin: -8px 0 0;
+  font-family: var(--font-mono);
+  font-size: clamp(16px, 2vw, 22px);
+  line-height: 1.35;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--accent);
+  max-width: 34ch;
+}
 .hero .lead    { margin-bottom: var(--gap-lg); border-left: 4px solid var(--accent); padding-left: 16px; text-align: left;}
 .hero-cta      { display: inline-flex; gap: var(--gap-md); flex-wrap: wrap; }
 .hero-center .hero-cta { justify-content: center; }
@@ -226,6 +237,29 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
   border: var(--border-width) solid var(--fg);
 }
 .code-block span { color: #a1b56c; } /* terminal green accent */
+
+.workflow-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.workflow-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: var(--border-width) solid var(--fg);
+  background: var(--surface);
+  padding: 6px 8px;
+}
+.workflow-strip span:not(:last-child)::after {
+  content: "->";
+  color: var(--accent);
+}
 
 /* Role Grid */
 .role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }

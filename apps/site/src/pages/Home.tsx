@@ -21,14 +21,22 @@ export function Home() {
         <div className="container hero-split">
           <div>
             <p className="eyebrow"><span>{__VERSION__}</span> <span>{t("release_label")}</span></p>
-            <h1><span>{t("hero_title_1")}</span><br/><span>{t("hero_title_2")}</span></h1>
-            <p className="lead" style={{ marginTop: 24 }}>{t("hero_lead")}</p>
+            <h1><span>{t("hero_title_1")}</span></h1>
+            <p className="hero-tagline">{t("hero_title_2")}</p>
+            <p className="lead" style={{ marginTop: 20 }}>{t("hero_lead")}</p>
             <div className="hero-cta" style={{ marginTop: 40 }}>
               <button className="btn btn-primary" onClick={copyInstall}>{t("btn_npm_install")}</button>
               <a href="#/docs" className="btn btn-secondary btn-arrow">{t("btn_docs")}</a>
             </div>
             <div className="code-block">
-              <code>$ <span>braincode run</span> "review this patch"</code>
+              <code>$ <span>braincode run</span> "add login validation"</code>
+            </div>
+            <div className="workflow-strip" aria-label={t("workflow_label")}>
+              <span>{t("workflow_step_1")}</span>
+              <span>{t("workflow_step_2")}</span>
+              <span>{t("workflow_step_3")}</span>
+              <span>{t("workflow_step_4")}</span>
+              <span>{t("workflow_step_5")}</span>
             </div>
           </div>
           <div className="ph-img wide hero-img" aria-label="Woodcut diagram of a brain routing tasks to multiple models">
@@ -82,7 +90,7 @@ export function Home() {
           </div>
           <div className="intent-graph-frame">
             <div className="intent-graph-bar">
-              <span><span className="pill">▮</span> &nbsp;INTENT GRAPH &nbsp;·&nbsp; PRIMARY = CODING &nbsp;·&nbsp; ROUTING = HEURISTIC</span>
+              <span><span className="pill">▮</span> &nbsp;INTENT GRAPH &nbsp;·&nbsp; PRIMARY = BACKEND &nbsp;·&nbsp; ROUTING = routeBrain</span>
               <span>{t("intent_refresh_hint")}</span>
             </div>
             <div className="intent-graph-scroll">

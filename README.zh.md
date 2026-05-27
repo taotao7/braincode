@@ -1,14 +1,44 @@
 # Braincode
 
-Braincode 是 **harness（驾驭层），不是单个 agent**。它是一个基于 Bun 的 monorepo，做的事是：把任务的每一个子部分路由到最合适的模型和最合适的专业角色 —— 而不是把一个 LLM 直接绑死在你的终端里，听天由命。
+一个多模型 coding agent 编排器。
 
-它的核心理念是用户可选的 **Brain Model（大脑模型）**：harness 内部的一种高层策略画像，可以动态决定每个子任务该使用哪个底层模型、哪种 agent 角色、哪些工具以及多大的上下文预算。
+Braincode 把一次编码请求变成协同工程流程：
 
-之所以强调 "harness" 这个定位：Braincode 不假设某一个模型在所有任务上都最强，它假设的恰恰相反 —— LLM 是一种能力很强但很窄的原子能力，真正决定它能不能稳定完成工程任务的，是围绕在它周围的 **harness**：路由、隔离的 worker 上下文、结构化 handoff、review 闸门、本地配置。
+```text
+planner -> specialist workers -> primary executor -> reviewer -> final report
+```
 
-项目在合适的地方复用 Pi 基础设施，同时把 Braincode 自身的产品级编排逻辑和 UI 保持独立。交互式终端 UI 由 Braincode 自己使用 Ink 实现；Pi 保留在 provider/runtime 层，不作为产品界面。
+它不是“又一个 AI CLI”，不是把一个模型绑到终端里让它自己规划、自己写、自己审。Braincode 是一个 coding workflow engine：有角色分工、模型路由、上下文隔离、review 闸门和结构化最终报告。
 
 **语言版本**：[English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
+
+## 为什么 Braincode？
+
+大多数 coding agent 让同一个模型完成规划、编码和自我审查。Braincode 把这些职责拆开。
+
+- 简单任务路由到便宜模型
+- 高风险工作升级到更强模型
+- Worker 上下文彼此隔离
+- 高风险文件编辑需要独立 Review
+- 输出结构化最终报告
+
+## 示例
+
+```bash
+braincode run "add login validation"
+braincode run --dry-run "add login validation"
+```
+
+`braincode run` 使用当前配置的 Brain Model。`--dry-run` 只预览路由计划，不调用 provider。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
+
+## 工作方式
+
+1. `routeBrain` 创建结构化计划。
+2. Brain 启动隔离的专家 Worker。
+3. Worker 返回结构化结果，而不是完整 transcript。
+4. 主执行器结合 Worker 上下文应用改动。
+5. 策略要求时，Review Worker 检查结果。
+6. Brain 返回最终报告并记录 session。
 
 ## 安装
 

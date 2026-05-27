@@ -1,5 +1,5 @@
 export const en = {
-  nav_arch: "Architecture",
+  nav_arch: "Why",
   nav_intent: "Intent",
   nav_output: "Output",
   nav_handoff: "Handoff",
@@ -9,24 +9,30 @@ export const en = {
   nav_docs: "Docs",
   nav_home: "Home",
   release_label: "RELEASE",
-  hero_title_1: "A harness,",
-  hero_title_2: "not an agent.",
+  hero_title_1: "Braincode",
+  hero_title_2: "A multi-model coding agent orchestrator.",
   hero_lead:
-    "Braincode is a multi-LLM harness, not a single-model agent. You pick the Brain — it routes each sub-task to the model and the specialist role best suited for the job.",
+    "Braincode turns one coding request into planner, specialist workers, primary executor, reviewer, and final report.",
+  workflow_label: "Braincode workflow",
+  workflow_step_1: "Planner",
+  workflow_step_2: "Workers",
+  workflow_step_3: "Executor",
+  workflow_step_4: "Reviewer",
+  workflow_step_5: "Final report",
   btn_npm_install: "NPM INSTALL",
   btn_docs: "Read the Docs",
-  section_arch_eyebrow: "SYSTEM ARCHITECTURE",
+  section_arch_eyebrow: "WHY BRAINCODE",
   section_arch_title:
-    "Smart orchestration matters more than picking a model.",
-  feature_1_title: "Brain Model Routing",
+    "Not another AI CLI. A coding workflow engine.",
+  feature_1_title: "Separated roles",
   feature_1_body:
-    "No single LLM is best at planning, coding, and reviewing. The Brain Model decides which role and context budget each sub-task gets.",
-  feature_2_title: "Isolated Multi-Agent Execution",
+    "Most agents ask one model to plan, code, and review itself. Braincode splits planning, execution, review, and reporting into explicit jobs.",
+  feature_2_title: "Cost and risk routing",
   feature_2_body:
-    "One main agent plus multiple workers running in parallel. Workers keep fully isolated context and communicate only through structured packets, keeping the main context clean.",
-  feature_3_title: "Local-First Config",
+    "Simple work can run on cheaper models. Risky edits can escalate to stronger models and independent review.",
+  feature_3_title: "Isolated worker context",
   feature_3_body:
-    "All configuration lives in ~/.braincode/. Edit it in the browser, what you see is what changes. API keys stay on your machine and never leak into a prompt.",
+    "Workers do not inherit the full conversation or each other's state. They return structured results the primary executor can use.",
   section_intent_eyebrow: "INTENT GRAPH · CTRL+O",
   section_intent_title: "See the brain think.",
   section_intent_lead:
@@ -87,7 +93,7 @@ export const en = {
     "Parallel tool calls. Maximum routing freedom, trading some stability for raw speed. For hardcore devs who know the codebase.",
   radical_meta: "-> use with caution",
   section_roles_eyebrow: "14 ROLES · ROLE-FIRST",
-  section_roles_title: "A harness, not an agent.",
+  section_roles_title: "Workflow engine, not a one-model CLI.",
   section_roles_lead:
     "There is no generic coding role. Code work is split by domain so each role can be routed to a model that is actually strong at that domain. The LLM-driven routeBrain picks which specialist runs.",
   section_roles_removed:

@@ -1,5 +1,5 @@
 export const fr = {
-  nav_arch: "Architecture",
+  nav_arch: "Pourquoi",
   nav_intent: "Intent",
   nav_output: "Sortie",
   nav_handoff: "Handoff",
@@ -9,24 +9,30 @@ export const fr = {
   nav_docs: "Docs",
   nav_home: "Accueil",
   release_label: "VERSION",
-  hero_title_1: "Un harness,",
-  hero_title_2: "pas un agent.",
+  hero_title_1: "Braincode",
+  hero_title_2: "Un orchestrateur d'agents de code multi-modèles.",
   hero_lead:
-    "Braincode est un harness multi-LLM, pas un agent à modèle unique. Vous choisissez le Cerveau — il dirige chaque sous-tâche vers le modèle et le rôle spécialisé les mieux adaptés.",
+    "Braincode transforme une demande de code en planificateur, workers spécialistes, exécuteur principal, reviewer et rapport final.",
+  workflow_label: "Workflow Braincode",
+  workflow_step_1: "Plan",
+  workflow_step_2: "Workers",
+  workflow_step_3: "Exécution",
+  workflow_step_4: "Revue",
+  workflow_step_5: "Rapport",
   btn_npm_install: "INSTALLER NPM",
   btn_docs: "Lire la doc",
-  section_arch_eyebrow: "ARCHITECTURE SYSTÈME",
+  section_arch_eyebrow: "POURQUOI BRAINCODE",
   section_arch_title:
-    "L'orchestration intelligente compte plus que le choix du modèle.",
-  feature_1_title: "Routage Brain Model",
+    "Pas un autre CLI IA. Un moteur de workflow de code.",
+  feature_1_title: "Rôles séparés",
   feature_1_body:
-    "Aucun LLM n'est meilleur partout sur planification, code et revue. Le Brain Model décide du rôle et du budget de contexte pour chaque sous-tâche.",
-  feature_2_title: "Exécution multi-agents isolée",
+    "La plupart des agents demandent au même modèle de planifier, coder et se relire. Braincode sépare plan, exécution, revue et rapport.",
+  feature_2_title: "Routage coût et risque",
   feature_2_body:
-    "Un agent principal plus plusieurs workers en parallèle. Les workers ont un contexte totalement isolé et ne communiquent que via des packets structurés — le contexte principal reste propre.",
-  feature_3_title: "Configuration locale d'abord",
+    "Les tâches simples peuvent utiliser des modèles moins chers. Les éditions risquées peuvent escalader vers de meilleurs modèles et une revue indépendante.",
+  feature_3_title: "Contexte worker isolé",
   feature_3_body:
-    "Toute la configuration vit dans ~/.braincode/. Modifiable dans le navigateur, en direct. Les clés API restent locales, jamais dans un prompt.",
+    "Les workers n'héritent pas de tout le transcript ni de l'état des autres. Ils renvoient des résultats structurés à l'exécuteur principal.",
   section_intent_eyebrow: "INTENT GRAPH · CTRL+O",
   section_intent_title: "Voyez le cerveau penser.",
   section_intent_lead:
@@ -87,7 +93,7 @@ export const fr = {
     "Appels d'outils en parallèle. Liberté de routage maximale, un peu de stabilité contre la vitesse brute. Pour les devs qui connaissent leur code.",
   radical_meta: "-> à manier avec soin",
   section_roles_eyebrow: "14 RÔLES · ROLE-FIRST",
-  section_roles_title: "Un harness, pas un agent.",
+  section_roles_title: "Un moteur de workflow, pas un CLI à modèle unique.",
   section_roles_lead:
     "Il n'y a pas de rôle « coding » générique. Le travail de code est découpé par domaine pour que chaque rôle puisse être routé vers un modèle réellement fort sur ce domaine. Le routeBrain piloté par LLM choisit le spécialiste.",
   section_roles_removed:

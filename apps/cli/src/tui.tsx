@@ -1950,7 +1950,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
           <Text color="cyan" bold>Intent Graph</Text>
           {formatIntentGraphLines(intentPanel.plan, Math.max(40, terminalCols - 8)).map((line, index) => (
-            <Text key={index} color={index <= 1 ? "cyan" : line.startsWith("Notes:") ? "yellow" : "gray"}>
+            <Text key={index} color={isIntentGraphHeaderLine(line) ? "cyan" : line.startsWith("Notes:") ? "yellow" : "gray"}>
               {line}
             </Text>
           ))}
@@ -2450,12 +2450,15 @@ const INTENT_BIT_CHARS: Record<number, string> = {
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
   const header = [
-    truncate(`Intent · ${plan.brain.id} · primary=${plan.role} · routing=${plan.routing.source}`, width),
-    truncate(`Model · ${plan.piModel.provider}/${plan.piModel.id} · tools=${plan.toolExecution}`, width),
+    ...wrapIntentLine(`Intent · ${plan.brain.id}`, width),
+    ...wrapIntentLine(`Primary · ${plan.role}`, width),
+    ...wrapIntentLine(`Routing · ${plan.routing.source}`, width),
+    ...wrapIntentLine(`Model · ${plan.piModel.provider}/${plan.piModel.id}`, width),
+    ...wrapIntentLine(`Tools · ${plan.toolExecution}`, width),
     "",
   ]
   if (plan.todos.length === 0) {
-    return [...header, truncate("(no subtasks yet — plan will populate after decomposition)", width)]
+    return [...header, ...wrapIntentLine("(no subtasks yet — plan will populate after decomposition)", width)]
   }
 
   const ROOT_ID = "__brain_root__"
@@ -2517,15 +2520,10 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
 
   const PAD_LEFT = 1
   const GAP = 5
-  const numLevels = levels.length
-  const labelBudget = Math.max(14, Math.floor((width - PAD_LEFT - GAP * Math.max(0, numLevels - 1)) / numLevels))
   const labels = new Map<string, string>()
-  const fitLabel = (text: string) => (text.length <= labelBudget ? text : truncate(text, labelBudget))
-  labels.set(ROOT_ID, fitLabel(`● brain root (${plan.role})`))
+  labels.set(ROOT_ID, `● brain root (${plan.role})`)
   for (const todo of plan.todos) {
-    const role = todo.role.length > 9 ? `${todo.role.slice(0, 8)}…` : todo.role
-    const full = `${todoGlyph(todo.status)} ${role}: ${todo.title.replace(/\s+/g, " ").trim()}`
-    labels.set(todo.id, fitLabel(full))
+    labels.set(todo.id, `${todoGlyph(todo.status)} ${todo.role}: ${todo.title.replace(/\s+/g, " ").trim()}`)
   }
 
   const ROW_STRIDE = 2
@@ -2610,7 +2608,7 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
     }
   }
 
-  const body = charGrid.map((row) => truncate(row.join("").replace(/\s+$/, ""), width))
+  const body = charGrid.map((row) => row.join("").replace(/\s+$/, ""))
 
   const withReasons = explicitDeps.filter((d) => d.reason && d.reason.trim().length > 0)
   const notes: string[] = []
@@ -2621,11 +2619,31 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
       const from = todoById.get(dep.from)
       const to = todoById.get(dep.to)
       if (!from || !to) continue
-      notes.push(truncate(`  ${from.role} → ${to.role}: ${dep.reason}`, width))
+      notes.push(...wrapIntentLine(`  ${from.role} → ${to.role}: ${dep.reason}`, width, "    "))
     }
   }
 
   return [...header, ...body, ...notes]
+}
+
+function wrapIntentLine(text: string, width: number, continuationIndent = ""): string[] {
+  const limit = Math.max(20, width)
+  if (text.length <= limit) return [text]
+  const lines: string[] = []
+  let remaining = text
+  while (remaining.length > limit) {
+    const searchStart = Math.max(0, limit - 24)
+    const breakAt = remaining.lastIndexOf(" ", limit)
+    const cut = breakAt > searchStart ? breakAt : limit
+    lines.push(remaining.slice(0, cut))
+    remaining = continuationIndent + remaining.slice(cut).trimStart()
+  }
+  lines.push(remaining)
+  return lines
+}
+
+function isIntentGraphHeaderLine(line: string): boolean {
+  return /^(Intent|Primary|Routing|Model|Tools) ·/.test(line)
 }
 
 function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "yellow" | "magenta" | "gray" {
