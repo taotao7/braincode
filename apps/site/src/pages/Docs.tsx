@@ -14,10 +14,6 @@ const TOC_IDS = [
   "docs_troubleshoot",
 ] as const;
 
-function Sec({ id, children }: { id: string; children: React.ReactNode }) {
-  return <div id={id}>{children}</div>;
-}
-
 function H2({ id, k }: { id: string; k: I18nKey }) {
   const { t } = useI18n();
   return <h2 id={id}>{t(k)}</h2>;
@@ -26,6 +22,14 @@ function H2({ id, k }: { id: string; k: I18nKey }) {
 function P({ k }: { k: I18nKey }) {
   const { t } = useI18n();
   return <p>{t(k)}</p>;
+}
+
+function TocLink({ id, children }: { id: string; children: React.ReactNode }) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return <a href={`#${id}`} onClick={handleClick}>{children}</a>;
 }
 
 function FileEntry({ title, body }: { title: I18nKey; body: I18nKey }) {
@@ -52,7 +56,7 @@ export function Docs() {
             <nav className="docs-toc">
               <h3>{t("docs_toc_title")}</h3>
               {TOC_IDS.map((id) => (
-                <a href={`#${id}`} key={id}>{t(id + "_title" as I18nKey)}</a>
+                <TocLink id={id} key={id}>{t(id + "_title" as I18nKey)}</TocLink>
               ))}
             </nav>
 

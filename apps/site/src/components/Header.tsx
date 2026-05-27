@@ -1,5 +1,27 @@
+import { useNavigate, useLocation } from "react-router-dom";
 import { useI18n, type Lang } from "../i18n";
 import logoUrl from "../assets/logo.png";
+
+function ScrollLink({ to, section, children }: { to: string; section: string; children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const scroll = () => {
+      const el = document.getElementById(section);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    if (location.pathname !== to) {
+      navigate(to);
+      requestAnimationFrame(() => setTimeout(scroll, 50));
+    } else {
+      scroll();
+    }
+  };
+
+  return <a href={`#/${section}`} onClick={handleClick}>{children}</a>;
+}
 
 export function Header() {
   const { t, lang, setLang } = useI18n();
@@ -13,12 +35,12 @@ export function Header() {
           Braincode
         </a>
         <nav>
-          <a href="#/#features">{t("nav_arch")}</a>
-          <a href="#/#intent">{t("nav_intent")}</a>
-          <a href="#/#output">{t("nav_output")}</a>
-          <a href="#/#handoff">{t("nav_handoff")}</a>
-          <a href="#/#modes">{t("nav_modes")}</a>
-          <a href="#/#install">{t("nav_install")}</a>
+          <ScrollLink to="/" section="features">{t("nav_arch")}</ScrollLink>
+          <ScrollLink to="/" section="intent">{t("nav_intent")}</ScrollLink>
+          <ScrollLink to="/" section="output">{t("nav_output")}</ScrollLink>
+          <ScrollLink to="/" section="handoff">{t("nav_handoff")}</ScrollLink>
+          <ScrollLink to="/" section="modes">{t("nav_modes")}</ScrollLink>
+          <ScrollLink to="/" section="install">{t("nav_install")}</ScrollLink>
           <a href="#/docs">{t("nav_docs")}</a>
           <a href="https://github.com/taotao7/braincode" target="_blank" rel="noopener noreferrer">
             {t("nav_github")}
