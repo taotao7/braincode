@@ -74,13 +74,14 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
 - Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, append `check_summary`, and pass patch/check artifacts to review workers.
+- Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked`; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 
 ## In Progress
 
-- Richer patch ledger records for tool calls, file snapshots, and review decisions.
+- Richer patch ledger records for tool calls and file snapshots.
 - Configurable check selection, timeouts, and command policy for project-specific verification.
-- Diff/check-based review gate that reviews patch artifacts instead of primary-agent prose.
+- Stronger review gate enforcement and TUI surfacing for typed review decisions.
 - Path-aware, command-aware, and risk-aware permission policy beyond tool-level approval.
 - Router-plan UX so `/plan` can show actual `routeBrain` decisions or clearly label heuristic previews.
 - Benchmarks and demo cases that measure multi-agent patch quality, checks, review decisions, duration, token use, fallbacks, and approvals.
@@ -88,7 +89,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 ## Roadmap
 
 - **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch/check records, and approval-aware write/execute flows. First local tool wiring, `patch_summary`, and `check_summary` records are in place; richer tool-call/snapshot/review ledger records remain.
-- **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`.
+- **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`. First typed `review_decision` records are in place; enforcement and UI polish remain.
 - **v0.5 Permission Policy v2**: project-root read policy, path rules, critical-file review requirements, dangerous-command deny rules, and configurable safe command allowlists.
 - **v0.6 Router Plan UX**: `/plan --router`, routing source labels, confidence/reason display, and clearer TUI intent views.
 - **v0.7 Demo & Benchmark**: representative coding tasks such as README edits, failing-test fixes, auth-risk changes, package changes, and security-review-only runs.

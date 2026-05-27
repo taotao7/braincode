@@ -769,6 +769,15 @@ export type SessionContextEntry =
       attempt?: number;
     }
   | {
+      type: "review";
+      timestamp?: number;
+      decision: "approved" | "changes_requested" | "blocked";
+      rationale?: string;
+      requiredChanges: string[];
+      blockingIssues: string[];
+      attempt?: number;
+    }
+  | {
       type: "error";
       timestamp?: number;
       error: string;
@@ -870,6 +879,13 @@ function objectField(record: Record<string, unknown>, key: string): Record<strin
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+function stringArrayField(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+    : [];
 }
 
 function planFields(plan: unknown): { brainId?: string; role?: string } {
@@ -1041,6 +1057,21 @@ export async function readSessionContext(
           exitCode: typeof result.exitCode === "number" || result.exitCode === null ? result.exitCode : undefined,
           durationMs: numberField(result, "durationMs"),
         })),
+      });
+    } else if (record.type === "review_decision") {
+      const rawDecision = stringField(record, "decision");
+      const decision: Extract<SessionContextEntry, { type: "review" }>["decision"] =
+        rawDecision === "approved" || rawDecision === "changes_requested" || rawDecision === "blocked"
+          ? rawDecision
+          : "blocked";
+      entries.push({
+        type: "review",
+        timestamp,
+        decision,
+        rationale: stringField(record, "rationale"),
+        requiredChanges: stringArrayField(record, "requiredChanges"),
+        blockingIssues: stringArrayField(record, "blockingIssues"),
+        attempt,
       });
     } else if (record.type === "handoff") {
       const summary = stringField(record, "summary");

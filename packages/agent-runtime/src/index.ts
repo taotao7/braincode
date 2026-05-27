@@ -61,6 +61,7 @@ export type AgentRunResult = {
   mcp?: McpHubConnectReport
   patch?: PatchSummary
   checks?: PatchCheckSummary
+  reviewDecision?: ReviewDecision
 }
 
 export type PatchFileChange = {
@@ -125,6 +126,15 @@ export type PatchReviewArtifacts = {
   diff?: PatchDiffSnapshot
 }
 
+export type ReviewDecisionStatus = "approved" | "changes_requested" | "blocked"
+
+export type ReviewDecision = {
+  decision: ReviewDecisionStatus
+  rationale: string
+  requiredChanges: string[]
+  blockingIssues: string[]
+}
+
 export type RuntimeModelSelection = {
   requested: ModelPolicy
   configured: BraincodeModel
@@ -167,6 +177,7 @@ export type ExecutedWorkerResult = WorkerResult & {
   todoIds: string[]
   status: "completed" | "failed"
   error?: string
+  reviewDecision?: ReviewDecision
 }
 
 export type RuntimePlan = {
@@ -1320,7 +1331,7 @@ Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
 Return only JSON in this shape:
-{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","rationale":"brief reason for the decision","requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
 }
 
 function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
@@ -1443,6 +1454,67 @@ function normalizeWorkerResultText(text: string, handoff: HandoffPacket): Worker
   }
 }
 
+export function normalizeReviewDecisionText(text: string, review: WorkerResult, checks?: PatchCheckSummary): ReviewDecision {
+  let parsedRecord: Record<string, unknown> | undefined
+  try {
+    const parsed = extractJsonObject(text)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) parsedRecord = parsed as Record<string, unknown>
+  } catch {
+    // Review text without JSON falls back to worker result fields.
+  }
+
+  const explicitDecision = normalizeReviewDecisionStatus(parsedRecord?.decision)
+  const rationale = stringValue(parsedRecord?.rationale) ?? review.summary
+  const requiredChanges = normalizeStringArray(parsedRecord?.requiredChanges)
+  const blockingIssues = normalizeStringArray(parsedRecord?.blockingIssues)
+  const fallbackDecision = fallbackReviewDecision(review, checks)
+  return applyCheckGateToReviewDecision({
+    decision: explicitDecision ?? fallbackDecision,
+    rationale,
+    requiredChanges,
+    blockingIssues,
+  }, checks)
+}
+
+function normalizeReviewDecisionStatus(value: unknown): ReviewDecisionStatus | undefined {
+  return value === "approved" || value === "changes_requested" || value === "blocked" ? value : undefined
+}
+
+function fallbackReviewDecision(review: WorkerResult, checks?: PatchCheckSummary): ReviewDecisionStatus {
+  if (review.progress.status === "blocked" || review.progress.status === "failed") return "blocked"
+  if (checks?.status === "failed") return "changes_requested"
+  return review.risks.length > 0 ? "changes_requested" : "approved"
+}
+
+function applyCheckGateToReviewDecision(decision: ReviewDecision, checks?: PatchCheckSummary): ReviewDecision {
+  if (checks?.status !== "failed" || decision.decision !== "approved") return decision
+  const failedChecks = checks.results.filter((result) => result.status === "failed").map((result) => result.name)
+  const checkChange = failedChecks.length > 0
+    ? `Fix failing checks before approval: ${failedChecks.join(", ")}.`
+    : "Fix failing checks before approval."
+  return {
+    ...decision,
+    decision: "changes_requested",
+    requiredChanges: uniqueStrings([...decision.requiredChanges, checkChange]),
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  const output: string[] = []
+  for (const value of values) {
+    const trimmed = value.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    output.push(trimmed)
+  }
+  return output
+}
+
 function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, error: unknown): ExecutedWorkerResult {
   const message = error instanceof Error ? error.message : String(error)
   return {
@@ -1542,7 +1614,8 @@ async function runWorkerFromPlan(
       await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
       const text = extractAssistantText(runtime.agent.state.messages)
       const result = normalizeWorkerResultText(text, handoff)
-      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status: "completed" }
+      const reviewDecision = phase === "review" ? normalizeReviewDecisionText(text, result) : undefined
+      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status: "completed", reviewDecision }
       await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
       await onTodoStatus?.(worker, phase, "completed", { summary: result.summary })
       await emit({ type: "worker_end", role: worker.role, phase, status: "completed", summary: text.trim(), todoIds: worker.todoIds })
@@ -1665,10 +1738,19 @@ async function updateTodoStatus(
   }
 }
 
-function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undefined): string {
+function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undefined, reviewDecision?: ReviewDecision): string {
   if (!review) return summary
+  const decision = reviewDecision ?? review.reviewDecision
+  const decisionText = decision
+    ? [
+        `Decision: ${decision.decision}`,
+        `Rationale: ${decision.rationale}`,
+        decision.requiredChanges.length > 0 ? `Required changes:\n${decision.requiredChanges.map((change) => `- ${change}`).join("\n")}` : "",
+        decision.blockingIssues.length > 0 ? `Blocking issues:\n${decision.blockingIssues.map((issue) => `- ${issue}`).join("\n")}` : "",
+      ].filter(Boolean).join("\n")
+    : review.summary
   const risks = review.risks.length > 0 ? `\nRisks:\n${review.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
-  return `${summary}\n\nReview:\n${review.summary}${risks}`
+  return `${summary}\n\nReview:\n${decisionText}${risks}`
 }
 
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
@@ -1789,7 +1871,16 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
             ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages)
             : undefined
-        if (reviewResult) workerResults.push(reviewResult)
+        const reviewDecision = reviewResult
+          ? applyCheckGateToReviewDecision(reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult, checks), checks)
+          : undefined
+        if (reviewResult) {
+          reviewResult.reviewDecision = reviewDecision
+          workerResults.push(reviewResult)
+        }
+        if (reviewDecision) {
+          await appendSessionRecord(sessionId, { type: "review_decision", ...reviewDecision, attempt: attempt + 1 }, home)
+        }
 
         const stopHooks = await runAndRecordHooks(
           "Stop",
@@ -1802,13 +1893,13 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           home,
           "hook_stop",
         )
-        const summary = `${mergeReviewResult(primarySummary, reviewResult)}${formatStopHookFeedback(stopHooks)}`
+        const summary = `${mergeReviewResult(primarySummary, reviewResult, reviewDecision)}${formatStopHookFeedback(stopHooks)}`
         const patch = await collectPatchSummary(cwd, patchBaseline)
         if (hasPatchActivity(patch)) {
           await appendSessionRecord(sessionId, { type: "patch_summary", ...patch, attempt: attempt + 1 }, home)
         }
-        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, attempt: attempt + 1 }, home)
-        return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch, checks }
+        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, attempt: attempt + 1 }, home)
+        return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch, checks, reviewDecision }
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
@@ -1960,6 +2051,12 @@ function formatSessionContext(context: SessionContext): string {
           ? `\n  scripts: ${entry.checks.map((check) => `${check.name}:${check.status}${check.exitCode === undefined ? "" : `:${check.exitCode ?? "n/a"}`}`).join(", ")}`
           : ""
         lines.push(`${label}${reason}${checks}`)
+      } else if (entry.type === "review") {
+        const label = `- review${entry.attempt ? ` attempt ${entry.attempt}` : ""} (${entry.decision})`
+        const rationale = entry.rationale ? `\n  rationale: ${clipContextText(entry.rationale, 1200)}` : ""
+        const required = entry.requiredChanges.length > 0 ? `\n  required: ${clipContextText(entry.requiredChanges.join("; "), 1200)}` : ""
+        const blocked = entry.blockingIssues.length > 0 ? `\n  blocked: ${clipContextText(entry.blockingIssues.join("; "), 1200)}` : ""
+        lines.push(`${label}${rationale}${required}${blocked}`)
       } else if (entry.type === "handoff") {
         const label = `- handoff${entry.trigger ? ` (${entry.trigger})` : ""}`
         const focus = entry.focus ? `\n  focus: ${clipContextText(entry.focus, 400)}` : ""

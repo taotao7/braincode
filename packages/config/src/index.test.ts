@@ -329,6 +329,14 @@ test("readSessionContext returns compact session records", async () => {
     attempt: 1,
   }, home)
   await appendSessionRecord("context-session", {
+    type: "review_decision",
+    decision: "changes_requested",
+    rationale: "tests failed",
+    requiredChanges: ["fix failing test"],
+    blockingIssues: [],
+    attempt: 1,
+  }, home)
+  await appendSessionRecord("context-session", {
     type: "run_end",
     summary: "implemented feature",
     attempt: 1,
@@ -339,8 +347,9 @@ test("readSessionContext returns compact session records", async () => {
   expect(context?.sessionId).toBe("context-session")
   expect(context?.prompt).toBe("implement feature")
   expect(context?.summary).toBe("implemented feature")
-  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "check", "run"])
+  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "check", "review", "run"])
   expect(context?.entries.find((entry) => entry.type === "todo")?.status).toBe("completed")
   expect(context?.entries.find((entry) => entry.type === "check")?.status).toBe("failed")
+  expect(context?.entries.find((entry) => entry.type === "review")?.decision).toBe("changes_requested")
   expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("frontend")
 })

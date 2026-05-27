@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, planRuntimeFromConfig, runConfiguredHooks, runPatchChecks, selectRuntimeModel } from "./index"
+import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runPatchChecks, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -183,6 +183,55 @@ test("runPatchChecks skips projects without recognized check scripts", async () 
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
+})
+
+test("normalizeReviewDecisionText parses typed decisions and gates failed checks", () => {
+  const review = {
+    summary: "No code issue found.",
+    progress: { status: "completed" },
+    risks: [],
+    artifacts: [],
+    nextQuestions: [],
+  } as never
+  const decision = normalizeReviewDecisionText(JSON.stringify({
+    decision: "approved",
+    rationale: "Patch is logically correct.",
+    requiredChanges: [],
+    blockingIssues: [],
+  }), review, {
+    status: "failed",
+    results: [
+      {
+        name: "test",
+        command: "bun",
+        args: ["run", "test"],
+        status: "failed",
+        exitCode: 1,
+        signal: null,
+        durationMs: 10,
+        stdout: "",
+        stderr: "failed",
+        timedOut: false,
+      },
+    ],
+  })
+
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.rationale).toBe("Patch is logically correct.")
+  expect(decision.requiredChanges[0]).toContain("test")
+})
+
+test("normalizeReviewDecisionText falls back to risks when decision is missing", () => {
+  const decision = normalizeReviewDecisionText("plain review", {
+    summary: "Found an issue.",
+    progress: { status: "completed" },
+    risks: ["missing regression test"],
+    artifacts: [],
+    nextQuestions: [],
+  } as never)
+
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.rationale).toBe("Found an issue.")
 })
 
 test("runConfiguredHooks executes trusted project command hooks", async () => {

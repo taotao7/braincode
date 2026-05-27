@@ -276,8 +276,8 @@ local tools
 Near-term work should prioritize:
 
 - Expanding the first-party local coding tools beyond the initial read/search/edit/patch/shell/git/script set as real usage demands.
-- Richer patch ledger records for tool calls, snapshots, and review decisions. Minimal changed-file/diff-stat `patch_summary` records and package-script `check_summary` records are in place.
-- A stronger diff/check-based review gate with typed review decisions.
+- Richer patch ledger records for tool calls and snapshots. Minimal changed-file/diff-stat `patch_summary`, package-script `check_summary`, and typed `review_decision` records are in place.
+- Stronger review gate enforcement and TUI surfacing for typed review decisions.
 - Path-aware and command-aware permission policy.
 - Configurable check selection, timeouts, and command policy for project-specific verification.
 - Router-plan UX that clearly distinguishes heuristic dry-runs from routeBrain execution plans.
@@ -343,5 +343,6 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
 - Done: minimal patch ledger record with changed files and git diff stats.
 - Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
-- Active: richer tool-call/snapshot/review ledger records.
+- Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` `review_decision` session records.
+- Active: richer tool-call/snapshot ledger records.
 - Active: granular permission rules for paths, commands, critical files, and review requirements.
