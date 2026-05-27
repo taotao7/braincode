@@ -6,9 +6,9 @@ import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./m
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
-import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
+import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
@@ -40,8 +40,8 @@ export type ToolApprovalDecision = {
 }
 
 export type WorkerLifecycleEvent =
-  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string; todoIds?: string[] }
-  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "failed"; summary?: string; error?: string; todoIds?: string[] }
+  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; todoIds?: string[] }
+  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "blocked" | "failed"; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; summary?: string; error?: string; todoIds?: string[] }
 
 export type TodoLifecycleEvent = {
   type: "todo_update"
@@ -167,6 +167,7 @@ export type RuntimePiModelSummary = {
 }
 
 export type RuntimeWorkerPlan = AgentWorkerPlan & {
+  contextId: string
   model: BraincodeModel
   policy: ModelPolicy
   piModel: RuntimePiModelSummary
@@ -176,7 +177,7 @@ export type ExecutedWorkerResult = WorkerResult & {
   role: RoutedAgentRole
   goal: string
   todoIds: string[]
-  status: "completed" | "failed"
+  status: "completed" | "blocked" | "failed"
   error?: string
   reviewDecision?: ReviewDecision
 }
@@ -185,6 +186,7 @@ export type RuntimePlan = {
   mode: BraincodeMode
   modeDescription: string
   brain: Pick<BrainModel, "id" | "name" | "description">
+  context: BrainTaskContext
   role: RoutedAgentRole
   agentPlan: AgentRoutingPlan
   todos: AgentTodoItem[]
@@ -510,6 +512,7 @@ function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, mod
   const selection = selectRuntimeModel(policy, models)
   return {
     ...worker,
+    contextId: crypto.randomUUID(),
     model: selection.configured,
     policy,
     piModel: toPiModelSummary(selection),
@@ -1036,7 +1039,7 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
       getApiKey: (provider) => (provider === routerSelection.piModel.provider ? apiKey : undefined),
     })
 
-    const roleEnum = "\"frontend\"|\"backend\"|\"designer\"|\"dba\"|\"devops\"|\"security\"|\"qa\"|\"review\"|\"summarize\"|\"oracle\"|\"librarian\"|\"rush\""
+    const roleEnum = routedAgentRoles.map((role) => `"${role}"`).join("|")
 
     await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
 
@@ -1046,10 +1049,12 @@ ${formatRoutedAgentRoleCatalog()}
 Routing principles (read these before deciding):
 - There is no generic "coding" role. Pick the matching specialist for code work: frontend for UI/CSS/components, backend for APIs/services, dba for schema/SQL, devops for CI/infra, security for auth/vuln, qa for tests, designer for UX without code.
 - Use librarian when the task needs codebase mapping, symbol lookup, or fact finding (it absorbs what would have been a "research" role).
-- Use oracle only for hard architecture/tradeoff/debugging reasoning that needs a top-tier model.
+- Use oracle only for hard architecture/tradeoff/debugging reasoning, high uncertainty, or cross-domain technical judgment.
 - Use review for defect inspection of existing code; use qa for forward-looking test strategy. They are not interchangeable.
 - Use rush for short conversational replies or tiny chores that need no tools (it absorbs what would have been a "fastReply" role).
 - Use summarize only when the user explicitly needs a handoff or recap.
+- Route only by role responsibility. Do not name, choose, or reason about execution engines; user configuration binds each role to its engine.
+- Dependencies are Brain-mediated: add one only when the downstream todo should receive the upstream todo's summarized result before it runs.
 
 Return ONLY a single JSON object matching this schema exactly:
 {"role":${roleEnum},"workers":[{"role":${roleEnum},"goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":${roleEnum},"reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
@@ -1081,7 +1086,7 @@ ${prompt}`, images.length > 0 ? images : undefined)
   }
 }
 
-async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = []): Promise<RuntimePlan> {
+async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId = crypto.randomUUID()): Promise<RuntimePlan> {
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
@@ -1118,6 +1123,15 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   }
   const runtimeTodoPlan = normalizeAgentRoutingPlan({ ...agentPlan, workers: runtimeWorkerInputs, todos: agentPlan.todos, dependencies: agentPlan.dependencies })
   const workers = runtimeTodoPlan.workers.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
+  const context = createBrainTaskContext({
+    id: brainContextId,
+    goal: prompt,
+    childContextIds: workers.map((worker) => worker.contextId),
+    progress: {
+      status: "pending",
+      summary: `Planned ${runtimeTodoPlan.todos.length} todo${runtimeTodoPlan.todos.length === 1 ? "" : "s"} across ${workers.length} worker context${workers.length === 1 ? "" : "s"}.`,
+    },
+  })
   const modePolicy = getModePolicy(settings.mode)
   const maxParallelAgents = brain.routing?.maxParallelAgents
   const routing = routerDecision
@@ -1133,6 +1147,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
       name: brain.name,
       description: brain.description,
     },
+    context,
     role,
     agentPlan,
     todos: runtimeTodoPlan.todos,
@@ -1201,12 +1216,11 @@ function extractAssistantText(messages: unknown[]): string {
 }
 
 function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string, phase: "support" | "review", projectSupport?: ProjectSupport): HandoffPacket {
-  const taskId = crypto.randomUUID()
   return {
     ...brainToAgentContextTransfer,
     id: crypto.randomUUID(),
     task: {
-      id: taskId,
+      id: worker.contextId,
       parentId,
       layer: "agent",
       agentRole: worker.role,
@@ -1275,13 +1289,17 @@ function summarizeProjectSupport(projectSupport: ProjectSupport) {
   }
 }
 
-function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport): string {
+function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = []): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
+  const priorResultContext = priorResults.length > 0
+    ? `\nBrain-supplied prior worker results for dependencies:\n${formatWorkerResults(priorResults)}\n`
+    : ""
   return `Run this isolated Braincode worker handoff.
 
 ${supportContext}
 Original user request:
 ${originalPrompt}
+${priorResultContext}
 
 Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
@@ -1542,6 +1560,12 @@ function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, e
   }
 }
 
+function workerResultStatus(result: WorkerResult): ExecutedWorkerResult["status"] {
+  if (result.progress.status === "failed") return "failed"
+  if (result.progress.status === "blocked") return "blocked"
+  return "completed"
+}
+
 async function runWorkerFromPlan(
   worker: RuntimeWorkerPlan,
   buildPrompt: (handoff: HandoffPacket) => string,
@@ -1561,15 +1585,17 @@ async function runWorkerFromPlan(
     try { await onWorkerEvent(event) } catch { /* ignore listener error */ }
   }
   const handoff = createWorkerHandoff(worker, sessionId, phase, projectSupport)
+  await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createHandoffAgentMessage(handoff) }, home)
   let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
 
   try {
     candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home)
   } catch (error) {
     const result = failedWorkerResult(worker, handoff, error)
+    await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
     await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, handoff, error: result.error }, home)
     await onTodoStatus?.(worker, phase, "failed", { error: result.error })
-    await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: result.error, todoIds: worker.todoIds })
+    await emit({ type: "worker_end", role: worker.role, phase, status: "failed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: result.progress, error: result.error, todoIds: worker.todoIds })
     return result
   }
 
@@ -1577,7 +1603,7 @@ async function runWorkerFromPlan(
   for (const [attempt, { selection, apiKey }] of candidates.entries()) {
     const agentSessionId = `${handoff.task.id}-${attempt + 1}`
     await onTodoStatus?.(worker, phase, "running")
-    await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, todoIds: worker.todoIds })
+    await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: { ...handoff.task.progress, status: "running" }, todoIds: worker.todoIds })
     await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
     const subagentHookContext: HookRuntimeContext = hookContext
       ? {
@@ -1619,10 +1645,12 @@ async function runWorkerFromPlan(
       const text = extractAssistantText(runtime.agent.state.messages)
       const result = normalizeWorkerResultText(text, handoff)
       const reviewDecision = phase === "review" ? normalizeReviewDecisionText(text, result) : undefined
-      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status: "completed", reviewDecision }
+      const status = workerResultStatus(result)
+      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status, reviewDecision }
+      await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(executed, { from: worker.role }), attempt: attempt + 1 }, home)
       await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
-      await onTodoStatus?.(worker, phase, "completed", { summary: result.summary })
-      await emit({ type: "worker_end", role: worker.role, phase, status: "completed", summary: text.trim(), todoIds: worker.todoIds })
+      await onTodoStatus?.(worker, phase, status, { summary: result.summary })
+      await emit({ type: "worker_end", role: worker.role, phase, status, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: result.progress, summary: text.trim(), todoIds: worker.todoIds })
       await runAndRecordHooks(
         "SubagentStop",
         {
@@ -1646,8 +1674,9 @@ async function runWorkerFromPlan(
   }
 
   const failure = failedWorkerResult(worker, handoff, lastError)
+  await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(failure, { from: worker.role }) }, home)
   await onTodoStatus?.(worker, phase, "failed", { error: failure.error })
-  await emit({ type: "worker_end", role: worker.role, phase, status: "failed", error: failure.error, todoIds: worker.todoIds })
+  await emit({ type: "worker_end", role: worker.role, phase, status: "failed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: failure.progress, error: failure.error, todoIds: worker.todoIds })
   return failure
 }
 
@@ -1659,6 +1688,7 @@ async function runSupportWorkers(
   models: BraincodeModel[],
   mode: BraincodeMode,
   toolExecution: RuntimePlan["toolExecution"],
+  dependencies: AgentTodoDependency[] = [],
   projectSupport?: ProjectSupport,
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
@@ -1667,34 +1697,59 @@ async function runSupportWorkers(
   promptImages: ImageContent[] = [],
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
-  void toolExecution // tool execution governs intra-agent tool calls; worker scheduling is independent.
+  void toolExecution // tool execution governs intra-agent tool calls; worker dependency scheduling is Brain-mediated.
 
   const limit = Number.isFinite(concurrencyCap) && (concurrencyCap as number) > 0
     ? Math.min(workers.length, Math.floor(concurrencyCap as number))
     : workers.length
   const results: ExecutedWorkerResult[] = new Array(workers.length)
-  let next = 0
-  const runOne = async (slot: number) => {
-    const index = next++
-    if (index >= workers.length) return
-    const worker = workers[index]!
-    results[index] = await runWorkerFromPlan(
-      worker,
-      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport),
-      sessionId,
-      home,
-      models,
-      mode,
-      "support",
-      projectSupport,
-      hookContext,
-      onWorkerEvent,
-      onTodoStatus,
-      promptImages,
-    )
-    return runOne(slot)
+  const pending = new Set(workers.map((_, index) => index))
+  const completedTodoIds = new Set<string>()
+  const todoOwnerById = new Map<string, number>()
+  for (const [index, worker] of workers.entries()) {
+    for (const todoId of worker.todoIds ?? []) {
+      todoOwnerById.set(todoId, index)
+    }
   }
-  await Promise.all(Array.from({ length: limit }, (_, slot) => runOne(slot)))
+
+  const workerIsReady = (index: number) => {
+    const workerTodoIds = new Set(workers[index]?.todoIds ?? [])
+    if (workerTodoIds.size === 0) return true
+    return dependencies.every((dependency) => {
+      if (!workerTodoIds.has(dependency.toTodoId)) return true
+      const owner = todoOwnerById.get(dependency.fromTodoId)
+      return owner === undefined || owner === index || !pending.has(owner) || completedTodoIds.has(dependency.fromTodoId)
+    })
+  }
+
+  while (pending.size > 0) {
+    const pendingIndexes = Array.from(pending)
+    const readyIndexes = pendingIndexes.filter(workerIsReady)
+    const wave = (readyIndexes.length > 0 ? readyIndexes : pendingIndexes).slice(0, limit)
+    await Promise.all(wave.map(async (index) => {
+      pending.delete(index)
+      const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
+      const worker = workers[index]!
+      results[index] = await runWorkerFromPlan(
+        worker,
+        (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
+        sessionId,
+        home,
+        models,
+        mode,
+        "support",
+        projectSupport,
+        hookContext,
+        onWorkerEvent,
+        onTodoStatus,
+        promptImages,
+      )
+      for (const todoId of worker.todoIds ?? []) {
+        completedTodoIds.add(todoId)
+      }
+    }))
+  }
+
   return results
 }
 
@@ -1786,7 +1841,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const promptImages = expanded.images
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
-  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages)
+  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId)
+  await appendSessionRecord(sessionId, { type: "context_plan", context: plan.context }, home)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
   if (request.onPlan) {
     try {
@@ -1807,7 +1863,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
     updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
   const patchBaseline = await collectPatchBaseline(cwd)
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
+  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()

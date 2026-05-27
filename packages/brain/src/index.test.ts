@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, formatRoutedAgentRoleCatalog, getModePolicy, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -93,4 +93,81 @@ test("formatRoutedAgentRoleCatalog lists each routed role exactly once", () => {
 test("selectBrain and selectModelPolicy return configured policies", () => {
   expect(selectBrain([brain], "brain")).toBe(brain)
   expect(selectModelPolicy(brain, "review")).toEqual({ modelId: "review", thinkingLevel: "high" })
+  expect(selectModelPolicy({ ...brain, roles: { ...brain.roles, qa: undefined as never } }, "qa")).toEqual({ modelId: "rush", thinkingLevel: "low" })
+  expect(() => selectBrain([brain], "missing")).toThrow("Unknown brain id")
+})
+
+test("role prompt and fallback role helpers normalize simple inputs", () => {
+  expect(getAgentRoleSystemPrompt("review", { modelId: "review", thinkingLevel: "high", systemPrompt: " custom " })).toBe("custom")
+  expect(getAgentRoleSystemPrompt("review")).toBe(agentRoleSystemPrompts.review)
+  expect(createAgentTodoId("backend", 2)).toBe("todo-03-backend")
+  expect(selectAgentRole("anything")).toBe("rush")
+})
+
+test("normalizeAgentTodos trims todos, repairs ids, and assigns workers", () => {
+  const workers: AgentWorkerPlan[] = [
+    { role: "backend", goal: "Implement API", reason: "needs backend" },
+    { role: "review", goal: "Review patch", reason: "risky", todoIds: ["missing"] },
+  ]
+  const todos: AgentTodoItem[] = [
+    { id: " Build API! ", title: " Build API ", role: "backend", status: "done" as never, reason: " because ", summary: " ok " },
+    { id: "Build API", title: "Review", role: "review", status: "blocked" },
+    { id: "empty", title: " ", role: "rush", status: "pending" },
+  ]
+
+  const normalized = normalizeAgentTodos(workers, todos)
+
+  expect(normalized.todos.map((todo) => todo.id)).toEqual(["build-api", "build-api-2"])
+  expect(normalized.todos[0]).toMatchObject({ title: "Build API", status: "pending", reason: "because", summary: "ok" })
+  expect(normalized.todos[1]).toMatchObject({ title: "Review", status: "blocked" })
+  expect(normalized.workers[0]?.todoIds).toEqual(["build-api"])
+  expect(normalized.workers[1]?.todoIds).toEqual(["build-api-2"])
+})
+
+test("normalizeAgentRoutingPlan filters invalid dependencies and derives support/review edges", () => {
+  const plan = normalizeAgentRoutingPlan({
+    primaryRole: "backend",
+    workers: [
+      { role: "librarian", goal: "Find context", reason: "support" },
+      { role: "backend", goal: "Implement", reason: "primary" },
+      { role: "review", goal: "Review", reason: "review" },
+    ],
+    todos: [
+      { id: "support", title: "Find context", role: "librarian", status: "pending" },
+      { id: "primary", title: "Implement", role: "backend", status: "pending" },
+      { id: "review", title: "Review", role: "review", status: "pending" },
+    ],
+    dependencies: [
+      { fromTodoId: "support", toTodoId: "primary", reason: " explicit " },
+      { fromTodoId: "support", toTodoId: "missing" },
+      { fromTodoId: "review", toTodoId: "review" },
+    ],
+    requiresReview: true,
+    reason: "test",
+  })
+
+  expect(plan.dependencies).toEqual([
+    { fromTodoId: "support", toTodoId: "primary", reason: "explicit" },
+    { fromTodoId: "primary", toTodoId: "review", reason: "Review runs after implementation output exists." },
+  ])
+})
+
+test("normalizeAgentRoutingPlan reviews non-review work when no primary todo exists", () => {
+  const plan = normalizeAgentRoutingPlan({
+    primaryRole: "backend",
+    workers: [
+      { role: "librarian", goal: "Find context", reason: "support" },
+      { role: "review", goal: "Review", reason: "review" },
+    ],
+    todos: [
+      { id: "support", title: "Find context", role: "librarian", status: "pending" },
+      { id: "review", title: "Review", role: "review", status: "pending" },
+    ],
+    requiresReview: true,
+    reason: "test",
+  })
+
+  expect(plan.dependencies).toEqual([
+    { fromTodoId: "support", toTodoId: "review", reason: "Review runs after implementation output exists." },
+  ])
 })

@@ -2,8 +2,8 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-67.01%25%20lines-yellow)
+![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 A multi-model coding agent orchestrator.

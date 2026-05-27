@@ -740,7 +740,7 @@ export type SessionContextEntry =
       timestamp?: number;
       phase?: string;
       role?: string;
-      status: "completed" | "failed";
+      status: "completed" | "blocked" | "failed";
       summary?: string;
       error?: string;
       attempt?: number;
@@ -902,6 +902,10 @@ function sessionStatus(value: unknown, fallback: SessionSummary["status"]): Sess
   return value === "completed" || value === "failed" || value === "incomplete" ? value : fallback;
 }
 
+function workerSessionStatus(value: unknown): Extract<SessionContextEntry, { type: "worker" }>["status"] {
+  return value === "failed" || value === "blocked" ? value : "completed";
+}
+
 export async function readSessionContext(
   sessionRef: string,
   home = getBraincodeHome(),
@@ -995,7 +999,7 @@ export async function readSessionContext(
         timestamp,
         phase: stringField(record, "phase"),
         role: stringField(record, "worker"),
-        status: sessionStatus(result?.status, "completed") === "failed" ? "failed" : "completed",
+        status: workerSessionStatus(result?.status),
         summary: result ? stringField(result, "summary") : undefined,
         attempt,
       });

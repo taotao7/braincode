@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -70,6 +70,11 @@ test("MCP server entries can be listed and toggled disabled", async () => {
   parsed = JSON.parse(await Bun.file(filePath).text())
   expect(parsed.servers.alpha.disabled).toBeUndefined()
   await expect(setMcpServerDisabled(filePath, "missing", true)).rejects.toThrow("not found")
+  await expect(setMcpServerDisabled(join(home, "missing.json"), "alpha", true)).rejects.toThrow("MCP config not found")
+
+  const emptyPath = join(home, "empty-mcp.json")
+  await Bun.write(emptyPath, JSON.stringify({ servers: null }))
+  await expect(setMcpServerDisabled(emptyPath, "alpha", true)).rejects.toThrow("has no 'mcpServers' map")
 })
 
 test("normalizeHooks keeps trusted command metadata and filters invalid groups", () => {
@@ -158,6 +163,28 @@ test("readHookSources discovers user and project hook config", async () => {
   expect(sources.map((source) => source.kind)).toEqual(["user", "project"])
   expect(sources[0]?.document.hooks.UserPromptSubmit?.[0]?.hooks[0]?.trusted).toBe(true)
   expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(false)
+})
+
+test("setHookHandlerEnabled toggles handlers and validates indexes", async () => {
+  const home = await makeTempHome()
+  const hooksPath = join(home, "hooks.json")
+  await Bun.write(hooksPath, JSON.stringify({
+    hooks: {
+      Stop: [{ matcher: "done", hooks: [{ command: "echo done", enabled: true }] }],
+    },
+  }))
+
+  await setHookHandlerEnabled(hooksPath, "Stop", 0, 0, false)
+  let parsed = JSON.parse(await Bun.file(hooksPath).text())
+  expect(parsed.hooks.Stop[0].hooks[0].enabled).toBe(false)
+
+  await expect(setHookHandlerEnabled(join(home, "missing-hooks.json"), "Stop", 0, 0, true)).rejects.toThrow("hooks file not found")
+  await expect(setHookHandlerEnabled(hooksPath, "UserPromptSubmit", 0, 0, true)).rejects.toThrow("hook group not found")
+  await expect(setHookHandlerEnabled(hooksPath, "Stop", 0, 1, true)).rejects.toThrow("hook handler not found")
+
+  await setHookHandlerEnabled(hooksPath, "Stop", 0, 0, true)
+  parsed = JSON.parse(await Bun.file(hooksPath).text())
+  expect(parsed.hooks.Stop[0].hooks[0].enabled).toBe(true)
 })
 
 test("readUserSupport discovers user MCP config and skills", async () => {
@@ -253,6 +280,18 @@ test("settings can be read and written from an explicit home", async () => {
   await writeSettings(nextSettings, home)
 
   await expect(readSettings(home)).resolves.toEqual(nextSettings)
+})
+
+test("readSettings migrates legacy default brain id", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+  const settings = await readSettings(home)
+  await Bun.write(paths.settings, JSON.stringify({ ...settings, defaultBrainId: "default" }))
+
+  const migrated = await readSettings(home)
+
+  expect(migrated.defaultBrainId).toBe("brain")
+  expect(JSON.parse(await Bun.file(paths.settings).text()).defaultBrainId).toBe("brain")
 })
 
 test("non-secret config documents can be read and written from an explicit home", async () => {
@@ -406,6 +445,7 @@ test("appendSessionRecord writes jsonl session records", async () => {
 
   const text = await Bun.file(join(paths.sessions, "test-session.jsonl")).text()
   expect(text.trim()).toContain('"type":"run_start"')
+  await expect(appendSessionRecord("../escape", { type: "run_start", prompt: "bad" }, home)).rejects.toThrow("sessionId may only contain")
 })
 
 test("readSessionContext returns compact session records", async () => {
@@ -465,4 +505,83 @@ test("readSessionContext returns compact session records", async () => {
   expect(context?.entries.find((entry) => entry.type === "check")?.status).toBe("failed")
   expect(context?.entries.find((entry) => entry.type === "review")?.decision).toBe("changes_requested")
   expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("frontend")
+})
+
+test("readSessionContext handles failure, fallback, handoff, and truncation entries", async () => {
+  const home = await makeTempHome()
+
+  await appendSessionRecord("failure-session", {
+    type: "run_error",
+    error: "provider unavailable",
+    willFallback: true,
+    attempt: 1,
+  }, home)
+  await appendSessionRecord("failure-session", {
+    type: "run_start",
+    prompt: "resume work",
+    plan: { role: "backend" },
+    attempt: 2,
+  }, home)
+  await appendSessionRecord("failure-session", {
+    type: "worker_error",
+    phase: "support",
+    worker: "librarian",
+    error: "index unavailable",
+    attempt: 2,
+  }, home)
+  await appendSessionRecord("failure-session", {
+    type: "todo_update",
+    phase: "primary",
+    role: "backend",
+    status: "unknown",
+    summary: "waiting",
+  } as never, home)
+  await appendSessionRecord("failure-session", {
+    type: "check_summary",
+    status: "unknown",
+    reason: "not configured",
+    results: [{ status: "unknown", exitCode: null }],
+    attempt: 2,
+  } as never, home)
+  await appendSessionRecord("failure-session", {
+    type: "review_decision",
+    decision: "unknown",
+    rationale: "no reviewer",
+    requiredChanges: [" fix "],
+    blockingIssues: [" blocker "],
+    attempt: 2,
+  } as never, home)
+  await appendSessionRecord("failure-session", {
+    type: "handoff",
+    summary: "continue backend work",
+    focus: "tests",
+    trigger: "auto",
+  }, home)
+  await appendSessionRecord("failure-session", {
+    type: "run_start",
+    prompt: "new activity",
+    plan: {},
+    attempt: 3,
+  }, home)
+
+  const context = await readSessionContext("failure-session", home)
+
+  expect(context?.summary).toBe("provider unavailable")
+  expect(context?.entries.find((entry) => entry.type === "error")?.willFallback).toBe(true)
+  expect(context?.entries.find((entry) => entry.type === "worker")?.status).toBe("failed")
+  expect(context?.entries.find((entry) => entry.type === "todo")?.status).toBe("pending")
+  expect(context?.entries.find((entry) => entry.type === "check")?.status).toBe("skipped")
+  expect(context?.entries.find((entry) => entry.type === "check")?.checks[0]).toEqual({ name: "unknown", status: "failed", exitCode: null })
+  expect(context?.entries.find((entry) => entry.type === "review")?.decision).toBe("blocked")
+  expect(context?.latestHandoff).toMatchObject({
+    summary: "continue backend work",
+    focus: "tests",
+    trigger: "auto",
+    fresh: false,
+  })
+  expect(context?.latestHandoff?.timestamp).toBeNumber()
+
+  const truncated = await readSessionContext("failure-session", home, 2)
+  expect(truncated?.truncated).toBe(true)
+  expect(truncated?.entries).toHaveLength(2)
 })

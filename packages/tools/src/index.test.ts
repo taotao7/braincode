@@ -39,7 +39,17 @@ test("default tool configuration enables the first-party local coding toolset", 
 
 test("normalizeToolConfiguration preserves and clamps check runner configuration", () => {
   const config = normalizeToolConfiguration({
-    tools: [],
+    tools: [
+      {
+        name: "custom_tool",
+        description: "Project-specific helper.",
+        permissions: ["read"],
+        risk: "low",
+        defaultEnabled: true,
+        enabled: true,
+        requiresApproval: false,
+      },
+    ],
     checks: {
       enabled: false,
       scripts: ["test", " test ", "", "lint"],
@@ -54,6 +64,7 @@ test("normalizeToolConfiguration preserves and clamps check runner configuration
     timeoutMs: 2_500,
     maxOutputBytes: 512_000,
   })
+  expect(config.tools.find((tool) => tool.name === "custom_tool")?.approvalPolicy).toBe("allow")
 })
 
 test("createLocalCodingTools respects disabled tools from tools.json", async () => {
@@ -93,6 +104,24 @@ test("createLocalCodingTools read-only mode excludes write and execute tools", a
   }
 })
 
+test("local tool prepareArguments normalizes aliases and primitive coercions", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-prepare-test-"))
+  try {
+    expect(getTool("list_files", projectRoot).prepareArguments?.({ dir: ".", pattern: "*.ts", limit: "2" })).toEqual({ directory: ".", glob: "*.ts", maxFiles: 2 })
+    expect(getTool("read_file", projectRoot).prepareArguments?.({ filePath: "a.txt", offset: "1", maxBytes: "3" })).toEqual({ path: "a.txt", offset: 1, limit: 3 })
+    expect(getTool("search_files", projectRoot).prepareArguments?.({ text: "needle", mode: "path", limit: "5" })).toEqual({ query: "needle", mode: "path", glob: undefined, maxResults: 5 })
+    expect(getTool("edit_file", projectRoot).prepareArguments?.({ file: "a.txt", old: "x", new: "y", replace_all: "true" })).toEqual({ path: "a.txt", content: undefined, oldString: "x", newString: "y", replaceAll: true })
+    expect(getTool("apply_patch", projectRoot).prepareArguments?.({ diff: "patch" })).toEqual({ patch: "patch" })
+    expect(getTool("shell", projectRoot).prepareArguments?.({ cmd: "echo hi", timeout: "1000" })).toEqual({ command: "echo hi", timeoutMs: 1000 })
+    expect(getTool("git_diff", projectRoot).prepareArguments?.({ file: "a.txt", cached: "false", summary: true })).toEqual({ path: "a.txt", staged: false, stat: true })
+    expect(getTool("get_changed_files", projectRoot).prepareArguments?.({ ignored: true })).toEqual({})
+    expect(getTool("run_script", projectRoot).prepareArguments?.({ name: "test", args: ["--watch", 1], timeout: "2000" })).toEqual({ script: "test", args: ["--watch"], timeoutMs: 2000 })
+    expect(() => getTool("read_file", projectRoot).prepareArguments?.({})).toThrow("Missing required string argument")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("local read/search/edit tools operate inside the project root", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-local-test-"))
   try {
@@ -117,6 +146,31 @@ test("local read/search/edit tools operate inside the project root", async () =>
     const updated = await readFile.execute("read-2", { path: "README.md" } as never)
     expect(textContent(updated)).toContain("hello local tools")
   } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("search_files path mode and fallback search work without rg", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-search-fallback-test-"))
+  const originalPath = process.env.PATH
+  try {
+    await Bun.write(join(projectRoot, "alpha.ts"), "needle\n")
+    await Bun.write(join(projectRoot, "beta.md"), "needle\n")
+
+    const searchFiles = getTool("search_files", projectRoot)
+    const pathResult = await searchFiles.execute("search-path", { query: "alpha", mode: "path", maxResults: 1 } as never)
+    expect(textContent(pathResult)).toBe("alpha.ts")
+
+    process.env.PATH = ""
+    const listFiles = getTool("list_files", projectRoot)
+    const listResult = await listFiles.execute("list-fallback", { glob: "*.md" } as never)
+    const contentResult = await searchFiles.execute("search-fallback", { query: "needle", glob: "*.ts" } as never)
+
+    expect(textContent(listResult)).toContain("beta.md")
+    expect(textContent(contentResult)).toContain("alpha.ts:1:needle")
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
     await rm(projectRoot, { recursive: true, force: true })
   }
 })
@@ -201,6 +255,7 @@ test("edit_file writes new files and replaces all matches", async () => {
 
     expect(textContent(replaceResult)).toContain("replace nested/file.txt")
     expect(await Bun.file(join(projectRoot, "nested/file.txt")).text()).toBe("1 1 two")
+    await expect(editFile.execute("write-missing-input", { path: "nested/file.txt" } as never)).rejects.toThrow("requires either content")
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

@@ -1,4 +1,4 @@
-import type { ContextRef } from "@braincode/protocol"
+import type { AgentMessage, ContextRef } from "@braincode/protocol"
 
 export type ContextLayer = "brain" | "agent"
 
@@ -67,4 +67,50 @@ export type WorkerResult = AgentToBrainContextTransfer & {
   artifacts: ContextRef[]
   risks: string[]
   nextQuestions: string[]
+}
+
+export type CreateBrainTaskContextInput = {
+  id: string
+  goal: string
+  childContextIds?: string[]
+  contextRefs?: ContextRef[]
+  progress?: TaskProgress
+}
+
+export function createBrainTaskContext(input: CreateBrainTaskContextInput): BrainTaskContext {
+  return {
+    id: input.id,
+    layer: "brain",
+    goal: input.goal,
+    progress: input.progress ?? { status: "pending", summary: "Brain orchestration context is planned." },
+    childContextIds: input.childContextIds ?? [],
+    contextRefs: input.contextRefs ?? [],
+  }
+}
+
+export function createHandoffAgentMessage(handoff: HandoffPacket, messageId = crypto.randomUUID()): AgentMessage {
+  return {
+    id: messageId,
+    parentId: handoff.task.parentId,
+    from: "brain",
+    to: handoff.task.agentRole,
+    kind: "handoff",
+    payload: handoff,
+    contextRefs: handoff.task.contextRefs,
+  }
+}
+
+export function createWorkerResultAgentMessage(
+  result: WorkerResult,
+  options: { from?: string; messageId?: string } = {},
+): AgentMessage {
+  return {
+    id: options.messageId ?? crypto.randomUUID(),
+    parentId: result.handoffId,
+    from: options.from ?? result.taskId,
+    to: "orchestrator",
+    kind: result.progress.status === "failed" ? "error" : "result",
+    payload: result,
+    contextRefs: result.artifacts,
+  }
 }

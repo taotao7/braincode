@@ -21,7 +21,7 @@ type TranscriptItem = {
   toolName?: string
   toolCategory?: ToolCategory
   toolStatus?: "running" | "ok" | "failed"
-  workerStatus?: "running" | "completed" | "failed"
+  workerStatus?: "running" | "completed" | "blocked" | "failed"
   todoStatus?: "pending" | "running" | "completed" | "blocked" | "failed"
   decisionStatus?: "pending" | "approved" | "blocked"
   todoId?: string
@@ -1338,7 +1338,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (itemId) workerItems.delete(key)
       const text = event.status === "completed"
         ? `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  done${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
-        : `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`
+        : event.status === "blocked"
+          ? `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  blocked${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
+          : `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`
       if (itemId) {
         updateItem(itemId, {
           workerStatus: event.status,
@@ -2414,6 +2416,7 @@ function labelFor(item: TranscriptItem): string {
     case "worker": {
       switch (item.workerStatus) {
         case "completed": return "◉"
+        case "blocked": return "◌"
         case "failed": return "◌"
         default: return "◎"
       }
@@ -2666,6 +2669,7 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
     case "worker": {
       switch (item.workerStatus) {
         case "completed": return "magenta"
+        case "blocked": return "yellow"
         case "failed": return "red"
         default: return "yellow"
       }
