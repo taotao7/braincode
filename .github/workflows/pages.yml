@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
+      - 'apps/site/**'
       - '.github/workflows/pages.yml'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -25,9 +27,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build site
+        env:
+          VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || 'dev' }}
+        run: bun run --filter @braincode/site build
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: apps/site/dist
       - id: deployment
         uses: actions/deploy-pages@v4

@@ -231,22 +231,22 @@ test("readSessionContext returns compact session records", async () => {
   await appendSessionRecord("context-session", {
     type: "run_start",
     prompt: "implement feature",
-    plan: { brain: { id: "brain" }, role: "coding" },
+    plan: { brain: { id: "brain" }, role: "frontend" },
     attempt: 1,
   }, home)
   await appendSessionRecord("context-session", {
     type: "worker_end",
     phase: "support",
-    worker: "research",
+    worker: "librarian",
     result: { status: "completed", summary: "found relevant prior work" },
     attempt: 1,
   }, home)
   await appendSessionRecord("context-session", {
     type: "todo_update",
     phase: "support",
-    role: "research",
+    role: "librarian",
     status: "completed",
-    todos: [{ id: "todo-01-research", title: "Find prior work", role: "research", status: "completed" }],
+    todos: [{ id: "todo-01-librarian", title: "Find prior work", role: "librarian", status: "completed" }],
     summary: "found relevant prior work",
   }, home)
   await appendSessionRecord("context-session", {
@@ -262,5 +262,5 @@ test("readSessionContext returns compact session records", async () => {
   expect(context?.summary).toBe("implemented feature")
   expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "run"])
   expect(context?.entries.find((entry) => entry.type === "todo")?.status).toBe("completed")
-  expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("coding")
+  expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("frontend")
 })

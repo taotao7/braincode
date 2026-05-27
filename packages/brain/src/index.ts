@@ -14,7 +14,6 @@ export type BrainModel = {
   planner: ModelPolicy
   roles: {
     routeBrain: ModelPolicy
-    coding: ModelPolicy
     frontend: ModelPolicy
     backend: ModelPolicy
     designer: ModelPolicy
@@ -22,10 +21,8 @@ export type BrainModel = {
     devops: ModelPolicy
     security: ModelPolicy
     qa: ModelPolicy
-    research: ModelPolicy
     review: ModelPolicy
     summarize: ModelPolicy
-    fastReply: ModelPolicy
     oracle: ModelPolicy
     librarian: ModelPolicy
     rush: ModelPolicy
@@ -49,7 +46,6 @@ export type AgentRole = keyof BrainModel["roles"]
 export type RoutedAgentRole = Exclude<AgentRole, "routeBrain" | "pet">
 
 export const routedAgentRoles = [
-  "coding",
   "frontend",
   "backend",
   "designer",
@@ -57,10 +53,8 @@ export const routedAgentRoles = [
   "devops",
   "security",
   "qa",
-  "research",
   "review",
   "summarize",
-  "fastReply",
   "oracle",
   "librarian",
   "rush",
@@ -77,11 +71,6 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     label: "Route Brain",
     responsibility: "Own the orchestration context layer: classify intent, choose the primary role, choose useful supporting workers, and return compact routing decisions.",
     boundaries: "Do not solve the task, do not call tools, and never route work to routeBrain.",
-  },
-  coding: {
-    label: "Coding",
-    responsibility: "Implement code changes, follow repository conventions, keep edits scoped, and run focused verification.",
-    boundaries: "Do not redesign product, security, data, or operations decisions unless the prompt asks for it or specialist results require it.",
   },
   frontend: {
     label: "Frontend",
@@ -118,11 +107,6 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     responsibility: "Plan tests, edge cases, regression checks, reproducible bugs, acceptance criteria, and verification strategy.",
     boundaries: "Do not rewrite implementation unless the prompt explicitly asks; focus on evidence and risk coverage.",
   },
-  research: {
-    label: "Research",
-    responsibility: "Find verified facts from files, docs, or external sources and separate evidence from inference.",
-    boundaries: "Do not implement; return concise findings with source references when available.",
-  },
   review: {
     label: "Review",
     responsibility: "Inspect code or plans for correctness, regressions, security issues, missing tests, and risky assumptions.",
@@ -133,11 +117,6 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     responsibility: "Compress context into handoff-ready decisions, changed artifacts, validation, caveats, and next steps.",
     boundaries: "Do not introduce new plans or facts that were not present in the provided context.",
   },
-  fastReply: {
-    label: "Fast Reply",
-    responsibility: "Answer simple conversational prompts or small factual asks directly with minimal ceremony.",
-    boundaries: "Avoid tool use, long analysis, and multi-agent routing unless the prompt expands beyond a quick reply.",
-  },
   oracle: {
     label: "Oracle",
     responsibility: "Handle hard reasoning, architecture tradeoffs, ambiguous planning, deep debugging, and high-risk technical decisions.",
@@ -145,13 +124,13 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
   },
   librarian: {
     label: "Librarian",
-    responsibility: "Understand large or unfamiliar codebases, trace architecture, locate symbols, and explain file/function relationships.",
-    boundaries: "Do not change code; return precise references and a compact map of what matters.",
+    responsibility: "Understand codebases, trace architecture, locate symbols, AND find verified facts from files, docs, or external sources.",
+    boundaries: "Do not change code; return precise references, a compact map of what matters, and cite sources when available.",
   },
   rush: {
     label: "Rush",
-    responsibility: "Finish miscellaneous one-off tasks quickly when no specialist role is a better fit.",
-    boundaries: "Keep scope tight and hand off to a specialist role when the task clearly belongs elsewhere.",
+    responsibility: "Finish small one-off tasks quickly, including short conversational replies, when no specialist role is a better fit.",
+    boundaries: "Keep scope tight, avoid tools when a direct reply suffices, and hand off to a specialist when the task clearly belongs elsewhere.",
   },
   pet: {
     label: "Pet",
@@ -165,14 +144,8 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "You are Braincode's route brain.",
     "Your only job is intelligent routing from Braincode's orchestration context layer: classify the user's intent, choose exactly one primary routed role, and choose only worker agents that materially improve the result.",
     "Return compact structured routing decisions. Do not solve the user's task. Do not include routeBrain as a worker.",
-    "Prefer coding as the primary role whenever the user asks to implement, fix, create, change, refactor, or edit code. Add specialist workers for frontend, backend, security, QA, DBA, DevOps, design, research, review, oracle, librarian, summarize, fastReply, or rush only when their scope is clearly relevant.",
+    "There is no generic coding role. Pick the matching specialist for code work: frontend for UI/CSS/components, backend for APIs/services, dba for schema/SQL, devops for CI/infra, security for auth/vuln work, qa for tests, designer for UX without code. Use rush only for small one-off chores or short conversational replies. Use librarian for codebase mapping or fact finding, oracle for hard architecture reasoning, review for defect inspection, summarize for handoff compression.",
     "Worker goals must be self-contained because each Braincode worker owns a separate task context and never receives the full Brain context or another worker's private context.",
-  ].join("\n"),
-  coding: [
-    "You are Braincode's coding agent.",
-    "Own implementation: read the provided context, make the smallest correct code changes, preserve repository conventions, and integrate specialist worker findings when they are useful.",
-    "Validate with focused checks that match the risk. State exactly what changed, what was verified, and what risk remains.",
-    "Do not broaden into product redesign, security review, data modeling, or infrastructure work unless the prompt or worker handoff requires it.",
   ].join("\n"),
   frontend: [
     "You are Braincode's frontend agent.",
@@ -216,12 +189,6 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Return focused checks that match the blast radius and include what to automate versus what to inspect manually.",
     "Do not rewrite implementation unless explicitly requested; identify evidence gaps and practical test additions.",
   ].join("\n"),
-  research: [
-    "You are Braincode's research agent.",
-    "Own fact finding: inspect relevant files or sources, separate verified evidence from inference, and return concise actionable findings.",
-    "Cite concrete files, symbols, docs, or URLs when available. Highlight freshness or uncertainty when it matters.",
-    "Do not implement or over-plan; stop at the information needed by the primary agent.",
-  ].join("\n"),
   review: [
     "You are Braincode's review agent.",
     "Own defect finding: correctness bugs, regressions, security issues, missing tests, bad assumptions, and risky edge cases.",
@@ -234,12 +201,6 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Remove chatter and duplication while keeping enough detail for another agent to resume safely.",
     "Do not introduce new facts, decisions, or promises beyond the supplied context.",
   ].join("\n"),
-  fastReply: [
-    "You are Braincode's fast reply agent.",
-    "Own simple direct answers: short conversation, small clarifications, and low-risk factual replies that do not need tools or multi-agent work.",
-    "Be concise, answer the actual question, and avoid unnecessary process narration.",
-    "Escalate only when the prompt clearly requires code, research, review, or planning.",
-  ].join("\n"),
   oracle: [
     "You are Braincode's oracle agent.",
     "Own hard thinking: architecture decisions, deep debugging, complex tradeoffs, ambiguous plans, and high-risk technical judgment.",
@@ -248,14 +209,14 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
   ].join("\n"),
   librarian: [
     "You are Braincode's librarian agent.",
-    "Own codebase understanding: map unfamiliar repositories, locate relevant modules and symbols, trace relationships, and explain how pieces fit together.",
-    "Prefer code graph or structured code discovery, then return precise file/function references and a concise architecture map.",
-    "Do not make code changes; provide enough orientation for the primary agent to act.",
+    "Own codebase understanding AND fact finding: map unfamiliar repositories, locate relevant modules and symbols, trace relationships, and find verified facts from files, docs, or external sources.",
+    "Prefer code graph or structured code discovery for code questions. Separate evidence from inference, and cite files, symbols, docs, or URLs when available.",
+    "Do not make code changes; provide enough orientation and references for the primary agent to act.",
   ].join("\n"),
   rush: [
     "You are Braincode's rush agent.",
-    "Own odd jobs and quick one-off chores that do not fit a specialist role. Move directly, keep scope tight, and finish with minimal ceremony.",
-    "If the request clearly belongs to a specialist role, state the appropriate handoff instead of forcing it into rush.",
+    "Own quick one-off chores AND short conversational replies that do not need tools or multi-agent work. Move directly, keep scope tight, and finish with minimal ceremony.",
+    "Be concise and avoid unnecessary process narration. If the request clearly belongs to a specialist role, state the appropriate handoff instead of forcing it into rush.",
     "Do not invent broad process or architecture for a small task.",
   ].join("\n"),
   pet: [
@@ -345,31 +306,10 @@ export function formatRoutedAgentRoleCatalog(): string {
     .join("\n")
 }
 
-type RoleSignal = {
-  role: RoutedAgentRole
-  pattern: RegExp
-  goal: string
-  reason: string
-}
-
-const roleSignals: RoleSignal[] = [
-  { role: "librarian", pattern: /\b(librarian|external codebase|large codebase|repository architecture|trace codebase|codebase architecture|代码库理解|外部仓库|架构梳理)\b/, goal: "Understand the relevant codebase or repository structure and return concise findings.", reason: "The prompt asks for codebase or repository understanding." },
-  { role: "oracle", pattern: /\b(oracle|deep reasoning|architecture|architect|hard debugging|tradeoff|复杂架构|深入分析|疑难|架构)\b/, goal: "Provide deep reasoning, architecture guidance, or a hard-debugging plan.", reason: "The prompt asks for deep reasoning, architecture, or difficult debugging." },
-  { role: "frontend", pattern: /\b(frontend|front-end|ui|ux|react|vue|svelte|css|html|页面|前端|界面)\b/, goal: "Handle UI, browser behavior, components, styling, and user-facing polish.", reason: "The prompt contains frontend or UI signals." },
-  { role: "backend", pattern: /\b(backend|back-end|api|server|service|endpoint|后端|接口|服务端)\b/, goal: "Handle APIs, services, validation, persistence boundaries, and server behavior.", reason: "The prompt contains backend or API signals." },
-  { role: "designer", pattern: /\b(design|designer|visual|mockup|wireframe|style|brand|品牌|设计|视觉|原型)\b/, goal: "Provide practical UX flow, visual direction, and interaction guidance.", reason: "The prompt contains product design or visual design signals." },
-  { role: "dba", pattern: /\b(database|db|dba|sql|postgres|mysql|sqlite|schema|migration|index|query plan|数据库|索引|迁移)\b/, goal: "Review schema, migrations, indexes, query plans, and data integrity.", reason: "The prompt contains database, schema, migration, or query signals." },
-  { role: "devops", pattern: /\b(devops|deploy|deployment|docker|kubernetes|k8s|ci|cd|infra|ops|observability|部署|运维|流水线)\b/, goal: "Handle CI/CD, deployment, containers, infrastructure, and operations.", reason: "The prompt contains deployment, infrastructure, or operations signals." },
-  { role: "security", pattern: /\b(security|secure|auth|permission|vulnerability|threat|secret|token|安全|权限|漏洞|鉴权|密钥)\b/, goal: "Analyze auth, permissions, secrets, vulnerabilities, and secure defaults.", reason: "The prompt contains security, auth, permission, or secret-handling signals." },
-  { role: "qa", pattern: /\b(test|tests|testing|qa|e2e|unit test|integration test|regression|测试|质量|回归)\b/, goal: "Plan focused tests, edge cases, regression checks, and verification strategy.", reason: "The prompt contains testing or quality signals." },
-  { role: "review", pattern: /\b(review|audit|inspect|check|code review|审查|检查)\b/, goal: "Review code or plans for correctness, regressions, risk, and missing tests.", reason: "The prompt asks for review, audit, inspection, or checking." },
-  { role: "summarize", pattern: /\b(summarize|summary|recap|handoff|总结|摘要|交接)\b/, goal: "Summarize decisions, context, validation, caveats, and next steps.", reason: "The prompt asks for summarization or handoff context." },
-  { role: "research", pattern: /\b(research|find|search|investigate|look up|调研|搜索|查找|调查)\b/, goal: "Find relevant facts quickly and return concise actionable findings.", reason: "The prompt asks for research, search, or investigation." },
-  { role: "rush", pattern: /\b(rush|quick chore|misc|one-off|随便|杂项|小活|快速处理)\b/, goal: "Handle a quick miscellaneous task while keeping scope tight.", reason: "The prompt describes a miscellaneous or quick one-off chore." },
-]
-
-const implementationPattern = /\b(implement|build|create|add|fix|change|modify|refactor|code|实现|开发|修复|新增|修改|重构)\b/
-const simpleConversationPattern = /\b(hi|hello|thanks|thank you|你好|谢谢)\b/
+// Heuristic for "this prompt is likely to cause file edits", used to set
+// `requiresReview`. The brain's actual routing is LLM-driven (see routeBrain
+// prompt in packages/agent-runtime); the patterns below intentionally do NOT
+// pick a role — they only flag risk.
 const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
@@ -486,46 +426,20 @@ export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" |
   }
 }
 
+// Deterministic fallback plan used when the LLM-driven routeBrain in
+// packages/agent-runtime fails or is unavailable. Always returns a safe rush
+// worker; the LLM is expected to override this in the normal path.
 export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRoutingPlan {
   const normalized = prompt.toLowerCase()
-  const matched = roleSignals.filter((signal) => signal.pattern.test(normalized))
-
-  if (matched.length === 0 && simpleConversationPattern.test(normalized) && normalized.length < 120) {
-    return normalizeAgentRoutingPlan({
-      primaryRole: "fastReply",
-      workers: [{ role: "fastReply", goal: "Answer the simple conversational prompt directly.", reason: "The prompt is short conversational text." }],
-      requiresReview: false,
-      reason: "Short conversational prompt routed to fastReply.",
-    })
-  }
-
-  if (matched.length === 0) {
-    return normalizeAgentRoutingPlan({
-      primaryRole: "coding",
-      workers: [{ role: "coding", goal: "Implement or modify code according to the user's request.", reason: "No specialized role signal was stronger than the default coding path." }],
-      requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
-      reason: "No specialized signal matched; defaulting to coding.",
-    })
-  }
-
-  const implementationRequested = implementationPattern.test(normalized)
-  const workersByRole = new Map<RoutedAgentRole, AgentWorkerPlan>()
-  if (implementationRequested) {
-    workersByRole.set("coding", { role: "coding", goal: "Implement the requested code changes and integrate specialist guidance when needed.", reason: "The prompt asks for implementation or code changes." })
-  }
-  for (const signal of matched) {
-    workersByRole.set(signal.role, { role: signal.role, goal: signal.goal, reason: signal.reason })
-  }
-
-  const maxWorkers = Math.max(1, brain?.routing.maxParallelAgents ?? 1)
-  const workers = Array.from(workersByRole.values()).slice(0, maxWorkers)
-  const primaryRole = workers.find((worker) => worker.role === "coding")?.role ?? workers[0]?.role ?? "coding"
-
   return normalizeAgentRoutingPlan({
-    primaryRole,
-    workers,
+    primaryRole: "rush",
+    workers: [{
+      role: "rush",
+      goal: "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
+      reason: "Deterministic fallback used when no router decision is available.",
+    }],
     requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
-    reason: workers.length > 1 ? "Multiple specialized role signals matched the prompt." : workers[0]?.reason ?? "Routed by role signal.",
+    reason: "Deterministic fallback plan (no router decision).",
   })
 }
 
@@ -534,5 +448,5 @@ export function selectAgentRole(prompt: string): RoutedAgentRole {
 }
 
 export function selectModelPolicy(brain: BrainModel, role: AgentRole): ModelPolicy {
-  return brain.roles[role] ?? brain.roles.coding
+  return brain.roles[role] ?? brain.roles.rush
 }

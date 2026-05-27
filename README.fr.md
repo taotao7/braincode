@@ -1,6 +1,10 @@
 # Braincode
 
-Braincode est un monorepo basé sur Bun pour un agent IA orienté codage capable aussi de traiter des tâches générales. Son idée centrale est un **Brain Model** sélectionnable par l'utilisateur : un profil de stratégie de haut niveau qui planifie dynamiquement quel modèle sous-jacent, quel rôle d'agent, quels outils et quel budget de contexte utiliser pour chaque partie d'une tâche.
+Braincode est **un harness, pas un agent**. C'est un monorepo basé sur Bun dont le travail est de router chaque partie d'une tâche vers le modèle et le rôle spécialisé les mieux adaptés — pas d'attacher un seul LLM à votre terminal en espérant qu'il fasse tout bien.
+
+Son idée centrale est un **Brain Model** sélectionnable par l'utilisateur : un profil de stratégie de haut niveau, à l'intérieur du harness, qui planifie dynamiquement quel modèle sous-jacent, quel rôle d'agent, quels outils et quel budget de contexte chaque sous-tâche doit recevoir.
+
+Le cadrage « harness » compte : Braincode ne suppose pas qu'un modèle est bon partout. Il suppose l'inverse — un LLM est une capacité puissante mais étroite, et c'est le **harness** autour (routage, contextes worker isolés, handoffs structurés, garde-fous de revue, config locale) qui transforme ces capacités en travail d'ingénierie fiable.
 
 Le projet réutilise l'infrastructure Pi lorsque cela a du sens, tout en gardant l'orchestration et l'interface produit Braincode séparées. L'interface terminal interactive appartient à Braincode et est construite avec Ink ; Pi reste une couche provider/runtime, pas l'interface produit.
 
@@ -36,6 +40,27 @@ Braincode propose actuellement deux modes de haut niveau :
 
 - `auto` — le mode par défaut, qui planifie selon l'intention et route vers différents agents/modèles.
 - `radical` — un mode autonome plus agressif pour les utilisateurs qui veulent une exécution plus rapide et plus large.
+
+## Rôles d'agent (v0.2.0)
+
+Le harness expose **14 rôles**, structurés comme des spécialistes par rôle plus un petit jeu d'aides fonctionnelles non chevauchantes. Le rôle générique `coding` a été supprimé — le travail de code est découpé par domaine pour que chaque rôle puisse être routé vers un modèle réellement fort sur ce domaine.
+
+**Routage**
+- `routeBrain` — planificateur piloté par LLM. Lit le prompt et émet une décision de routage structurée (rôle principal, workers, todos, dépendances). Le harness n'utilise plus le matching regex pour router.
+
+**Spécialistes de domaine**
+- `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
+
+**Aides fonctionnelles (non chevauchantes)**
+- `librarian` — cartographie de code ET recherche factuelle (absorbe l'ancien rôle `research`)
+- `review` — inspection de défauts dans le code existant
+- `oracle` — raisonnement difficile, arbitrages d'architecture
+- `summarize` — compression de handoff
+
+**Affichage d'état**
+- `pet` — rapporteur d'état BrainPet, en lecture seule
+
+Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs utilisateur existantes sont migrées automatiquement — les entrées de rôle obsolètes sont retirées au premier chargement.
 
 ## Objectifs
 

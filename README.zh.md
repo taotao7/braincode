@@ -1,6 +1,10 @@
 # Braincode
 
-Braincode 是一个基于 Bun 的 monorepo 项目，目标是构建一个以编码为核心、同时也能处理通用任务的 AI agent。它的核心理念是用户可选的 **Brain Model（大脑模型）**：一种高层策略画像，可以动态决定每个子任务该使用哪个底层模型、哪种 agent 角色、哪些工具以及多大的上下文预算。
+Braincode 是 **harness（驾驭层），不是单个 agent**。它是一个基于 Bun 的 monorepo，做的事是：把任务的每一个子部分路由到最合适的模型和最合适的专业角色 —— 而不是把一个 LLM 直接绑死在你的终端里，听天由命。
+
+它的核心理念是用户可选的 **Brain Model（大脑模型）**：harness 内部的一种高层策略画像，可以动态决定每个子任务该使用哪个底层模型、哪种 agent 角色、哪些工具以及多大的上下文预算。
+
+之所以强调 "harness" 这个定位：Braincode 不假设某一个模型在所有任务上都最强，它假设的恰恰相反 —— LLM 是一种能力很强但很窄的原子能力，真正决定它能不能稳定完成工程任务的，是围绕在它周围的 **harness**：路由、隔离的 worker 上下文、结构化 handoff、review 闸门、本地配置。
 
 项目在合适的地方复用 Pi 基础设施，同时把 Braincode 自身的产品级编排逻辑和 UI 保持独立。交互式终端 UI 由 Braincode 自己使用 Ink 实现；Pi 保留在 provider/runtime 层，不作为产品界面。
 
@@ -36,6 +40,27 @@ Braincode 目前有两种顶层模式：
 
 - `auto` — 默认模式，根据意图自动规划并路由到不同 agent/模型。
 - `radical` — 更激进的自治模式，适合希望更快、更广执行的用户。
+
+## Agent 角色（v0.2.0）
+
+harness 暴露 **14 个角色**，整体以角色（专业人设）为主，并保留少量不重叠的功能型助手。原来通用的 `coding` 角色已经被移除 —— 代码工作按照领域细分，这样每个角色都能路由到真正擅长该领域的模型。
+
+**路由**
+- `routeBrain` — 由 LLM 驱动的规划器。读 prompt，输出结构化的路由决定（primary 角色、worker 列表、todo、依赖）。harness 不再依赖正则匹配做路由。
+
+**领域专家**
+- `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
+
+**功能型助手（不重叠）**
+- `librarian` — 代码库地图 + 外部资料检索（合并了原来的 `research` 角色）
+- `review` — 对现有代码做缺陷检查
+- `oracle` — 复杂推理、架构权衡
+- `summarize` — handoff 压缩
+
+**状态显示**
+- `pet` — 只读的 BrainPet 状态报告
+
+本次发布移除的角色：`coding`、`fastReply`、`research`。已有用户配置会自动迁移 —— 首次加载时，过时的角色条目会被剥离。
 
 ## 目标
 

@@ -99,8 +99,10 @@ packages/
 
 一个 **Brain Model** = 每个角色一份 `ModelPolicy` + 路由 / 上下文默认值。角色目录集中定义在 `packages/brain` 的 `agentRoleProfiles` + `agentRoleSystemPrompts` —— router 的提示词、默认值、运行时系统提示永远不会漂移。
 
-可被路由到的角色（worker 可以是这些）：
-`coding · frontend · backend · designer · dba · devops · security · qa · research · review · summarize · fastReply · oracle · librarian · rush`
+可被路由到的角色（worker 可以是这些），v0.2.0：
+`frontend · backend · designer · dba · devops · security · qa · review · summarize · oracle · librarian · rush`
+
+v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `rush` 吸收）、`research`（被 `librarian` 吸收）。目录变短是有意的 —— 保留下来的每个角色都对应一种真正不同的模型路由决定。
 
 非路由角色：
 

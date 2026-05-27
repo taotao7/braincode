@@ -851,7 +851,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     appendItem({ kind: "panel", text: `${target.scope === "user" ? "User" : "Project"} · ${target.id}  →  ${target.path}\n\n${trimmed}` })
   }
 
-  const ALL_ROLES = ["coding", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "research", "review", "summarize", "fastReply", "oracle", "librarian", "rush"]
+  const ALL_ROLES = ["frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush"]
 
   function invokeTeamTest(argument: string) {
     const promptArg = argument.trim()
@@ -1613,7 +1613,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           {brainPanel.brains.map((brain, index) => (
             <Box key={brain.id} flexDirection="column">
               <Text color={index === brainPanel.selected ? "green" : undefined}>
-                {index === brainPanel.selected ? "›" : " "} {brain.id === brainPanel.defaultBrainId ? "★" : " "} {brain.id} · planner={brain.planner.modelId} · coding={brain.roles.coding.modelId}
+                {index === brainPanel.selected ? "›" : " "} {brain.id === brainPanel.defaultBrainId ? "★" : " "} {brain.id} · planner={brain.planner.modelId} · frontend={brain.roles.frontend.modelId}
               </Text>
               <Text color="gray">    {truncate(brain.description ?? "", 120)}</Text>
             </Box>
@@ -1627,7 +1627,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
           <Text color="cyan" bold>Intent Graph</Text>
           {formatIntentGraphLines(intentPanel.plan, Math.max(40, terminalCols - 8)).map((line, index) => (
-            <Text key={index} color={index <= 1 ? "cyan" : line.includes("->") ? "yellow" : "gray"}>
+            <Text key={index} color={index <= 1 ? "cyan" : line.startsWith("Notes:") ? "yellow" : "gray"}>
               {line}
             </Text>
           ))}
@@ -1976,68 +1976,208 @@ function labelFor(item: TranscriptItem): string {
   }
 }
 
+const INTENT_BIT_UP = 1
+const INTENT_BIT_RIGHT = 2
+const INTENT_BIT_DOWN = 4
+const INTENT_BIT_LEFT = 8
+
+const INTENT_BIT_CHARS: Record<number, string> = {
+  0: " ",
+  1: "│",
+  2: "─",
+  3: "└",
+  4: "│",
+  5: "│",
+  6: "┌",
+  7: "├",
+  8: "─",
+  9: "┘",
+  10: "─",
+  11: "┴",
+  12: "┐",
+  13: "┤",
+  14: "┬",
+  15: "┼",
+}
+
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
-  const todoById = new Map(plan.todos.map((todo) => [todo.id, todo]))
-  const outgoing = new Map<string, string[]>()
-  const incoming = new Set<string>()
-  for (const dependency of plan.dependencies) {
-    if (!todoById.has(dependency.fromTodoId) || !todoById.has(dependency.toTodoId)) continue
-    outgoing.set(dependency.fromTodoId, [...(outgoing.get(dependency.fromTodoId) ?? []), dependency.toTodoId])
-    incoming.add(dependency.toTodoId)
-  }
-
-  const lines: string[] = [
-    truncate(`brain root task · ${plan.brain.id} · primary=${plan.role} · routing=${plan.routing.source}`, width),
-    truncate(`model · ${plan.piModel.provider}/${plan.piModel.id} · toolExecution=${plan.toolExecution}`, width),
-    "Decomposition and dependency path:",
-    "brain root task",
+  const header = [
+    truncate(`Intent · ${plan.brain.id} · primary=${plan.role} · routing=${plan.routing.source}`, width),
+    truncate(`Model · ${plan.piModel.provider}/${plan.piModel.id} · tools=${plan.toolExecution}`, width),
+    "",
   ]
-
-  const roots = plan.todos.filter((todo) => !incoming.has(todo.id))
-  const orderedRoots = roots.length > 0 ? roots : plan.todos
-  const rendered = new Set<string>()
-  const walk = (todoId: string, prefix: string, seen: Set<string>) => {
-    const todo = todoById.get(todoId)
-    if (!todo) return
-    rendered.add(todoId)
-    const cycle = seen.has(todoId)
-    lines.push(truncate(`${prefix}${formatIntentTodo(todo)}${cycle ? " (cycle)" : ""}`, width))
-    if (cycle) return
-    const children = outgoing.get(todoId) ?? []
-    children.forEach((childId, index) => {
-      const isLast = index === children.length - 1
-      walk(childId, `${prefix}${isLast ? "   " : "│  "}${isLast ? "└─ " : "├─ "}`, new Set([...seen, todoId]))
-    })
+  if (plan.todos.length === 0) {
+    return [...header, truncate("(no subtasks yet — plan will populate after decomposition)", width)]
   }
 
-  orderedRoots.forEach((todo, index) => {
-    const isLast = index === orderedRoots.length - 1
-    walk(todo.id, isLast ? "└─ " : "├─ ", new Set())
-  })
+  const ROOT_ID = "__brain_root__"
+  const todoById = new Map(plan.todos.map((todo) => [todo.id, todo]))
+  const order: string[] = [ROOT_ID, ...plan.todos.map((todo) => todo.id)]
 
-  const hidden = plan.todos.filter((todo) => !rendered.has(todo.id))
-  for (const todo of hidden) {
-    lines.push(truncate(`├─ ${formatIntentTodo(todo)}`, width))
+  const adjOut = new Map<string, string[]>()
+  const adjIn = new Map<string, string[]>()
+  for (const id of order) {
+    adjOut.set(id, [])
+    adjIn.set(id, [])
   }
-
-  lines.push("Dependency edges:")
-  if (plan.dependencies.length === 0) {
-    lines.push("  (none; subtasks can run independently before merge)")
-  } else {
-    for (const dependency of plan.dependencies) {
-      const from = todoById.get(dependency.fromTodoId)
-      const to = todoById.get(dependency.toTodoId)
-      if (!from || !to) continue
-      const reason = dependency.reason ? ` · ${dependency.reason}` : ""
-      lines.push(truncate(`  ${from.role}/${from.id} -> ${to.role}/${to.id}${reason}`, width))
+  const explicitDeps: { from: string; to: string; reason?: string }[] = []
+  for (const dep of plan.dependencies) {
+    if (!todoById.has(dep.fromTodoId) || !todoById.has(dep.toTodoId)) continue
+    adjOut.get(dep.fromTodoId)!.push(dep.toTodoId)
+    adjIn.get(dep.toTodoId)!.push(dep.fromTodoId)
+    explicitDeps.push({ from: dep.fromTodoId, to: dep.toTodoId, reason: dep.reason })
+  }
+  for (const todo of plan.todos) {
+    if (adjIn.get(todo.id)!.length === 0) {
+      adjOut.get(ROOT_ID)!.push(todo.id)
+      adjIn.get(todo.id)!.push(ROOT_ID)
     }
   }
 
-  return lines
-}
+  const indeg = new Map<string, number>()
+  for (const id of order) indeg.set(id, adjIn.get(id)!.length)
+  const level = new Map<string, number>()
+  for (const id of order) level.set(id, 0)
+  const queue: string[] = []
+  for (const id of order) if (indeg.get(id) === 0) queue.push(id)
+  const cycleNodes = new Set<string>()
+  let processed = 0
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    processed++
+    for (const next of adjOut.get(id)!) {
+      level.set(next, Math.max(level.get(next)!, level.get(id)! + 1))
+      indeg.set(next, indeg.get(next)! - 1)
+      if (indeg.get(next)! === 0) queue.push(next)
+    }
+  }
+  if (processed < order.length) {
+    for (const id of order) {
+      if ((indeg.get(id) ?? 0) > 0) {
+        cycleNodes.add(id)
+        if ((level.get(id) ?? 0) === 0) level.set(id, 1)
+      }
+    }
+  }
 
-function formatIntentTodo(todo: RuntimePlan["todos"][number]): string {
-  return `${todoGlyph(todo.status)} subtask (${todo.role}) ${todo.title}`
+  const levels: string[][] = []
+  for (const id of order) {
+    const lv = level.get(id)!
+    while (levels.length <= lv) levels.push([])
+    levels[lv].push(id)
+  }
+
+  const PAD_LEFT = 1
+  const GAP = 5
+  const numLevels = levels.length
+  const labelBudget = Math.max(14, Math.floor((width - PAD_LEFT - GAP * Math.max(0, numLevels - 1)) / numLevels))
+  const labels = new Map<string, string>()
+  const fitLabel = (text: string) => (text.length <= labelBudget ? text : truncate(text, labelBudget))
+  labels.set(ROOT_ID, fitLabel(`● brain root (${plan.role})`))
+  for (const todo of plan.todos) {
+    const role = todo.role.length > 9 ? `${todo.role.slice(0, 8)}…` : todo.role
+    const full = `${todoGlyph(todo.status)} ${role}: ${todo.title.replace(/\s+/g, " ").trim()}`
+    labels.set(todo.id, fitLabel(full))
+  }
+
+  const ROW_STRIDE = 2
+  const rowOf = new Map<string, number>()
+  levels[0].forEach((id, idx) => rowOf.set(id, idx * ROW_STRIDE))
+  for (let lv = 1; lv < levels.length; lv++) {
+    const sorted = [...levels[lv]].sort((a, b) => {
+      const pa = adjIn.get(a)!.map((p) => rowOf.get(p) ?? 0)
+      const pb = adjIn.get(b)!.map((p) => rowOf.get(p) ?? 0)
+      const ma = pa.length ? pa.reduce((s, v) => s + v, 0) / pa.length : 0
+      const mb = pb.length ? pb.reduce((s, v) => s + v, 0) / pb.length : 0
+      return ma - mb
+    })
+    levels[lv] = sorted
+    let cursor = -ROW_STRIDE
+    for (const id of sorted) {
+      const parents = adjIn.get(id)!.map((p) => rowOf.get(p) ?? 0)
+      const target = parents.length ? Math.round(parents.reduce((s, v) => s + v, 0) / parents.length) : 0
+      const aligned = target - (target % ROW_STRIDE)
+      const row = Math.max(aligned, cursor + ROW_STRIDE)
+      rowOf.set(id, row)
+      cursor = row
+    }
+  }
+
+  const labelWidth = levels.map((ids) => ids.reduce((m, id) => Math.max(m, labels.get(id)!.length), 0))
+  const colOfLevel: number[] = []
+  let cx = PAD_LEFT
+  for (let i = 0; i < levels.length; i++) {
+    colOfLevel.push(cx)
+    cx += labelWidth[i] + GAP
+  }
+  const totalCols = Math.max(1, cx)
+  const totalRows = Math.max(1, ...Array.from(rowOf.values()).map((r) => r + 1))
+
+  const grid: number[][] = Array.from({ length: totalRows }, () => new Array(totalCols).fill(0))
+  const place = (row: number, col: number, bits: number) => {
+    if (row < 0 || row >= totalRows || col < 0 || col >= totalCols) return
+    grid[row][col] |= bits
+  }
+  const arrowAt: { row: number; col: number }[] = []
+
+  for (const fromId of order) {
+    const fromLv = level.get(fromId)!
+    const fromRow = rowOf.get(fromId)!
+    const fromLabelEnd = colOfLevel[fromLv] + labels.get(fromId)!.length
+    for (const toId of adjOut.get(fromId)!) {
+      const toLv = level.get(toId)!
+      if (toLv <= fromLv) continue
+      const toRow = rowOf.get(toId)!
+      const toLabelStart = colOfLevel[toLv]
+      const connectorCol = toLabelStart - 3
+      for (let c = fromLabelEnd; c < connectorCol; c++) place(fromRow, c, INTENT_BIT_LEFT | INTENT_BIT_RIGHT)
+      if (toRow === fromRow) {
+        place(fromRow, connectorCol, INTENT_BIT_LEFT | INTENT_BIT_RIGHT)
+      } else if (toRow > fromRow) {
+        place(fromRow, connectorCol, INTENT_BIT_LEFT | INTENT_BIT_DOWN)
+        for (let r = fromRow + 1; r < toRow; r++) place(r, connectorCol, INTENT_BIT_UP | INTENT_BIT_DOWN)
+        place(toRow, connectorCol, INTENT_BIT_UP | INTENT_BIT_RIGHT)
+      } else {
+        place(fromRow, connectorCol, INTENT_BIT_LEFT | INTENT_BIT_UP)
+        for (let r = toRow + 1; r < fromRow; r++) place(r, connectorCol, INTENT_BIT_UP | INTENT_BIT_DOWN)
+        place(toRow, connectorCol, INTENT_BIT_DOWN | INTENT_BIT_RIGHT)
+      }
+      for (let c = connectorCol + 1; c < toLabelStart - 1; c++) place(toRow, c, INTENT_BIT_LEFT | INTENT_BIT_RIGHT)
+      arrowAt.push({ row: toRow, col: toLabelStart - 1 })
+    }
+  }
+
+  const charGrid: string[][] = grid.map((row) => row.map((b) => INTENT_BIT_CHARS[b] ?? " "))
+  for (const { row, col } of arrowAt) {
+    if (row < totalRows && col < totalCols) charGrid[row][col] = "▶"
+  }
+  for (const id of order) {
+    const lv = level.get(id)!
+    const row = rowOf.get(id)!
+    const startCol = colOfLevel[lv]
+    const text = `${labels.get(id)!}${cycleNodes.has(id) ? " (cycle)" : ""}`
+    for (let i = 0; i < text.length; i++) {
+      const col = startCol + i
+      if (row < totalRows && col < totalCols) charGrid[row][col] = text[i]!
+    }
+  }
+
+  const body = charGrid.map((row) => truncate(row.join("").replace(/\s+$/, ""), width))
+
+  const withReasons = explicitDeps.filter((d) => d.reason && d.reason.trim().length > 0)
+  const notes: string[] = []
+  if (withReasons.length > 0) {
+    notes.push("")
+    notes.push("Notes:")
+    for (const dep of withReasons) {
+      const from = todoById.get(dep.from)
+      const to = todoById.get(dep.to)
+      if (!from || !to) continue
+      notes.push(truncate(`  ${from.role} → ${to.role}: ${dep.reason}`, width))
+    }
+  }
+
+  return [...header, ...body, ...notes]
 }
 
 function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "yellow" | "magenta" | "gray" {
@@ -2214,7 +2354,7 @@ function formatBrainDetail(brain: BrainModel, defaultBrainId: string): string {
   lines.push("Planner:")
   lines.push(`  ${brain.planner.modelId} (${brain.planner.thinkingLevel})`)
   lines.push("Roles:")
-  const roleEntries = Object.entries(brain.roles) as Array<[keyof BrainModel["roles"], typeof brain.roles.coding]>
+  const roleEntries = Object.entries(brain.roles) as Array<[keyof BrainModel["roles"], typeof brain.roles.frontend]>
   for (const [role, policy] of roleEntries) {
     lines.push(`  ${role.padEnd(11)} ${policy.modelId} (${policy.thinkingLevel})${policy.fallbackModelIds && policy.fallbackModelIds.length > 0 ? ` → ${policy.fallbackModelIds.join(", ")}` : ""}`)
   }

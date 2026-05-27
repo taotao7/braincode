@@ -13,7 +13,7 @@ If you are new to the codebase, start with [Overview](./overview.md).
 
 - Build a coding-first agent that can also perform general tasks.
 - Let users select a high-level **Brain Model** instead of a single LLM.
-- Dynamically route planning, coding, research, review, summarization, and quick replies to different models.
+- Dynamically route planning, domain code work (frontend/backend/etc.), research, review, summarization, and quick replies to different models — Braincode acts as a harness over multiple LLMs rather than a single-LLM agent.
 - Isolate context between agents.
 - Keep context ownership layered: Brain owns the orchestration context, and every subagent owns one isolated task context.
 - Communicate between agents with structured handoff/result messages instead of shared full transcripts.
@@ -71,8 +71,8 @@ Use `auto` for normal coding-agent behavior:
 
 - classify the task before acting;
 - choose cheap/fast models for simple work;
-- use stronger models for planning, risky coding, or review;
-- spawn separate agents for research, coding, summarization, or review when needed;
+- use stronger models for planning, risky code work, or review;
+- spawn separate agents for librarian, code specialists (frontend/backend/etc.), summarization, or review when needed;
 - keep context isolated and merge only structured results.
 
 ### `radical`
@@ -93,7 +93,6 @@ type BrainModel = {
   planner: ModelPolicy
   roles: {
     routeBrain: ModelPolicy
-    coding: ModelPolicy
     frontend: ModelPolicy
     backend: ModelPolicy
     designer: ModelPolicy
@@ -101,13 +100,12 @@ type BrainModel = {
     devops: ModelPolicy
     security: ModelPolicy
     qa: ModelPolicy
-    research: ModelPolicy
     review: ModelPolicy
     summarize: ModelPolicy
-    fastReply: ModelPolicy
     oracle: ModelPolicy
     librarian: ModelPolicy
     rush: ModelPolicy
+    pet: ModelPolicy
   }
   routing: {
     maxParallelAgents: number

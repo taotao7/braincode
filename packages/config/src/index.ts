@@ -192,15 +192,6 @@ export const defaultBrains: BraincodeBrains = {
           thinkingLevel: "xhigh",
           systemPrompt: agentRoleSystemPrompts.routeBrain,
         },
-        coding: {
-          modelId: "anthropic/claude-sonnet-4-6",
-          fallbackModelIds: [
-            "azure-openai-responses/gpt-5.5",
-            "google/gemini-3.1-pro-preview",
-          ],
-          thinkingLevel: "medium",
-          systemPrompt: agentRoleSystemPrompts.coding,
-        },
         frontend: {
           modelId: "anthropic/claude-sonnet-4-6",
           fallbackModelIds: [
@@ -264,12 +255,6 @@ export const defaultBrains: BraincodeBrains = {
           thinkingLevel: "low",
           systemPrompt: agentRoleSystemPrompts.qa,
         },
-        research: {
-          modelId: "google/gemini-3-flash-preview",
-          fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
-          thinkingLevel: "low",
-          systemPrompt: agentRoleSystemPrompts.research,
-        },
         review: {
           modelId: "google/gemini-3.1-pro-preview",
           fallbackModelIds: [
@@ -284,12 +269,6 @@ export const defaultBrains: BraincodeBrains = {
           fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
           thinkingLevel: "low",
           systemPrompt: agentRoleSystemPrompts.summarize,
-        },
-        fastReply: {
-          modelId: "google/gemini-3-flash-preview",
-          fallbackModelIds: ["anthropic/claude-sonnet-4-6"],
-          thinkingLevel: "minimal",
-          systemPrompt: agentRoleSystemPrompts.fastReply,
         },
         oracle: {
           modelId: "azure-openai-responses/gpt-5.5",
@@ -1300,16 +1279,27 @@ function migrateBrains(document: BraincodeBrains): boolean {
       changed = true;
     }
     const roles = record.roles as Record<string, unknown> | undefined;
-    if (roles && typeof roles === "object" && !roles.pet) {
-      const fallback = (roles.fastReply ?? roles.summarize ?? roles.coding) as Record<string, unknown> | undefined;
-      if (fallback) {
-        roles.pet = {
-          modelId: fallback.modelId,
-          fallbackModelIds: fallback.fallbackModelIds,
-          thinkingLevel: "minimal",
-          systemPrompt: agentRoleSystemPrompts.pet,
-        };
-        changed = true;
+    if (roles && typeof roles === "object") {
+      if (!roles.pet) {
+        const fallback = (roles.summarize ?? roles.rush) as Record<string, unknown> | undefined;
+        if (fallback) {
+          roles.pet = {
+            modelId: fallback.modelId,
+            fallbackModelIds: fallback.fallbackModelIds,
+            thinkingLevel: "minimal",
+            systemPrompt: agentRoleSystemPrompts.pet,
+          };
+          changed = true;
+        }
+      }
+      // v0.2.0: drop the obsolete `coding`, `fastReply`, and `research` roles.
+      // `coding` is subsumed by frontend/backend specialists. `fastReply` folds
+      // into `rush`. `research` folds into `librarian`.
+      for (const obsolete of ["coding", "fastReply", "research"]) {
+        if (obsolete in roles) {
+          delete roles[obsolete];
+          changed = true;
+        }
       }
     }
   }

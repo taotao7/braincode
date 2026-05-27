@@ -99,8 +99,10 @@ Source de vérité : `getModePolicy` dans `packages/brain`.
 
 Un **Brain Model** est une `ModelPolicy` par rôle plus des valeurs par défaut de routage / contexte. Le catalogue de rôles est défini à un seul endroit — `agentRoleProfiles` + `agentRoleSystemPrompts` dans `packages/brain` — pour que le prompt du router, les valeurs par défaut et les prompts système runtime ne divergent jamais.
 
-Rôles routables (ceux qu'un worker peut être) :
-`coding · frontend · backend · designer · dba · devops · security · qa · research · review · summarize · fastReply · oracle · librarian · rush`
+Rôles routables (ceux qu'un worker peut être), v0.2.0 :
+`frontend · backend · designer · dba · devops · security · qa · review · summarize · oracle · librarian · rush`
+
+Supprimés en v0.2.0 : `coding` (absorbé par frontend/backend), `fastReply` (absorbé par `rush`), `research` (absorbé par `librarian`). Le catalogue est plus court délibérément — chaque rôle restant correspond à une décision de routage de modèle réellement différente.
 
 Rôles non routables :
 

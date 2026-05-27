@@ -120,7 +120,7 @@ test("expandPromptReferences inlines compact session references", async () => {
     await appendSessionRecord("session-ref-test", {
       type: "run_start",
       prompt: "old task",
-      plan: { brain: { id: "brain" }, role: "coding" },
+      plan: { brain: { id: "brain" }, role: "rush" },
       attempt: 1,
     }, home)
     await appendSessionRecord("session-ref-test", {
@@ -150,7 +150,7 @@ test("expandPromptReferences reuses a cached handoff brief without re-summarizin
     await appendSessionRecord("handoff-cache-test", {
       type: "run_start",
       prompt: "earlier task",
-      plan: { brain: { id: "brain" }, role: "coding" },
+      plan: { brain: { id: "brain" }, role: "rush" },
       attempt: 1,
     }, home)
     await appendSessionRecord("handoff-cache-test", {
@@ -190,7 +190,7 @@ test("expandPromptReferences regenerates a handoff if newer activity supersedes 
     await appendSessionRecord("handoff-stale-test", {
       type: "run_start",
       prompt: "new activity after handoff",
-      plan: { brain: { id: "brain" }, role: "coding" },
+      plan: { brain: { id: "brain" }, role: "rush" },
       attempt: 1,
     }, home)
     await appendSessionRecord("handoff-stale-test", {
@@ -208,6 +208,43 @@ test("expandPromptReferences regenerates a handoff if newer activity supersedes 
     expect(result.prompt).not.toContain("handoff brief:\nSession handoff-stale-test")
   } finally {
     await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("expandPromptReferences attaches supported images as base64 ImageContent", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-image-ref-project-test-"))
+  try {
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03])
+    const pngPath = join(projectRoot, "snap.png")
+    await Bun.write(pngPath, pngBytes)
+
+    const result = await expandPromptReferences(`look at @${pngPath}`, projectRoot)
+
+    expect(result.references[0]?.kind).toBe("image")
+    expect(result.images).toHaveLength(1)
+    expect(result.images[0]?.type).toBe("image")
+    expect(result.images[0]?.mimeType).toBe("image/png")
+    expect(result.images[0]?.data).toBe(pngBytes.toString("base64"))
+    expect(result.prompt).toContain("attached to this message")
+    expect(result.prompt).not.toContain("could not be inlined")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("expandPromptReferences keeps unsupported image formats as text-only references", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-image-svg-test-"))
+  try {
+    const svgPath = join(projectRoot, "diagram.svg")
+    await Bun.write(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>")
+
+    const result = await expandPromptReferences(`see @${svgPath}`, projectRoot)
+
+    expect(result.references[0]?.kind).toBe("image")
+    expect(result.images).toHaveLength(0)
+    expect(result.prompt).toContain("format not inlineable as image")
+  } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
 })
@@ -249,13 +286,19 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
             planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
             roles: {
               routeBrain: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
-              coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
-              research: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+              frontend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              backend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              designer: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              dba: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              devops: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              security: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              qa: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
               review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
               summarize: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
-              fastReply: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
               oracle: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
               librarian: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              rush: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+              pet: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
             },
             routing: {
               maxParallelAgents: 2,
@@ -273,11 +316,14 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     const plan = await planRuntimeFromConfig("review this patch", home)
 
     expect(plan.mode).toBe("radical")
-    expect(plan.role).toBe("review")
-    expect(plan.workers.map((worker) => worker.role)).toEqual(["review"])
-    expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["review", "pending"]])
+    // No LLM router available in tests → planAgentRouting falls back to rush.
+    // The real LLM-driven routeBrain (in production) picks the right specialist.
+    expect(plan.role).toBe("rush")
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
+    expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["rush", "pending"]])
     expect(plan.toolExecution).toBe("parallel")
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
+    expect(plan.routing.source).toBe("heuristic")
   } finally {
     await rm(home, { recursive: true, force: true })
   }
@@ -320,8 +366,19 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
             planner: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
             roles: {
               routeBrain: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
-              coding: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              frontend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              backend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              designer: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              dba: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              devops: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              security: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              qa: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
               review: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              summarize: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+              oracle: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              librarian: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
+              rush: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "low" },
+              pet: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "minimal" },
             },
             routing: {
               maxParallelAgents: 2,
@@ -338,16 +395,19 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
 
     const plan = await planRuntimeFromConfig("implement a secure frontend login flow", home)
 
-    expect(plan.role).toBe("coding")
-    expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
-    expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend", "review"])
-    expect(plan.todos.map((todo) => todo.role)).toEqual(["coding", "frontend", "review"])
+    // No LLM router in tests → deterministic rush fallback. Because the prompt
+    // contains "implement" (file-edit risk pattern), brain policy injects a
+    // review worker automatically.
+    expect(plan.role).toBe("rush")
+    expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["rush"])
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["rush", "review"])
+    expect(plan.todos.map((todo) => todo.role)).toEqual(["rush", "review"])
     expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
-      ["todo-02-frontend", "todo-01-coding"],
-      ["todo-01-coding", "todo-03-review"],
+      ["todo-01-rush", "todo-02-review"],
     ])
-    expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-03-review"])
-    expect(plan.workers.find((worker) => worker.role === "frontend")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
+    expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-02-review"])
+    expect(plan.workers.find((worker) => worker.role === "rush")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
+    expect(plan.routing.source).toBe("heuristic")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, getModePolicy, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, formatRoutedAgentRoleCatalog, getModePolicy, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -8,7 +8,6 @@ const brain: BrainModel = {
   planner: { modelId: "planner", thinkingLevel: "medium" },
   roles: {
     routeBrain: { modelId: "planner", thinkingLevel: "xhigh" },
-    coding: { modelId: "coding", thinkingLevel: "medium" },
     frontend: { modelId: "frontend", thinkingLevel: "medium" },
     backend: { modelId: "backend", thinkingLevel: "medium" },
     designer: { modelId: "designer", thinkingLevel: "medium" },
@@ -16,10 +15,8 @@ const brain: BrainModel = {
     devops: { modelId: "devops", thinkingLevel: "medium" },
     security: { modelId: "security", thinkingLevel: "high" },
     qa: { modelId: "qa", thinkingLevel: "low" },
-    research: { modelId: "research", thinkingLevel: "low" },
     review: { modelId: "review", thinkingLevel: "high" },
     summarize: { modelId: "summarize", thinkingLevel: "low" },
-    fastReply: { modelId: "fast", thinkingLevel: "minimal" },
     oracle: { modelId: "oracle", thinkingLevel: "xhigh" },
     librarian: { modelId: "librarian", thinkingLevel: "high" },
     rush: { modelId: "rush", thinkingLevel: "low" },
@@ -43,43 +40,36 @@ test("mode policies distinguish auto and radical", () => {
   expect(getModePolicy("radical").mode).toBe("radical")
 })
 
-test("selectAgentRole returns the primary role from routing heuristics", () => {
-  expect(selectAgentRole("review this patch")).toBe("review")
-  expect(selectAgentRole("summarize the work")).toBe("summarize")
-  expect(selectAgentRole("research pi agent runtime")).toBe("research")
-  expect(selectAgentRole("frontend layout guidance")).toBe("frontend")
-  expect(selectAgentRole("fix the frontend layout")).toBe("coding")
-  expect(selectAgentRole("optimize this SQL migration")).toBe("dba")
-  expect(selectAgentRole("deep architecture tradeoff analysis")).toBe("oracle")
-  expect(selectAgentRole("understand this external codebase architecture")).toBe("librarian")
-  expect(selectAgentRole("hello")).toBe("fastReply")
-  expect(selectAgentRole("implement the feature")).toBe("coding")
+test("planAgentRouting falls back to rush deterministically (LLM-driven routing lives in agent-runtime)", () => {
+  const plan = planAgentRouting("review this patch", brain)
+  expect(plan.primaryRole).toBe("rush")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
 })
 
-test("planAgentRouting returns workers and review requirements", () => {
-  const plan = planAgentRouting("implement a secure frontend login flow with tests", brain)
+test("planAgentRouting flags requiresReview when file-edit risk words appear", () => {
+  const edit = planAgentRouting("implement a new feature", brain)
+  expect(edit.requiresReview).toBe(true)
 
-  expect(plan.primaryRole).toBe("coding")
-  expect(plan.workers.map((worker) => worker.role)).toEqual(["coding", "frontend"])
-  expect(plan.todos.map((todo) => [todo.id, todo.role, todo.status])).toEqual([
-    ["todo-01-coding", "coding", "pending"],
-    ["todo-02-frontend", "frontend", "pending"],
-  ])
-  expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
-    ["todo-02-frontend", "todo-01-coding"],
-  ])
-  expect(plan.workers[0]?.todoIds).toEqual(["todo-01-coding"])
-  expect(plan.requiresReview).toBe(true)
-  expect(plan.reason).toBe("Multiple specialized role signals matched the prompt.")
+  const benign = planAgentRouting("hello there", brain)
+  expect(benign.requiresReview).toBe(false)
 })
 
-test("planAgentRouting respects max parallel worker budget", () => {
-  const plan = planAgentRouting("implement frontend backend security tests deployment", {
-    ...brain,
-    routing: { ...brain.routing, maxParallelAgents: 3 },
-  })
+test("planAgentRouting honors requireReviewForFileEdits=false", () => {
+  const looseBrain: BrainModel = { ...brain, routing: { ...brain.routing, requireReviewForFileEdits: false } }
+  const plan = planAgentRouting("implement a new feature", looseBrain)
+  expect(plan.requiresReview).toBe(false)
+})
 
-  expect(plan.workers).toHaveLength(3)
+test("routedAgentRoles contains exactly the 12 routed roles (no coding/fastReply/research)", () => {
+  expect(routedAgentRoles).toEqual([
+    "frontend", "backend", "designer", "dba", "devops", "security", "qa",
+    "review", "summarize", "oracle", "librarian", "rush",
+  ])
+  for (const role of routedAgentRoles) {
+    expect(role).not.toBe("coding")
+    expect(role).not.toBe("fastReply")
+    expect(role).not.toBe("research")
+  }
 })
 
 test("agent role prompts cover every routed role and the router", () => {
@@ -87,6 +77,17 @@ test("agent role prompts cover every routed role and the router", () => {
   for (const role of routedAgentRoles) {
     expect(agentRoleSystemPrompts[role]).toContain("Braincode")
   }
+})
+
+test("formatRoutedAgentRoleCatalog lists each routed role exactly once", () => {
+  const catalog = formatRoutedAgentRoleCatalog()
+  for (const role of routedAgentRoles) {
+    expect(catalog).toContain(`- ${role} `)
+  }
+  // Removed roles should not appear in the LLM-facing catalog.
+  expect(catalog).not.toMatch(/^- coding /m)
+  expect(catalog).not.toMatch(/^- fastReply /m)
+  expect(catalog).not.toMatch(/^- research /m)
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {

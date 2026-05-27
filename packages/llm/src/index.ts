@@ -10,6 +10,7 @@ export type BraincodeModel = {
   baseUrl?: string
   contextWindow: number
   supportsTools: boolean
+  supportsVision?: boolean
   defaultThinkingLevel?: ModelThinkingLevel
 }
 
@@ -136,11 +137,18 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
   try {
     if (!model.baseUrl) {
       const { piModel } = resolvePiModel(model)
+      const includeImage = model.supportsVision !== false && piModel.input?.includes("image")
+      const userContent = includeImage
+        ? [
+            { type: "text" as const, text: "Reply with exactly: OK" },
+            { type: "image" as const, data: TEST_IMAGE_PNG_BASE64, mimeType: "image/png" },
+          ]
+        : "Reply with exactly: OK"
       await completeSimple(
         piModel,
         {
           systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
-          messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }],
+          messages: [{ role: "user", content: userContent, timestamp: Date.now() }],
         },
         { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
       )
@@ -198,10 +206,20 @@ function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: stri
   return detail
 }
 
+const TEST_IMAGE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
+
 async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: string, thinkingLevel?: ModelThinkingLevel): Promise<void> {
   const baseUrl = normalizeOpenAICompatibleBaseUrl(model.baseUrl ?? "")
   const kimiCoding = isKimiCodingModel(model, baseUrl)
   const reasoningEffort = mapThinkingLevelToReasoningEffort(thinkingLevel)
+  const includeImage = model.supportsVision !== false && !kimiCoding
+  const userContent = includeImage
+    ? [
+        { type: "text", text: "Reply with exactly: OK" },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${TEST_IMAGE_PNG_BASE64}` } },
+      ]
+    : "Reply with exactly: OK"
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -213,7 +231,7 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
       model: model.modelId,
       messages: [
         { role: "system", content: "You are testing model connectivity. Reply with exactly: OK" },
-        { role: "user", content: "Reply with exactly: OK" },
+        { role: "user", content: userContent },
       ],
       max_tokens: kimiCoding ? 32 : 8,
       temperature: kimiCoding ? 0.6 : 0,
@@ -224,7 +242,10 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
   const body = await response.json().catch(() => undefined)
   if (!response.ok) {
     const message = typeof body?.error?.message === "string" ? body.error.message : `HTTP ${response.status}`
-    throw new Error(`Model generation test failed: ${message}`)
+    const hint = includeImage && /image|vision|multimodal|content type/i.test(message)
+      ? " (vision input rejected — uncheck Vision in the model form if this model is text-only)"
+      : ""
+    throw new Error(`Model generation test failed: ${message}${hint}`)
   }
 
   if (kimiCoding) {
@@ -254,6 +275,7 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
 
 function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
   const api = normalizeModelApi(model.api)
+  const input: ("text" | "image")[] = model.supportsVision === false ? ["text"] : ["text", "image"]
   return {
     id: model.modelId,
     name: model.name,
@@ -261,7 +283,7 @@ function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
     provider: model.provider as never,
     baseUrl: model.baseUrl ?? "",
     reasoning: model.defaultThinkingLevel !== "off",
-    input: ["text"],
+    input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: model.contextWindow,
     maxTokens: Math.min(128000, model.contextWindow),
@@ -366,6 +388,7 @@ export function toBraincodeModel(model: Model<Api>): BraincodeModel {
     baseUrl: model.baseUrl || undefined,
     contextWindow: model.contextWindow,
     supportsTools: true,
+    supportsVision: model.input?.includes("image") ?? false,
     defaultThinkingLevel: model.reasoning ? "medium" : "off",
   }
 }

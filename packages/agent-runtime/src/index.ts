@@ -5,7 +5,7 @@ export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
-import type { Model } from "@earendil-works/pi-ai"
+import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
@@ -516,7 +516,7 @@ function isRoutedAgentRole(value: unknown): value is RoutedAgentRole {
 }
 
 function isAgentRole(value: unknown): value is AgentRole {
-  return value === "coding" || value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "research" || value === "review" || value === "summarize" || value === "fastReply" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
+  return value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
 function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
@@ -629,24 +629,35 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
       getApiKey: (provider) => (provider === routerSelection.piModel.provider ? apiKey : undefined),
     })
 
-    await runtime.agent.prompt(`Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
+    const roleEnum = "\"frontend\"|\"backend\"|\"designer\"|\"dba\"|\"devops\"|\"security\"|\"qa\"|\"review\"|\"summarize\"|\"oracle\"|\"librarian\"|\"rush\""
 
-Allowed roles:
+    await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
+
+Allowed routed roles:
 ${formatRoutedAgentRoleCatalog()}
 
-Return only JSON in this shape:
-{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","workers":[{"role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":"coding|frontend|backend|designer|dba|devops|security|qa|research|review|summarize|fastReply|oracle|librarian|rush","reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
+Routing principles (read these before deciding):
+- There is no generic "coding" role. Pick the matching specialist for code work: frontend for UI/CSS/components, backend for APIs/services, dba for schema/SQL, devops for CI/infra, security for auth/vuln, qa for tests, designer for UX without code.
+- Use librarian when the task needs codebase mapping, symbol lookup, or fact finding (it absorbs what would have been a "research" role).
+- Use oracle only for hard architecture/tradeoff/debugging reasoning that needs a top-tier model.
+- Use review for defect inspection of existing code; use qa for forward-looking test strategy. They are not interchangeable.
+- Use rush for short conversational replies or tiny chores that need no tools (it absorbs what would have been a "fastReply" role).
+- Use summarize only when the user explicitly needs a handoff or recap.
 
-Constraints:
+Return ONLY a single JSON object matching this schema exactly:
+{"role":${roleEnum},"workers":[{"role":${roleEnum},"goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":${roleEnum},"reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
+
+Output constraints:
+- "role" MUST be one of the enum values above. Do not invent role names. Do not include "coding", "fastReply", or "research" — they are deprecated.
 - Pick exactly one primary role in "role".
 - Include only workers that would materially improve the task.
 - Break the work into 1-6 concrete todos in execution order.
 - Assign every todo to the agent role that should complete it.
 - Use short lowercase todo ids with letters, numbers, dashes, or underscores.
 - Include dependencies only when one todo materially needs another todo's output.
-- Do not include routeBrain as a role.
+- Do not include routeBrain or pet as a worker role.
 - Prefer no more than ${brain.routing.maxParallelAgents} workers.
-- If implementation is needed, include coding as a worker and usually as the primary role.
+- "confidence" is a number in [0,1] reflecting how confident you are in the routing decision.
 
 User prompt:
 ${prompt}`)
@@ -1253,6 +1264,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     throw new Error(`UserPromptSubmit hook blocked the prompt: ${promptHooks.blockedReason}`)
   }
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
+  const promptImages = expanded.images
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
@@ -1323,7 +1335,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       })
 
       try {
-        await runtime.agent.prompt(primaryPrompt)
+        await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
         const reviewResult =
@@ -1435,9 +1447,17 @@ export type PromptReference = {
 export type ExpandedPromptResult = {
   prompt: string
   references: PromptReference[]
+  images: ImageContent[]
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"])
+const SUPPORTED_IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+}
 const MAX_INLINE_FILE_BYTES = 64 * 1024
 const MAX_INLINE_SESSION_CHARS = 24 * 1024
 const MAX_SESSION_FIELD_CHARS = 6 * 1024
@@ -1497,6 +1517,7 @@ function formatSessionContext(context: SessionContext): string {
 
 export async function expandPromptReferences(prompt: string, projectRoot: string, home?: string): Promise<ExpandedPromptResult> {
   const references: PromptReference[] = []
+  const images: ImageContent[] = []
   const tokens = new Map<string, PromptReference>()
   const sessionContexts = new Map<string, SessionContext>()
   const sessionBriefs = new Map<string, string>()
@@ -1560,7 +1581,7 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
     references.push(ref)
   }
 
-  if (references.length === 0) return { prompt, references }
+  if (references.length === 0) return { prompt, references, images }
 
   const sections: string[] = []
   for (const ref of references) {
@@ -1571,7 +1592,23 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
       sections.push(`File ${ref.token} (${rel}):\n\`\`\`${fence}\n${content}\n\`\`\``)
     } else if (ref.kind === "image") {
       const rel = relativePath(projectRoot, ref.path) || ref.path
-      sections.push(`Image ${ref.token} attached at ${rel}.`)
+      const dot = ref.path.lastIndexOf(".")
+      const ext = dot === -1 ? "" : ref.path.slice(dot).toLowerCase()
+      const mimeType = SUPPORTED_IMAGE_MIME_TYPES[ext]
+      if (mimeType) {
+        try {
+          const bytes = await Bun.file(ref.path).bytes()
+          const data = Buffer.from(bytes).toString("base64")
+          images.push({ type: "image", data, mimeType })
+          sections.push(`Image ${ref.token} (${rel}) — attached to this message.`)
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          debugLog("expandPromptReferences", `failed to read image ${ref.path}`, { error: detail })
+          sections.push(`Image ${ref.token} (${rel}) could not be read: ${detail}.`)
+        }
+      } else {
+        sections.push(`Image ${ref.token} attached at ${rel} (format not inlineable as image; treat as filesystem reference).`)
+      }
     } else if (ref.kind === "session") {
       const brief = sessionBriefs.get(ref.token)
       const context = sessionContexts.get(ref.token)
@@ -1590,5 +1627,6 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
   return {
     prompt: `${prompt}\n\nReferenced attachments:\n${sections.join("\n\n")}`,
     references,
+    images,
   }
 }

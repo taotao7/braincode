@@ -35,6 +35,7 @@ test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
     baseUrl: "https://example.test",
     contextWindow: 1000,
     supportsTools: true,
+    supportsVision: false,
     defaultThinkingLevel: "off",
   })
 })
