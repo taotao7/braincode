@@ -22,8 +22,20 @@ export type AgentRunRequest = {
   onPlan?: (plan: RuntimePlan) => void | Promise<void>
   onTodoEvent?: (event: TodoLifecycleEvent) => void | Promise<void>
   onEvent?: (event: AgentEvent) => void | Promise<void>
+  onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
+}
+
+export type ToolApprovalRequest = {
+  toolCallId: string
+  toolName: string
+  args: unknown
+}
+
+export type ToolApprovalDecision = {
+  approved: boolean
+  reason?: string
 }
 
 export type WorkerLifecycleEvent =
@@ -63,6 +75,7 @@ export type BraincodeAgentRuntimeOptions = {
   tools?: import("@earendil-works/pi-agent-core").AgentTool[]
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
+  onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
 }
 
 export type BraincodeAgentRuntime = {
@@ -490,6 +503,19 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     },
     getApiKey: options.getApiKey,
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
+    beforeToolCall: options.onToolApproval
+      ? async (context, signal) => {
+        const decision = await options.onToolApproval?.({
+          toolCallId: context.toolCall.id,
+          toolName: context.toolCall.name,
+          args: context.args,
+        }, signal)
+        if (decision?.approved === false) {
+          return { block: true, reason: decision.reason ?? `User blocked tool call: ${context.toolCall.name}` }
+        }
+        return undefined
+      }
+      : undefined,
   })
 
   if (options.onEvent) {
@@ -614,7 +640,7 @@ function extractJsonObject(text: string): unknown {
   return JSON.parse(candidate)
 }
 
-async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, fallback: AgentRoutingPlan, home?: string): Promise<RouterPlanDecision | undefined> {
+async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string): Promise<RouterPlanDecision | undefined> {
   const routerPolicy = brain.planner ?? brain.roles.routeBrain
   if (!routerPolicy?.modelId) return undefined
 
@@ -660,7 +686,7 @@ Output constraints:
 - "confidence" is a number in [0,1] reflecting how confident you are in the routing decision.
 
 User prompt:
-${prompt}`)
+${prompt}`, images.length > 0 ? images : undefined)
 
     const text = extractAssistantText(runtime.agent.state.messages)
     const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }
@@ -674,14 +700,14 @@ ${prompt}`)
   }
 }
 
-async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[]): Promise<RuntimePlan> {
+async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = []): Promise<RuntimePlan> {
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
   const heuristicPlan = planAgentRouting(prompt, brain)
   const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
-    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, home)
+    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, images, home)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
   const agentPlan = normalizeAgentRoutingPlan(forceRoles && forceRoles.length > 0
@@ -1047,6 +1073,7 @@ async function runWorkerFromPlan(
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   onTodoStatus?: WorkerTodoStatusHandler,
+  promptImages: ImageContent[] = [],
 ): Promise<ExecutedWorkerResult> {
   const emit = async (event: WorkerLifecycleEvent) => {
     if (!onWorkerEvent) return
@@ -1107,7 +1134,7 @@ async function runWorkerFromPlan(
           ...(subagentStartHooks.blockedReason ? [subagentStartHooks.blockedReason] : []),
         ],
       )
-      await runtime.agent.prompt(workerPrompt)
+      await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
       const text = extractAssistantText(runtime.agent.state.messages)
       const result = normalizeWorkerResultText(text, handoff)
       const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status: "completed" }
@@ -1155,6 +1182,7 @@ async function runSupportWorkers(
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   concurrencyCap?: number,
   onTodoStatus?: WorkerTodoStatusHandler,
+  promptImages: ImageContent[] = [],
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
   void toolExecution // tool execution governs intra-agent tool calls; worker scheduling is independent.
@@ -1180,6 +1208,7 @@ async function runSupportWorkers(
       hookContext,
       onWorkerEvent,
       onTodoStatus,
+      promptImages,
     )
     return runOne(slot)
   }
@@ -1266,7 +1295,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const promptImages = expanded.images
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
-  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles)
+  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
   if (request.onPlan) {
     try {
@@ -1286,7 +1315,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
   const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
     updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus)
+  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()
@@ -1332,6 +1361,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         tools: mcpTools,
         getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
         onEvent: request.onEvent,
+        onToolApproval: request.onToolApproval,
       })
 
       try {
@@ -1340,7 +1370,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages)
             : undefined
         if (reviewResult) workerResults.push(reviewResult)
 

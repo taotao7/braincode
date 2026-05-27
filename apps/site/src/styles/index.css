@@ -205,7 +205,9 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 .hero .lead    { margin-bottom: var(--gap-lg); border-left: 4px solid var(--accent); padding-left: 16px; text-align: left;}
 .hero-cta      { display: inline-flex; gap: var(--gap-md); flex-wrap: wrap; }
 .hero-center .hero-cta { justify-content: center; }
-.hero-split    { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-2xl); align-items: center; }
+.hero-split    { display: grid; grid-template-columns: 4fr 6fr; gap: var(--gap-xl); align-items: center; }
+.hero-split .hero-img { aspect-ratio: 2 / 1; }
+.hero-split .hero-img img { object-fit: contain; background: var(--bg); }
 @media (max-width: 920px) { .hero-split { grid-template-columns: 1fr; } }
 
 /* Code Block */
@@ -300,6 +302,105 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 .intent-graph .role    { color: #7cafc2; }
 .intent-graph .key     { color: #ba8baf; }
 
+/* Runtime transcript */
+.runtime-frame {
+  background: var(--fg);
+  color: var(--bg);
+  border: var(--border-width) solid var(--fg);
+  box-shadow: 10px 10px 0px var(--accent);
+}
+.runtime-bar {
+  background: var(--bg);
+  color: var(--fg);
+  border-bottom: var(--border-width) solid var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.runtime-body {
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.runtime-line,
+.runtime-decision-head {
+  display: grid;
+  grid-template-columns: 120px 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.runtime-line {
+  padding: 10px 12px;
+  border-left: 6px solid var(--bg);
+  background: color-mix(in oklch, var(--bg) 7%, transparent);
+}
+.runtime-line-web { border-left-color: #7cafc2; }
+.runtime-line-exec { border-left-color: #f7ca88; }
+.runtime-line-read { border-left-color: #a1b56c; }
+.runtime-label {
+  display: inline-block;
+  color: var(--fg);
+  background: var(--bg);
+  border: var(--border-width) solid var(--bg);
+  padding: 2px 6px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.runtime-type {
+  color: #f7ca88;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.runtime-line-web .runtime-type { color: #7cafc2; }
+.runtime-line-exec .runtime-type { color: #f7ca88; }
+.runtime-line-read .runtime-type { color: #a1b56c; }
+.runtime-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.runtime-decision {
+  border: var(--border-width) solid var(--bg);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.decision-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: var(--bg);
+  font-weight: bold;
+}
+.decision-row input {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: var(--border-width) solid var(--bg);
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.decision-row input:checked::after {
+  content: "x";
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: bold;
+}
+
 /* Handoff Packet */
 .handoff-packet {
   background: var(--fg);
@@ -359,5 +460,32 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 @media (max-width: 640px) {
   .topnav nav { display: none; }
   .intent-graph { font-size: 11px; padding: 14px; }
+  .runtime-body { font-size: 11px; padding: 14px; }
+  .runtime-line,
+  .runtime-decision-head { grid-template-columns: 1fr; gap: 6px; }
   .handoff-packet pre { font-size: 11px; padding: 14px; }
 }
+
+/* Chinese typography overrides — Impact has no CJK glyphs, and 0.02–0.1em
+   letter-spacing creates visible gaps between Chinese characters. */
+:lang(zh) h1,
+:lang(zh) h2,
+:lang(zh) h3,
+:lang(zh) h4,
+:lang(zh) .pillar h4,
+:lang(zh) .feature h3 {
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+               'Source Han Sans SC', 'Noto Sans CJK SC', var(--font-display);
+  letter-spacing: 0;
+  font-weight: 900;
+}
+:lang(zh) h1 { font-size: clamp(40px, 6vw, 72px); line-height: 1.15; }
+:lang(zh) h2 { font-size: clamp(28px, 4.2vw, 48px); line-height: 1.2; }
+:lang(zh) .eyebrow { letter-spacing: 0.04em; }
+:lang(zh) .topnav .logo,
+:lang(zh) .topnav nav a,
+:lang(zh) .btn { letter-spacing: 0; }
+:lang(zh) .lead { max-width: 50ch; line-height: 1.75; }
+:lang(zh) .feature p,
+:lang(zh) .pillar p,
+:lang(zh) .card p { line-height: 1.75; }

@@ -3,8 +3,8 @@ import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
-import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
-import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
+import { ensureSessionHandoff, executePromptFromConfig, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type ToolApprovalDecision, type ToolApprovalRequest, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
+import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
 import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
@@ -14,18 +14,22 @@ import { usePetWatcher, type PetWatcherSnapshotItem } from "./pet-watcher"
 
 type TranscriptItem = {
   id: string
-  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "todo" | "queued"
+  kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "todo" | "queued" | "decision"
   text: string
   plan?: RuntimePlan
   toolName?: string
+  toolCategory?: ToolCategory
   toolStatus?: "running" | "ok" | "failed"
   workerStatus?: "running" | "completed" | "failed"
   todoStatus?: "pending" | "running" | "completed" | "blocked" | "failed"
+  decisionStatus?: "pending" | "approved" | "blocked"
   todoId?: string
   startedAt?: number
   finishedAt?: number
   queueId?: string
 }
+
+type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool"
 
 type QueuedTask = {
   id: string
@@ -55,6 +59,9 @@ const COMMANDS: CommandDefinition[] = [
   { name: "new", label: "/new", hint: "Start a fresh session (clears transcript)" },
   { name: "handoff", label: "/handoff", hint: "Fork a new session (or pass <session-id> to summarize another)", insert: "/handoff " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
+  { name: "mode", label: "/mode", hint: "View or switch execution mode: auto/radical", insert: "/mode " },
+  { name: "auto", label: "/auto", hint: "Switch execution mode to auto" },
+  { name: "radical", label: "/radical", hint: "Switch execution mode to radical" },
   { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
   { name: "skill", label: "/skill", hint: "List project skills (.agents/skill)" },
   { name: "agents", label: "/agents", hint: "Show AGENTS.md location and length" },
@@ -120,6 +127,25 @@ type IntentPanelState = {
   plan: RuntimePlan
 }
 
+type DecisionOptionId = "approve" | "block"
+
+type DecisionOption = {
+  id: DecisionOptionId
+  label: string
+  description: string
+  checked: boolean
+}
+
+type DecisionPanelState = {
+  id: string
+  itemId: string
+  toolName: string
+  toolCategory: ToolCategory
+  argsSummary: string
+  selected: number
+  options: DecisionOption[]
+}
+
 type BraincodeTuiProps = {
   initialPrompt?: string
 }
@@ -159,6 +185,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [cursor, setCursor] = useState((initialPrompt ?? "").length)
   const [running, setRunning] = useState(false)
   const [items, setItems] = useState<TranscriptItem[]>([])
+  const [mode, setMode] = useState<BraincodeMode>("auto")
   const [projectSupport, setProjectSupport] = useState<ProjectSupport | null>(null)
   const [userSupport, setUserSupport] = useState<UserSupport | null>(null)
   const [projectFiles, setProjectFiles] = useState<string[]>([])
@@ -170,11 +197,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [brainPanel, setBrainPanel] = useState<BrainPanelState | null>(null)
   const [intentPlan, setIntentPlan] = useState<RuntimePlan | null>(null)
   const [intentPanel, setIntentPanel] = useState<IntentPanelState | null>(null)
+  const [decisionPanel, setDecisionPanel] = useState<DecisionPanelState | null>(null)
   const [statusFlash, setStatusFlash] = useState<string>("")
   const initialRan = useRef(false)
   const lastEscapeAt = useRef(0)
   const DOUBLE_ESC_MS = 500
   const queueRef = useRef<QueuedTask[]>([])
+  const pendingDecisionResolve = useRef<((decision: ToolApprovalDecision) => void) | null>(null)
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion((value) => value + 1)
 
@@ -224,6 +253,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   useEffect(() => {
     void (async () => {
+      try {
+        const settings = await readSettings()
+        setMode(settings.mode)
+      } catch (error) {
+        appendItem({ kind: "error", text: `Failed to read settings: ${formatError(error)}` })
+      }
       try {
         const support = await readProjectSupport(projectRoot)
         setProjectSupport(support)
@@ -352,6 +387,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true
       case "brain":
         void showBrainPanel(argument)
+        return true
+      case "mode":
+        void switchMode(argument)
+        return true
+      case "auto":
+        void switchMode("auto")
+        return true
+      case "radical":
+        void switchMode("radical")
         return true
       case "team-test":
         invokeTeamTest(argument)
@@ -806,6 +850,33 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
+  async function switchMode(argument: string) {
+    const next = argument.trim().toLowerCase()
+    if (!next) {
+      appendItem({ kind: "panel", text: `Execution mode: ${mode}\nUse /mode auto or /mode radical to switch. /auto and /radical are shortcuts.` })
+      return
+    }
+    if (next !== "auto" && next !== "radical") {
+      appendItem({ kind: "error", text: "Usage: /mode auto|radical" })
+      return
+    }
+    try {
+      const current = await readSettings()
+      if (current.mode === next) {
+        setMode(next)
+        flash(`Mode already ${next}`)
+        appendItem({ kind: "status", text: `Mode remains ${next}.` })
+        return
+      }
+      await writeSettings({ ...current, mode: next })
+      setMode(next)
+      appendItem({ kind: "status", text: `Mode → ${next}${running ? " (applies to the next run)" : ""}` })
+      flash(`Mode → ${next}`)
+    } catch (error) {
+      appendItem({ kind: "error", text: `Mode switch failed: ${formatError(error)}` })
+    }
+  }
+
   function viewBrainDetail(target: BrainModel) {
     appendItem({ kind: "panel", text: formatBrainDetail(target, brainPanel?.defaultBrainId ?? "") })
   }
@@ -987,7 +1058,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     const currentAssistant = { id: null as string | null, text: "" }
     const currentThinking = { id: null as string | null, text: "" }
-    const toolItems = new Map<string, { itemId: string; toolName: string; startedAt: number; argsSummary: string }>()
+    const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string }>()
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
       setItems((previous) => previous.map((item) => item.id === itemId ? { ...item, ...patch } : item))
@@ -1049,10 +1120,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             currentThinking.text += update.delta
             updateItem(id, { text: truncateForStatus(currentThinking.text) })
           } else if (update.type === "toolcall_start") {
-            updateStatus("Preparing tool call…")
+            updateStatus("Tool Call · preparing arguments…")
           } else if (update.type === "toolcall_end") {
             const callName = update.toolCall?.name ?? ""
-            if (callName) updateStatus(`Tool args ready: ${callName}`)
+            if (callName) {
+              const category = classifyToolCall(callName, update.toolCall?.arguments)
+              updateStatus(`Tool Call · ${toolCategoryTitle(category)} · ${callName}`)
+            }
           }
           return
         }
@@ -1060,22 +1134,24 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           finalizeStreamingBuffers()
           const itemId = crypto.randomUUID()
           const argsSummary = summarizeToolArgs(event.args)
-          toolItems.set(event.toolCallId, { itemId, toolName: event.toolName, startedAt: Date.now(), argsSummary })
+          const toolCategory = classifyToolCall(event.toolName, event.args)
+          toolItems.set(event.toolCallId, { itemId, toolName: event.toolName, toolCategory, startedAt: Date.now(), argsSummary })
           appendItemRaw({
             id: itemId,
             kind: "tool",
             toolStatus: "running",
             toolName: event.toolName,
+            toolCategory,
             startedAt: Date.now(),
-            text: `${event.toolName}  ${argsSummary}`,
+            text: formatToolStartText(event.toolName, argsSummary),
           })
-          updateStatus(`Running tool: ${event.toolName}`)
+          updateStatus(`Tool Call · ${toolCategoryTitle(toolCategory)} · running ${event.toolName}`)
           return
         }
         case "tool_execution_update": {
           const tracked = toolItems.get(event.toolCallId)
           if (!tracked) return
-          updateStatus(`${event.toolName} · streaming…`)
+          updateStatus(`Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · streaming ${event.toolName}`)
           return
         }
         case "tool_execution_end": {
@@ -1085,10 +1161,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           const elapsed = Date.now() - tracked.startedAt
           updateItem(tracked.itemId, {
             toolStatus: event.isError ? "failed" : "ok",
+            toolCategory: tracked.toolCategory,
             finishedAt: Date.now(),
-            text: `${event.toolName}  ${tracked.argsSummary}  →  ${event.isError ? "failed" : "ok"} (${elapsed}ms)  ${summarizeToolResult(event.result)}`,
+            text: formatToolEndText(event.toolName, tracked.argsSummary, event.isError, elapsed, summarizeToolResult(event.result)),
           })
-          updateStatus(`${event.isError ? "Tool failed" : "Tool done"}: ${event.toolName}`)
+          updateStatus(`Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · ${event.isError ? "failed" : "done"} ${event.toolName}`)
           return
         }
         case "turn_end":
@@ -1189,8 +1266,81 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       setItems((previous) => previous.map((item) => item.id === statusId ? { ...item, text } : item))
     }
 
+    const onToolApproval = async (request: ToolApprovalRequest, signal?: AbortSignal): Promise<ToolApprovalDecision> => {
+      const toolCategory = classifyToolCall(request.toolName, request.args)
+      if (!requiresToolDecision(toolCategory, request.toolName, request.args)) return { approved: true }
+      try {
+        const configuredTools = await readTools()
+        if (toolApprovalAllowedByConfig(request.toolName, toolCategory, configuredTools)) {
+          return { approved: true }
+        }
+      } catch (error) {
+        appendItemRaw({ id: crypto.randomUUID(), kind: "status", text: `Tool config unavailable; asking for approval: ${formatError(error)}` })
+      }
+      if (pendingDecisionResolve.current) {
+        return { approved: false, reason: "Another tool decision is already pending." }
+      }
+
+      finalizeStreamingBuffers()
+      const itemId = crypto.randomUUID()
+      const argsSummary = summarizeToolArgs(request.args)
+      appendItemRaw({
+        id: itemId,
+        kind: "decision",
+        decisionStatus: "pending",
+        toolName: request.toolName,
+        toolCategory,
+        text: `${toolCategoryTitle(toolCategory)} · ${request.toolName} · waiting for selection`,
+      })
+      updateStatus(`Ask User · ${toolCategoryTitle(toolCategory)} approval needed`)
+
+      return await new Promise<ToolApprovalDecision>((resolve) => {
+        const finish = (decision: ToolApprovalDecision) => {
+          signal?.removeEventListener("abort", abort)
+          pendingDecisionResolve.current = null
+          resolve(decision)
+        }
+        const abort = () => {
+          setDecisionPanel(null)
+          updateItem(itemId, {
+            decisionStatus: "blocked",
+            text: `${toolCategoryTitle(toolCategory)} · ${request.toolName} · blocked (aborted)`,
+          })
+          finish({ approved: false, reason: "Tool decision aborted." })
+        }
+        if (signal?.aborted) {
+          abort()
+          return
+        }
+        signal?.addEventListener("abort", abort, { once: true })
+        pendingDecisionResolve.current = finish
+        setDecisionPanel({
+          id: request.toolCallId,
+          itemId,
+          toolName: request.toolName,
+          toolCategory,
+          argsSummary,
+          selected: 0,
+          options: [
+            {
+              id: "approve",
+              label: "Approve once",
+              description: "Run this tool call now.",
+              checked: true,
+            },
+            {
+              id: "block",
+              label: "Block",
+              description: "Return a blocked tool result to the model.",
+              checked: false,
+            },
+          ],
+        })
+      })
+    }
+
     try {
-      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
+      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onToolApproval, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
       rememberIntentPlan(result.plan)
       finalizeStreamingBuffers()
       setItems((previous) => {
@@ -1323,9 +1473,83 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     return false
   }
 
+  function moveDecisionSelection(delta: number) {
+    setDecisionPanel((current) => {
+      if (!current || current.options.length === 0) return current
+      return {
+        ...current,
+        selected: (current.selected + delta + current.options.length) % current.options.length,
+      }
+    })
+  }
+
+  function checkDecisionSelection(optionId?: DecisionOptionId) {
+    setDecisionPanel((current) => {
+      if (!current) return current
+      const selectedId = optionId ?? current.options[current.selected]?.id
+      if (!selectedId) return current
+      return {
+        ...current,
+        selected: Math.max(0, current.options.findIndex((option) => option.id === selectedId)),
+        options: current.options.map((option) => ({ ...option, checked: option.id === selectedId })),
+      }
+    })
+  }
+
+  function finishDecision(optionId?: DecisionOptionId) {
+    if (!decisionPanel) return
+    const selected = optionId
+      ? decisionPanel.options.find((option) => option.id === optionId)
+      : decisionPanel.options.find((option) => option.checked) ?? decisionPanel.options[decisionPanel.selected]
+    if (!selected) return
+    const approved = selected.id === "approve"
+    setItems((previous) => previous.map((item) => item.id === decisionPanel.itemId
+      ? {
+        ...item,
+        decisionStatus: approved ? "approved" : "blocked",
+        text: `${toolCategoryTitle(decisionPanel.toolCategory)} · ${decisionPanel.toolName} · ${approved ? "approved once" : "blocked"}`,
+      }
+      : item))
+    setDecisionPanel(null)
+    const resolve = pendingDecisionResolve.current
+    pendingDecisionResolve.current = null
+    resolve?.({
+      approved,
+      reason: approved ? undefined : `User blocked tool call: ${decisionPanel.toolName}`,
+    })
+  }
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit()
+      return
+    }
+
+    if (decisionPanel) {
+      const nextMove = key.downArrow || (key.ctrl && input === "n")
+      const prevMove = key.upArrow || (key.ctrl && input === "p")
+      if (nextMove || prevMove) {
+        moveDecisionSelection(nextMove ? 1 : -1)
+        return
+      }
+      if (input === " ") {
+        checkDecisionSelection()
+        return
+      }
+      if (input === "y") {
+        checkDecisionSelection("approve")
+        finishDecision("approve")
+        return
+      }
+      if (input === "n" || key.escape) {
+        checkDecisionSelection("block")
+        finishDecision("block")
+        return
+      }
+      if (key.return) {
+        finishDecision()
+        return
+      }
       return
     }
 
@@ -1567,7 +1791,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         <Box flexDirection="column">
           <Text color="cyan" bold>BRAIN / CODE</Text>
           <Text color="gray">
-            session {sessionId.slice(0, 8)} · {relative(homedir(), projectRoot) || projectRoot}
+            session {sessionId.slice(0, 8)} · mode {mode} · {relative(homedir(), projectRoot) || projectRoot}
           </Text>
           <Text color="gray">
             project: {projectSupport ? `AGENTS.md ${projectSupport.agents ? "✓" : "·"}  mcp:${projectMcpCount}  skills:${projectSkillCount}` : "loading…"}
@@ -1591,7 +1815,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         <Box flexDirection="column">
           {items.map((item) => (
             <Box key={item.id} flexDirection="column" marginBottom={1}>
-              <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+              <TranscriptLine item={item} />
               {item.plan ? <Text color="gray">mode={item.plan.mode} routing={item.plan.routing.source} toolExecution={item.plan.toolExecution}</Text> : null}
               {item.plan?.todos.length ? (
                 <Box flexDirection="column" marginLeft={2}>
@@ -1737,6 +1961,23 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
+      {decisionPanel ? (
+        <Box borderStyle="double" borderColor="yellow" flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color="yellow" bold>Ask User · Tool Decision</Text>
+          <Text>
+            <Text color={toolCategoryColor(decisionPanel.toolCategory)} bold>[{toolCategoryTitle(decisionPanel.toolCategory)}]</Text>
+            <Text color="yellow"> {decisionPanel.toolName}</Text>
+          </Text>
+          {decisionPanel.argsSummary ? <Text color="gray">args: {decisionPanel.argsSummary}</Text> : null}
+          {decisionPanel.options.map((option, index) => (
+            <Text key={option.id} color={index === decisionPanel.selected ? "green" : option.checked ? "yellow" : "gray"}>
+              {index === decisionPanel.selected ? "› " : "  "}{option.checked ? "[x]" : "[ ]"} {option.label} — {option.description}
+            </Text>
+          ))}
+          <Text color="gray">↑↓ / Ctrl+P/N navigate · Space checks · Enter confirms · y approves · n/Esc blocks</Text>
+        </Box>
+      ) : null}
+
       <Box justifyContent="flex-end">
         <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
       </Box>
@@ -1760,7 +2001,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         )}
       </Box>
       <Text color="gray">
-        Enter submits · / commands · @ files · @@ sessions · Ctrl+O intent · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · /mode auto|radical · @ files · @@ sessions · Ctrl+O intent · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color="yellow">
@@ -1948,6 +2189,36 @@ function clipDraftToWindow(draft: string, cursor: number, width: number, maxLine
   }
 }
 
+function TranscriptLine({ item }: { item: TranscriptItem }) {
+  if (item.kind === "tool") {
+    const category = item.toolCategory ?? "tool"
+    return (
+      <Text>
+        <Text color="yellow" bold>Tool Call</Text>
+        <Text color="gray"> · </Text>
+        <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
+        <Text color={colorFor(item)}> {item.text}</Text>
+      </Text>
+    )
+  }
+  if (item.kind === "decision") {
+    const category = item.toolCategory ?? "tool"
+    const status = item.decisionStatus ?? "pending"
+    const statusColor = status === "approved" ? "green" : status === "blocked" ? "red" : "yellow"
+    return (
+      <Text>
+        <Text color="yellow" bold>Ask User</Text>
+        <Text color="gray"> · </Text>
+        <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
+        <Text color="gray"> · </Text>
+        <Text color={statusColor} bold>{status.toUpperCase()}</Text>
+        <Text color={colorFor(item)}> {item.text}</Text>
+      </Text>
+    )
+  }
+  return <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+}
+
 function labelFor(item: TranscriptItem): string {
   switch (item.kind) {
     case "user": return "You:"
@@ -1959,9 +2230,9 @@ function labelFor(item: TranscriptItem): string {
     case "thinking": return "Thinking:"
     case "tool": {
       switch (item.toolStatus) {
-        case "ok": return "✓"
-        case "failed": return "✗"
-        default: return "→"
+        case "ok": return "Tool Call:"
+        case "failed": return "Tool Call:"
+        default: return "Tool Call:"
       }
     }
     case "worker": {
@@ -1973,6 +2244,7 @@ function labelFor(item: TranscriptItem): string {
     }
     case "todo": return todoGlyph(item.todoStatus ?? "pending")
     case "queued": return "»"
+    case "decision": return "Ask User:"
   }
 }
 
@@ -2190,9 +2462,10 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
     case "panel": return "magenta"
     case "thinking": return "gray"
     case "tool": {
+      if (item.toolStatus === "failed") return "red"
+      if (item.toolCategory) return toolCategoryColor(item.toolCategory)
       switch (item.toolStatus) {
         case "ok": return "cyan"
-        case "failed": return "red"
         default: return "yellow"
       }
     }
@@ -2213,6 +2486,13 @@ function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "ye
       }
     }
     case "queued": return "yellow"
+    case "decision": {
+      switch (item.decisionStatus) {
+        case "approved": return "green"
+        case "blocked": return "red"
+        default: return "yellow"
+      }
+    }
   }
 }
 
@@ -2298,6 +2578,75 @@ function isLikelySessionId(token: string): boolean {
 function truncateForStatus(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim()
   return truncate(collapsed, 80)
+}
+
+function classifyToolCall(toolName: string, args: unknown): ToolCategory {
+  const name = toolName.toLowerCase()
+  if (/(web.?search|search_query|search-query|brave|tavily|serp|firecrawl|browser_search|web_fetch|fetch_url)/.test(name)) return "websearch"
+  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess)/.test(name)) return "execute"
+  if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return "write"
+  if (/(read|grep|rg|search_files|search-files|list|find|get_file|get-code|snippet|open_file)/.test(name)) return "read"
+  const serialized = summarizeToolArgs(args).toLowerCase()
+  if (/\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from)\b/.test(serialized)) return "execute"
+  if (name.startsWith("mcp__")) return "mcp"
+  return "tool"
+}
+
+function toolCategoryTitle(category: ToolCategory): string {
+  switch (category) {
+    case "websearch": return "Web Search"
+    case "execute": return "Execute"
+    case "write": return "Write"
+    case "read": return "Read"
+    case "mcp": return "MCP"
+    case "tool": return "Tool"
+  }
+}
+
+function toolCategoryColor(category: ToolCategory): "blue" | "cyan" | "green" | "red" | "yellow" | "magenta" | "gray" {
+  switch (category) {
+    case "websearch": return "blue"
+    case "execute": return "yellow"
+    case "write": return "magenta"
+    case "read": return "cyan"
+    case "mcp": return "magenta"
+    case "tool": return "cyan"
+  }
+}
+
+function requiresToolDecision(category: ToolCategory, toolName: string, args: unknown): boolean {
+  if (category === "execute" || category === "write") return true
+  const text = `${toolName} ${summarizeToolArgs(args)}`.toLowerCase()
+  return /\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from|truncate\s+table)\b/.test(text)
+}
+
+function toolApprovalAllowedByConfig(toolName: string, category: ToolCategory, document: BraincodeTools): boolean {
+  const enabledAllowed = new Set(
+    document.tools
+      .filter((tool) => tool.enabled && tool.approvalPolicy === "allow")
+      .map((tool) => tool.name),
+  )
+  if (enabledAllowed.has(toolName)) return true
+  const lower = toolName.toLowerCase()
+  for (const name of enabledAllowed) {
+    const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, "_")
+    if (lower === normalized || lower.endsWith(`__${normalized}`)) return true
+  }
+  if (category === "execute" && enabledAllowed.has("shell")) return true
+  if (category === "write" && enabledAllowed.has("edit_file")) return true
+  if (category === "read" && (enabledAllowed.has("read_file") || enabledAllowed.has("search_files"))) return true
+  return false
+}
+
+function formatToolStartText(toolName: string, argsSummary: string): string {
+  return `${toolName}${argsSummary ? ` · args ${argsSummary}` : ""}`
+}
+
+function formatToolEndText(toolName: string, argsSummary: string, isError: boolean, elapsedMs: number, resultSummary: string): string {
+  const status = isError ? "failed" : "completed"
+  const args = argsSummary ? ` · args ${argsSummary}` : ""
+  const result = resultSummary ? ` · result ${resultSummary}` : ""
+  return `${toolName} · ${status} (${elapsedMs}ms)${args}${result}`
 }
 
 function summarizeToolArgs(args: unknown): string {

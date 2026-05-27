@@ -1,6 +1,7 @@
 export const fr = {
   nav_arch: "Architecture",
   nav_intent: "Intent",
+  nav_output: "Sortie",
   nav_handoff: "Handoff",
   nav_modes: "Exécution",
   nav_install: "Installation",
@@ -38,6 +39,24 @@ export const fr = {
   intent_pillar_3_title: "Auditable",
   intent_pillar_3_body:
     "Chaque arête garde sa raison. Vous savez « pourquoi ce worker a tourné » sans lire le transcript.",
+  section_output_eyebrow: "SORTIE RUNTIME",
+  section_output_title: "Chaque action porte une étiquette visible.",
+  section_output_lead:
+    "Les tool calls, recherches web, exécutions shell et décisions utilisateur ne se fondent pas dans la même ligne de transcript. Braincode marque d'abord le type d'action, puis affiche arguments, statut et résultats.",
+  output_frame_title: "TRANSCRIPT D'EXÉCUTION",
+  output_frame_hint: "ÉTIQUETTES D'OUTILS · DÉCISIONS COCHABLES",
+  output_decision_copy: "Une commande dangereuse exige une décision explicite.",
+  output_decision_approve: "Approuver une fois : lancer la commande de build",
+  output_decision_block: "Bloquer et renvoyer la raison au modèle",
+  output_pillar_1_title: "Étiquettes explicites",
+  output_pillar_1_body:
+    "Web search, execute, read, write et MCP affichent des labels distincts avant le payload.",
+  output_pillar_2_title: "Statuts séparés",
+  output_pillar_2_body:
+    "Début, streaming, fin, échec, durée et résumé de résultat restent faciles à scanner.",
+  output_pillar_3_title: "Choix cochables",
+  output_pillar_3_body:
+    "Quand l'agent a besoin d'une décision, le TUI présente des options cochables au lieu d'un texte libre ambigu.",
   section_handoff_eyebrow: "HANDOFF PACKETS",
   section_handoff_title: "Transfert de contexte cerveau-vers-agent.",
   section_handoff_lead:

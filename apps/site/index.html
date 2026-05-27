@@ -16,6 +16,7 @@
       <nav>
         <a href="#features" data-i18n="nav_arch">Architecture</a>
         <a href="#intent" data-i18n="nav_intent">Intent</a>
+        <a href="#output" data-i18n="nav_output">Output</a>
         <a href="#handoff" data-i18n="nav_handoff">Handoff</a>
         <a href="#modes" data-i18n="nav_modes">Execution</a>
         <a href="#install" data-i18n="nav_install">Install</a>
@@ -47,7 +48,7 @@
           </div>
         </div>
         <div class="ph-img wide hero-img" aria-label="Woodcut diagram of a brain routing tasks to multiple models">
-          <img src="%BASE_URL%logo.png" alt="Braincode routing diagram" />
+          <img src="%BASE_URL%routing-diagram.png" alt="Braincode routing diagram" />
         </div>
       </div>
     </section>
@@ -104,14 +105,14 @@
 <pre class="intent-graph"><span class="dim">Intent · <span class="key">brain</span> · primary=<span class="role">backend</span> · routing=router-brain
 Model  · <span class="key">cliproxyapi/claude-opus-4-7</span> · tools=parallel</span>
 
-                        <span class="line">┌─▶</span> <span class="ok">☑</span> <span class="role">librarian</span>: gather context     <span class="line">─┐</span>
- <span class="ok">●</span> brain root (<span class="role">backend</span>) <span class="line">─┤</span>                                  <span class="line">├─▶</span> <span class="active">◐</span> <span class="role">backend</span>: implement API   <span class="line">─┐</span>
-                        <span class="line">└─▶</span> <span class="ok">☑</span> <span class="role">security</span>: auth risks       <span class="line">─┘</span>                               <span class="line">│</span>
-                                                                                                  <span class="line">▼</span>
-                                                                                          <span class="pending">☐</span> <span class="role">review</span>: verify diff
-                                                                                                  <span class="line">│</span>
-                                                                                                  <span class="line">▼</span>
-                                                                                          <span class="pending">☐</span> <span class="role">qa</span>: regression checks
+                            <span class="line">┌─▶</span> <span class="ok">☑</span> <span class="role">librarian</span>: gather context <span class="line">─┐</span>
+ <span class="ok">●</span> brain root (<span class="role">backend</span>) <span class="line">────┤</span>                                <span class="line">├─▶</span> <span class="active">◐</span> <span class="role">backend</span>: implement API <span class="line">─┐</span>
+                            <span class="line">└─▶</span> <span class="ok">☑</span> <span class="role">security</span>: auth risks      <span class="line">─┘</span>                             <span class="line">│</span>
+                                                                                           <span class="line">▼</span>
+                                                                                           <span class="pending">☐</span> <span class="role">review</span>: verify diff
+                                                                                           <span class="line">│</span>
+                                                                                           <span class="line">▼</span>
+                                                                                           <span class="pending">☐</span> <span class="role">qa</span>: regression checks
 
 <span class="dim">Notes:
   <span class="role">librarian</span> → <span class="role">backend</span>  support worker output feeds the primary task
@@ -136,6 +137,76 @@ Model  · <span class="key">cliproxyapi/claude-opus-4-7</span> · tools=parallel
             <span class="pillar-num">03</span>
             <h4 data-i18n="intent_pillar_3_title">Auditable</h4>
             <p data-i18n="intent_pillar_3_body">Every edge stores a reason. You can answer "why did this worker run?" without reading a transcript.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Runtime Output Surface -->
+    <section class="section" id="output" data-od-id="runtime-output">
+      <div class="container stack" style="gap: 48px;">
+        <div class="grid-1-2" style="align-items: end;">
+          <div>
+            <p class="eyebrow" data-i18n="section_output_eyebrow">RUNTIME OUTPUT</p>
+            <h2 data-i18n="section_output_title">Every action has a visible label.</h2>
+          </div>
+          <p class="lead" data-i18n="section_output_lead" style="border:none; padding:0;">Tool calls, web searches, shell execution, and user decisions do not blur into the same transcript line. Braincode marks the action type first, then shows arguments, status, and results.</p>
+        </div>
+
+        <div class="runtime-frame" aria-label="Braincode runtime transcript with explicit tool labels">
+          <div class="runtime-bar">
+            <span data-i18n="output_frame_title">RUN TRANSCRIPT</span>
+            <span data-i18n="output_frame_hint">TOOL TAGS · CHECKABLE DECISIONS</span>
+          </div>
+          <div class="runtime-body">
+            <div class="runtime-line runtime-line-web">
+              <span class="runtime-label">TOOL CALL</span>
+              <span class="runtime-type">[WEB SEARCH]</span>
+              <span class="runtime-text">web.search · args {query="Vite GitHub Pages base path"}</span>
+            </div>
+            <div class="runtime-line runtime-line-exec">
+              <span class="runtime-label">TOOL CALL</span>
+              <span class="runtime-type">[EXECUTE]</span>
+              <span class="runtime-text">shell · args {cmd="bun run build:site"}</span>
+            </div>
+            <div class="runtime-line runtime-line-read">
+              <span class="runtime-label">TOOL RESULT</span>
+              <span class="runtime-type">[READ]</span>
+              <span class="runtime-text">get_code_snippet · completed (42ms) · result 18 lines</span>
+            </div>
+            <div class="runtime-decision">
+              <div class="runtime-decision-head">
+                <span class="runtime-label">ASK USER</span>
+                <span class="runtime-type">[EXECUTE]</span>
+                <span class="runtime-text" data-i18n="output_decision_copy">Dangerous command needs an explicit decision.</span>
+              </div>
+              <label class="decision-row">
+                <input type="checkbox" checked />
+                <span data-i18n="output_decision_approve">Approve once: run the build command</span>
+              </label>
+              <label class="decision-row">
+                <input type="checkbox" />
+                <span data-i18n="output_decision_block">Block and return the reason to the model</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-3" style="gap: 16px;">
+          <div class="pillar">
+            <span class="pillar-num">01</span>
+            <h4 data-i18n="output_pillar_1_title">Explicit tags</h4>
+            <p data-i18n="output_pillar_1_body">Web search, execute, read, write, and MCP calls carry distinct labels before the payload.</p>
+          </div>
+          <div class="pillar">
+            <span class="pillar-num">02</span>
+            <h4 data-i18n="output_pillar_2_title">Separated status</h4>
+            <p data-i18n="output_pillar_2_body">Start, streaming update, completion, failure, duration, and result summary stay scannable.</p>
+          </div>
+          <div class="pillar">
+            <span class="pillar-num">03</span>
+            <h4 data-i18n="output_pillar_3_title">Checkable choices</h4>
+            <p data-i18n="output_pillar_3_body">When the agent needs a decision, the TUI presents checkable options instead of free-form guessing.</p>
           </div>
         </div>
       </div>

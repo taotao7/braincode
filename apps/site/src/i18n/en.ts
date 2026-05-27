@@ -1,6 +1,7 @@
 export const en = {
   nav_arch: "Architecture",
   nav_intent: "Intent",
+  nav_output: "Output",
   nav_handoff: "Handoff",
   nav_modes: "Execution",
   nav_install: "Install",
@@ -38,6 +39,24 @@ export const en = {
   intent_pillar_3_title: "Auditable",
   intent_pillar_3_body:
     'Every edge stores a reason. You can answer "why did this worker run?" without reading a transcript.',
+  section_output_eyebrow: "RUNTIME OUTPUT",
+  section_output_title: "Every action has a visible label.",
+  section_output_lead:
+    "Tool calls, web searches, shell execution, and user decisions do not blur into the same transcript line. Braincode marks the action type first, then shows arguments, status, and results.",
+  output_frame_title: "RUN TRANSCRIPT",
+  output_frame_hint: "TOOL TAGS · CHECKABLE DECISIONS",
+  output_decision_copy: "Dangerous command needs an explicit decision.",
+  output_decision_approve: "Approve once: run the build command",
+  output_decision_block: "Block and return the reason to the model",
+  output_pillar_1_title: "Explicit tags",
+  output_pillar_1_body:
+    "Web search, execute, read, write, and MCP calls carry distinct labels before the payload.",
+  output_pillar_2_title: "Separated status",
+  output_pillar_2_body:
+    "Start, streaming update, completion, failure, duration, and result summary stay scannable.",
+  output_pillar_3_title: "Checkable choices",
+  output_pillar_3_body:
+    "When the agent needs a decision, the TUI presents checkable options instead of free-form guessing.",
   section_handoff_eyebrow: "HANDOFF PACKETS",
   section_handoff_title: "Brain-to-agent context transfer.",
   section_handoff_lead:

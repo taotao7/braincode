@@ -139,6 +139,8 @@ Both paths normalize into an `AgentRoutingPlan` with one primary routed role, ze
 
 Routing also produces a todo plan and dependency graph. Each todo has a stable id, title, assigned routed role, status, and optional summary. Dependency edges identify which todo must produce output before another todo can proceed. Worker plans carry the todo ids they own. During execution the runtime records `todo_plan` and `todo_update` session JSONL events, emits live todo updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. The TUI can show the current decomposition graph with `Ctrl+O` or `/intent`. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
 
+Tool execution emits a separate, user-visible surface from normal assistant text. The TUI labels tool transcript rows by action class (`Web Search`, `Execute`, `Read`, `Write`, `MCP`, or generic `Tool`) and keeps tool start, streaming update, completion, failure, duration, arguments, and result summaries scannable. Risky tool categories can pause through the runtime's tool approval callback before Pi executes the call; the TUI presents those approval requests as checkable `Ask User` decisions and returns an approve/block result to the runtime. Tool approval honors `~/.braincode/tools.json`: tools enabled with `approvalPolicy: "allow"` in the Web UI are not prompted again.
+
 ## Layered context ownership
 
 Workers must not share full conversation history.
@@ -176,7 +178,7 @@ Core packet types:
 
 The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries, project facts, and thread references remain future extensions of the same packet boundary.
 
-Prompt references follow the same boundary. `@<path>` attaches project files or images to the root user request. `@@<session-id>` attaches a compact session context snapshot built from session JSONL records: user prompts, final summaries, worker summaries, and errors. It must not inline a full transcript or worker-private context; workers receive only the expanded root request plus their own handoff packet.
+Prompt references follow the same boundary. `@<path>` attaches project files or images to the root user request. `@@<session-id>` attaches a compact session context snapshot built from session JSONL records: user prompts, final summaries, worker summaries, and errors. It must not inline a full transcript or worker-private context; workers receive only the expanded root request plus their own handoff packet. When images are attached, Braincode passes the same image inputs to routeBrain, supporting role agents, the primary role, and review so frontend/design workers can inspect visual context instead of seeing only an attachment marker.
 
 Agent-to-agent communication should use protocol types from `packages/protocol`.
 

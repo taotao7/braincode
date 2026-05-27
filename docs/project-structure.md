@@ -106,12 +106,13 @@ Expected commands:
 
 The CLI should stay thin. It should delegate implementation to packages.
 
-The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, and session state. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
+The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, and session state. It should let users switch Braincode mode between `auto` and `radical` without leaving the TUI. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
 
 Early TUI commands:
 
 - `/help` — show Braincode TUI commands and the model-configuration boundary.
 - `/plan <task>` — preview Brain Model routing without making a provider call.
+- `/mode auto|radical`, `/auto`, `/radical` — switch top-level execution mode.
 - `/clear` — clear the transcript.
 - `/exit` or `/quit` — leave the TUI.
 
@@ -206,6 +207,7 @@ Responsibilities:
 - Run a review worker for risky tasks when Brain policy requires it.
 - Merge structured worker and review results into the final run result.
 - Connect tools to the underlying agent runtime.
+- Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
 - Run trusted lifecycle hooks at supported runtime points and record hook outcomes in the session log.
