@@ -11,6 +11,7 @@ import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
 import { fuzzyFilter, listProjectFiles } from "./project-files"
 import { BrainPet } from "./brain-pet"
 import { usePetWatcher, type PetWatcherSnapshotItem } from "./pet-watcher"
+import { buildEditPreview, displayEditPath, extractEditArgs, resolveEditPath, snapshotFileContent, type EditArgs, type EditPreview, type EditRow } from "./tool-edit-preview"
 
 type TranscriptItem = {
   id: string
@@ -27,6 +28,7 @@ type TranscriptItem = {
   startedAt?: number
   finishedAt?: number
   queueId?: string
+  editPreview?: EditPreview
 }
 
 type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool"
@@ -1115,7 +1117,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     const currentAssistant = { id: null as string | null, text: "" }
     const currentThinking = { id: null as string | null, text: "" }
-    const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string }>()
+    const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string; editArgs?: EditArgs; editBeforePromise?: Promise<string | null> }>()
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
       setItems((previous) => previous.map((item) => item.id === itemId ? { ...item, ...patch } : item))
@@ -1204,7 +1206,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           const itemId = crypto.randomUUID()
           const argsSummary = summarizeToolArgs(event.args)
           const toolCategory = classifyToolCall(event.toolName, event.args)
-          toolItems.set(event.toolCallId, { itemId, toolName: event.toolName, toolCategory, startedAt: Date.now(), argsSummary })
+          const editArgs = toolCategory === "write" ? extractEditArgs(event.toolName, event.args) ?? undefined : undefined
+          const editBeforePromise = editArgs ? snapshotFileContent(resolveEditPath(editArgs.filePath, projectRoot)) : undefined
+          const entry = { itemId, toolName: event.toolName, toolCategory, startedAt: Date.now(), argsSummary, editArgs, editBeforePromise }
+          toolItems.set(event.toolCallId, entry)
           appendItemRaw({
             id: itemId,
             kind: "tool",
@@ -1234,6 +1239,25 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             finishedAt: Date.now(),
             text: formatToolEndText(event.toolName, tracked.argsSummary, event.isError, elapsed, summarizeToolResult(event.result)),
           })
+          if (tracked.editArgs) {
+            const editArgs = tracked.editArgs
+            const beforePromise = tracked.editBeforePromise ?? Promise.resolve(null)
+            const itemId = tracked.itemId
+            const isError = event.isError
+            void (async () => {
+              const [before, after] = await Promise.all([
+                beforePromise,
+                snapshotFileContent(resolveEditPath(editArgs.filePath, projectRoot)),
+              ])
+              const editPreview = buildEditPreview({
+                filePath: displayEditPath(editArgs.filePath, projectRoot),
+                before,
+                after,
+                success: !isError,
+              })
+              updateItem(itemId, { editPreview })
+            })()
+          }
           updateStatus(`Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · ${event.isError ? "failed" : "done"} ${event.toolName}`)
           return
         }
@@ -1900,6 +1924,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                   ))}
                 </Box>
               ) : null}
+              {item.editPreview ? <EditPreviewView preview={item.editPreview} /> : null}
             </Box>
           ))}
         </Box>
@@ -2291,6 +2316,62 @@ function TranscriptLine({ item }: { item: TranscriptItem }) {
     )
   }
   return <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+}
+
+function padLineNum(value: number | null, width: number): string {
+  if (value === null) return " ".repeat(width)
+  const str = String(value)
+  return str.length >= width ? str : " ".repeat(width - str.length) + str
+}
+
+function EditPreviewView({ preview }: { preview: EditPreview }) {
+  const headlineColor = preview.success ? "green" : "red"
+  const verb = preview.created ? "File created." : preview.deleted ? "File deleted." : "File edited."
+  const summary = preview.success
+    ? `Succeeded. ${verb} (+${preview.added} added, -${preview.removed} removed)`
+    : `Failed. (+${preview.added} would have been added, -${preview.removed} would have been removed)`
+  const widthOld = Math.max(2, String(preview.removed + preview.added + 1).length)
+  const widthNew = widthOld
+  return (
+    <Box flexDirection="column" marginLeft={2}>
+      <Text color="gray">Edit {preview.filePath}</Text>
+      <Text color={headlineColor}>↳ {summary}</Text>
+      {preview.binary ? <Text color="gray">  (binary or oversized file — diff not rendered)</Text> : null}
+      {preview.hunks.map((hunk, i) => (
+        <Box key={i} flexDirection="column">
+          {hunk.unchangedAbove > 0
+            ? <Text color="gray">{"  "}… {hunk.unchangedAbove} unchanged lines …</Text>
+            : null}
+          {hunk.rows.map((row, j) => <EditRowLine key={j} row={row} widthOld={widthOld} widthNew={widthNew} />)}
+        </Box>
+      ))}
+      {preview.truncated
+        ? <Text color="gray">{"  "}… {preview.hiddenLines} more lines …</Text>
+        : null}
+    </Box>
+  )
+}
+
+function EditRowLine({ row, widthOld, widthNew }: { row: EditRow; widthOld: number; widthNew: number }) {
+  if (row.kind === "context") {
+    return (
+      <Text color="gray">
+        {padLineNum(row.oldLine, widthOld)} {padLineNum(row.newLine, widthNew)}   {row.text}
+      </Text>
+    )
+  }
+  if (row.kind === "removed") {
+    return (
+      <Text backgroundColor="red" color="white">
+        {padLineNum(row.oldLine, widthOld)} {padLineNum(null, widthNew)} - {row.text}
+      </Text>
+    )
+  }
+  return (
+    <Text backgroundColor="green" color="black">
+      {padLineNum(null, widthOld)} {padLineNum(row.newLine, widthNew)} + {row.text}
+    </Text>
+  )
 }
 
 function RuntimeStatusLine({ status }: { status: RunStatusState }) {
