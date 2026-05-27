@@ -1265,6 +1265,26 @@ export async function readBrains(
   return brains;
 }
 
+const legacySystemPromptPatterns = {
+  routeBrain: [/Prefer coding as the primary role/],
+  librarian: [/Own codebase understanding: map unfamiliar repositories/],
+  rush: [/Own odd jobs and quick one-off chores/],
+} as const;
+
+function refreshLegacySystemPrompt(
+  value: unknown,
+  prompt: string,
+  patterns: readonly RegExp[],
+): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+  const systemPrompt = record.systemPrompt;
+  if (typeof systemPrompt !== "string") return false;
+  if (!patterns.some((pattern) => pattern.test(systemPrompt))) return false;
+  record.systemPrompt = prompt;
+  return true;
+}
+
 function migrateBrains(document: BraincodeBrains): boolean {
   let changed = false;
   for (const brain of document.brains) {
@@ -1278,8 +1298,44 @@ function migrateBrains(document: BraincodeBrains): boolean {
       record.name = "Brain";
       changed = true;
     }
+    if (
+      refreshLegacySystemPrompt(
+        record.planner,
+        agentRoleSystemPrompts.routeBrain,
+        legacySystemPromptPatterns.routeBrain,
+      )
+    ) {
+      changed = true;
+    }
     const roles = record.roles as Record<string, unknown> | undefined;
     if (roles && typeof roles === "object") {
+      if (
+        refreshLegacySystemPrompt(
+          roles.routeBrain,
+          agentRoleSystemPrompts.routeBrain,
+          legacySystemPromptPatterns.routeBrain,
+        )
+      ) {
+        changed = true;
+      }
+      if (
+        refreshLegacySystemPrompt(
+          roles.librarian,
+          agentRoleSystemPrompts.librarian,
+          legacySystemPromptPatterns.librarian,
+        )
+      ) {
+        changed = true;
+      }
+      if (
+        refreshLegacySystemPrompt(
+          roles.rush,
+          agentRoleSystemPrompts.rush,
+          legacySystemPromptPatterns.rush,
+        )
+      ) {
+        changed = true;
+      }
       if (!roles.pet) {
         const fallback = (roles.summarize ?? roles.rush) as Record<string, unknown> | undefined;
         if (fallback) {

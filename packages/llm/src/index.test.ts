@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, testModelConnection, toBraincodeModel, type BraincodeModel } from "./index"
+import { listBuiltInModelCatalog, listBuiltInProviders, resolvePiModel, testModelConnection, toBraincodeModel, toOpenAICompatibleBraincodeModel, type BraincodeModel } from "./index"
 
 test("listBuiltInProviders exposes Pi providers", () => {
   expect(listBuiltInProviders()).toContain("anthropic")
@@ -53,6 +53,20 @@ test("resolvePiModel maps legacy OpenAI chat completions API id", () => {
   })
 
   expect(piModel.api).toBe("openai-completions")
+  expect(piModel.input).toEqual(["text"])
+})
+
+test("OpenAI-compatible catalog models default to text-only input", () => {
+  const model = toOpenAICompatibleBraincodeModel({
+    provider: "proxy",
+    baseUrl: "https://proxy.example/v1",
+    modelId: "text-model",
+  })
+
+  const { piModel } = resolvePiModel(model)
+
+  expect(model.supportsVision).toBe(false)
+  expect(piModel.input).toEqual(["text"])
 })
 
 test("testModelConnection returns a diagnostic result for unsupported locations", async () => {

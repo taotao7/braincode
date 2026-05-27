@@ -123,6 +123,7 @@ export function toOpenAICompatibleBraincodeModel(input: { provider: string; base
     baseUrl: normalizeOpenAICompatibleBaseUrl(input.baseUrl),
     contextWindow: 128000,
     supportsTools: true,
+    supportsVision: false,
     defaultThinkingLevel: "medium",
   }
 }
@@ -213,7 +214,7 @@ async function testOpenAICompatibleGeneration(model: BraincodeModel, apiKey: str
   const baseUrl = normalizeOpenAICompatibleBaseUrl(model.baseUrl ?? "")
   const kimiCoding = isKimiCodingModel(model, baseUrl)
   const reasoningEffort = mapThinkingLevelToReasoningEffort(thinkingLevel)
-  const includeImage = model.supportsVision !== false && !kimiCoding
+  const includeImage = model.supportsVision === true && !kimiCoding
   const userContent = includeImage
     ? [
         { type: "text", text: "Reply with exactly: OK" },
@@ -275,7 +276,7 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
 
 function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
   const api = normalizeModelApi(model.api)
-  const input: ("text" | "image")[] = model.supportsVision === false ? ["text"] : ["text", "image"]
+  const input: ("text" | "image")[] = model.supportsVision === true ? ["text", "image"] : ["text"]
   return {
     id: model.modelId,
     name: model.name,

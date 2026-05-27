@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Braincode · Pick a Brain, not a Model</title>
-  <link rel="icon" href="/logo.png" type="image/png" />
+  <link rel="icon" href="%BASE_URL%logo.png" type="image/png" />
 </head>
 <body>
   <header class="topnav" data-od-id="topnav">
     <div class="container topnav-inner">
       <span class="logo">
-        <img src="/logo.png" alt="Braincode" />
+        <img src="%BASE_URL%logo.png" alt="Braincode" />
         Braincode
       </span>
       <nav>
@@ -35,7 +35,7 @@
     <section class="section hero" data-od-id="hero-split">
       <div class="container hero-split">
         <div>
-          <p class="eyebrow">__VERSION__ <span data-i18n="release_label">RELEASE</span></p>
+          <p class="eyebrow"><span data-version>__VERSION__</span> <span data-i18n="release_label">RELEASE</span></p>
           <h1><span data-i18n="hero_title_1">A harness,</span><br/><span data-i18n="hero_title_2">not an agent.</span></h1>
           <p class="lead" data-i18n="hero_lead" style="margin-top: 24px;">Braincode is a multi-LLM harness, not a single-model agent. You pick the Brain — it routes each sub-task to the model and the specialist role best suited for the job.</p>
           <div class="hero-cta" style="margin-top: 40px;">
@@ -47,7 +47,7 @@
           </div>
         </div>
         <div class="ph-img wide hero-img" aria-label="Woodcut diagram of a brain routing tasks to multiple models">
-          <img src="https://private-user-images.githubusercontent.com/24582204/597466334-d1d8a807-7438-470f-96a8-e7fc94c45cfe.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3Nzk3OTA5ODMsIm5iZiI6MTc3OTc5MDY4MywicGF0aCI6Ii8yNDU4MjIwNC81OTc0NjYzMzQtZDFkOGE4MDctNzQzOC00NzBmLTk2YTgtZTdmYzk0YzQ1Y2ZlLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjA1MjYlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwNTI2VDEwMTgwM1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWY2Y2FlNGRjNTVjMTVjNzk5OGM3NTZhYWI3YjAzYmUzNjcxM2VkODMxODE5NDU4NjJiNmY0YjExY2RjODYwOGYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.8mSM5VBPYnQFuZl_EIs9BtMDoV0q68ZnPvpOj2givdE" alt="Braincode routing diagram" />
+          <img src="%BASE_URL%logo.png" alt="Braincode routing diagram" />
         </div>
       </div>
     </section>
@@ -101,23 +101,23 @@
             <span data-i18n="intent_refresh_hint">/PLAN REFRESHES &nbsp;·&nbsp; ESC CLOSES</span>
           </div>
           <div class="intent-graph-scroll">
-<pre class="intent-graph"><span class="dim">Intent · <span class="key">brain</span> · primary=<span class="role">coding</span> · routing=heuristic
+<pre class="intent-graph"><span class="dim">Intent · <span class="key">brain</span> · primary=<span class="role">backend</span> · routing=router-brain
 Model  · <span class="key">cliproxyapi/claude-opus-4-7</span> · tools=parallel</span>
 
                         <span class="line">┌─▶</span> <span class="ok">☑</span> <span class="role">librarian</span>: gather context     <span class="line">─┐</span>
- <span class="ok">●</span> brain root (<span class="role">coding</span>) <span class="line">─┤</span>                                  <span class="line">├─▶</span> <span class="active">◐</span> <span class="role">coding</span>: implement change <span class="line">─┐</span>
-                        <span class="line">└─▶</span> <span class="ok">☑</span> <span class="role">research</span>: api references   <span class="line">─┘</span>                               <span class="line">│</span>
+ <span class="ok">●</span> brain root (<span class="role">backend</span>) <span class="line">─┤</span>                                  <span class="line">├─▶</span> <span class="active">◐</span> <span class="role">backend</span>: implement API   <span class="line">─┐</span>
+                        <span class="line">└─▶</span> <span class="ok">☑</span> <span class="role">security</span>: auth risks       <span class="line">─┘</span>                               <span class="line">│</span>
                                                                                                   <span class="line">▼</span>
                                                                                           <span class="pending">☐</span> <span class="role">review</span>: verify diff
                                                                                                   <span class="line">│</span>
                                                                                                   <span class="line">▼</span>
-                                                                                          <span class="pending">☐</span> <span class="role">security</span>: scan diff
+                                                                                          <span class="pending">☐</span> <span class="role">qa</span>: regression checks
 
 <span class="dim">Notes:
-  <span class="role">librarian</span> → <span class="role">coding</span>   support worker output feeds the primary task
-  <span class="role">research</span>  → <span class="role">coding</span>   api reference for the implementation
-  <span class="role">coding</span>    → <span class="role">review</span>   review runs after implementation output exists
-  <span class="role">review</span>    → <span class="role">security</span> parallel verification on risky changes</span>
+  <span class="role">librarian</span> → <span class="role">backend</span>  support worker output feeds the primary task
+  <span class="role">security</span>  → <span class="role">backend</span>  auth risk notes guide the implementation
+  <span class="role">backend</span>   → <span class="role">review</span>   review runs after implementation output exists
+  <span class="role">review</span>    → <span class="role">qa</span>       focused regression checks follow review</span>
 </pre>
           </div>
         </div>
@@ -299,6 +299,6 @@ Model  · <span class="key">cliproxyapi/claude-opus-4-7</span> · tools=parallel
     </div>
   </footer>
 
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

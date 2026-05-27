@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
+import { agentRoleSystemPrompts } from "@braincode/brain"
 import { appendSessionRecord, ensureBraincodeHome, getProviderApiKey, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, writeBrains, writeModels, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
@@ -190,6 +191,60 @@ test("readModels migrates legacy OpenAI chat completions API ids", async () => {
 
   const stored = JSON.parse(await Bun.file(paths.models).text()) as { models: Array<{ api?: string }> }
   expect(stored.models[0]?.api).toBe("openai-completions")
+})
+
+test("readBrains migrates obsolete roles and stale default system prompts", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(
+    paths.brains,
+    JSON.stringify({
+      brains: [
+        {
+          id: "brain",
+          planner: {
+            modelId: "planner",
+            thinkingLevel: "xhigh",
+            systemPrompt: "You are Braincode's route brain.\nPrefer coding as the primary role whenever the user asks to implement.",
+          },
+          roles: {
+            routeBrain: {
+              modelId: "planner",
+              thinkingLevel: "xhigh",
+              systemPrompt: "You are Braincode's route brain.\nPrefer coding as the primary role whenever the user asks to implement.",
+            },
+            coding: { modelId: "coding", thinkingLevel: "medium" },
+            fastReply: { modelId: "fast", thinkingLevel: "minimal" },
+            research: { modelId: "research", thinkingLevel: "low" },
+            librarian: {
+              modelId: "librarian",
+              thinkingLevel: "high",
+              systemPrompt: "You are Braincode's librarian agent.\nOwn codebase understanding: map unfamiliar repositories, locate relevant modules and symbols, trace relationships, and explain how pieces fit together.",
+            },
+            rush: {
+              modelId: "rush",
+              thinkingLevel: "low",
+              systemPrompt: "You are Braincode's rush agent.\nOwn odd jobs and quick one-off chores that do not fit a specialist role.",
+            },
+            summarize: { modelId: "summarize", thinkingLevel: "low" },
+          },
+        },
+      ],
+    }),
+  )
+
+  const brains = await readBrains(home)
+  const brain = brains.brains[0] as { planner?: { systemPrompt?: string }; roles?: Record<string, { systemPrompt?: string }> }
+
+  expect(brain.roles?.coding).toBeUndefined()
+  expect(brain.roles?.fastReply).toBeUndefined()
+  expect(brain.roles?.research).toBeUndefined()
+  expect(brain.planner?.systemPrompt).toBe(agentRoleSystemPrompts.routeBrain)
+  expect(brain.roles?.routeBrain?.systemPrompt).toBe(agentRoleSystemPrompts.routeBrain)
+  expect(brain.roles?.librarian?.systemPrompt).toBe(agentRoleSystemPrompts.librarian)
+  expect(brain.roles?.rush?.systemPrompt).toBe(agentRoleSystemPrompts.rush)
+  expect(brain.roles?.pet?.systemPrompt).toBe(agentRoleSystemPrompts.pet)
 })
 
 test("auth status lists configured provider names without returning secrets", async () => {

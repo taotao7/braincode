@@ -8,10 +8,9 @@ document.querySelectorAll<HTMLButtonElement>(".lang-switch button").forEach((btn
 });
 
 // Inject version into the eyebrow
-const versionEl = document.querySelector<HTMLElement>("[data-od-id='hero-split'] .eyebrow");
+const versionEl = document.querySelector<HTMLElement>("[data-version]");
 if (versionEl) {
-  const text = versionEl.textContent ?? "";
-  versionEl.textContent = text.replace("__VERSION__", __VERSION__);
+  versionEl.textContent = __VERSION__;
 }
 
 applyLang(pickInitialLang());

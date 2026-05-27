@@ -3,7 +3,8 @@ import { zh } from "./zh";
 import { fr } from "./fr";
 
 export type Lang = "en" | "zh" | "fr";
-export type I18nDict = typeof en;
+export type I18nKey = keyof typeof en;
+export type I18nDict = Record<I18nKey, string>;
 
 export const dictionaries: Record<Lang, I18nDict> = { en, zh, fr };
 
