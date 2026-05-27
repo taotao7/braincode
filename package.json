@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "braincode": "bun run apps/cli/src/index.ts",
+    "benchmark": "bun run apps/cli/src/index.ts benchmark",
     "config": "bun run apps/cli/src/index.ts config",
     "check": "bunx tsc --noEmit -p tsconfig.json",
     "test": "bun test",

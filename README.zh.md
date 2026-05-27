@@ -27,9 +27,13 @@ planner -> specialist workers -> primary executor -> reviewer -> final report
 ```bash
 braincode run "add login validation"
 braincode run --dry-run "add login validation"
+braincode run --dry-run --heuristic "add login validation"
+braincode benchmark
 ```
 
-`braincode run` 使用当前配置的 Brain Model。`--dry-run` 只预览路由计划，不调用 provider。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
+`braincode run` 使用当前配置的 Brain Model。`--dry-run` 预览与真实执行相同的 routeBrain 规划路径；需要不调用 provider 的诊断时，加 `--heuristic`。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
+
+`braincode benchmark` 运行一组代表性 coding prompt：README 编辑、失败测试修复、auth 风险改动、package/script 改动，以及只做安全审查的只读任务。默认会在有凭据时请求 routeBrain，并标注 heuristic fallback；`--heuristic` 可用于无 provider 的诊断运行。
 
 ## 工作方式
 
@@ -124,6 +128,6 @@ harness 暴露 **14 个角色**，整体以角色（专业人设）为主，并�
 
 ## 更多内容
 
-当前 TUI 支持 `/help` 查看命令、`/plan <任务>` 预览 Brain Model 路由但不调用 provider。TUI 不提供直接切换模型的命令；模型和 provider 配置属于 `braincode config`。
+当前 TUI 支持 `/help` 查看命令、`/plan <任务>` 预览 Brain Model 路由；需要无 provider 诊断时使用 `/plan --heuristic <任务>`。TUI 不提供直接切换模型的命令；模型和 provider 配置属于 `braincode config`。
 
 完整的架构、包职责、配置布局、路线图等，请参考英文版的 [README.md](./README.md)。

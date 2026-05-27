@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { executePromptFromConfig, planRuntimeFromConfig } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -10,6 +10,16 @@ function readFlag(args: string[], name: string): string | undefined {
   return args[index + 1]
 }
 
+function readRepeatedFlag(args: string[], name: string): string[] {
+  const values: string[] = []
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== name) continue
+    const value = args[index + 1]
+    if (value && !value.startsWith("--")) values.push(value)
+  }
+  return values
+}
+
 function printHelp() {
   console.log(`Braincode
 
@@ -17,17 +27,26 @@ Usage:
   braincode [tui]
   braincode config [--port <port>] [--host <host>] [--no-open]
   braincode run [--dry-run] [--heuristic] <prompt>
+  braincode benchmark [--heuristic] [--task <id>] [--json]
   braincode help
 
 Commands:
   tui      Start the interactive TUI (default when no command is given).
   config   Start the local browser configuration service.
   run      Plan or execute a task using the configured brain and model.
+  benchmark
+           Run representative coding-task plan benchmarks.
   help     Show this help message.
 
 Run flags:
   --dry-run     Print the routeBrain runtime plan instead of executing.
   --heuristic   With --dry-run, skip routeBrain and print the deterministic fallback plan.
+
+Benchmark flags:
+  --heuristic   Skip routeBrain and benchmark the deterministic fallback plan.
+  --task <id>   Run one task id; repeat or comma-separate for multiple tasks.
+  --list        Print available benchmark tasks.
+  --json        Print machine-readable JSON.
 `)
 }
 
@@ -93,6 +112,79 @@ async function runTask(args: string[]) {
   console.error(`\nSession: ${result.sessionId}`)
 }
 
+async function runBenchmark(args: string[]) {
+  const json = args.includes("--json")
+  const list = args.includes("--list")
+  const useRouterBrain = !(args.includes("--heuristic") || args.includes("--no-router"))
+  const home = readFlag(args, "--home")
+  const taskIds = readRepeatedFlag(args, "--task")
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (list) {
+    if (json) {
+      console.log(JSON.stringify({ tasks: demoBenchmarkTasks }, null, 2))
+      return
+    }
+    console.log(formatBenchmarkTaskList())
+    return
+  }
+
+  const result = await runDemoBenchmarkSuite(planRuntimeFromConfig, {
+    home,
+    useRouterBrain,
+    taskIds,
+  })
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2))
+  } else {
+    console.log(formatBenchmarkReport(result))
+  }
+
+  if (result.summary.failedTasks > 0) {
+    process.exitCode = 1
+  }
+}
+
+function formatBenchmarkTaskList(): string {
+  return [
+    "Braincode benchmark tasks:",
+    ...demoBenchmarkTasks.map((task) => `  ${task.id.padEnd(22)} ${task.title} (${task.tags.join(", ")})`),
+  ].join("\n")
+}
+
+function formatBenchmarkReport(result: DemoBenchmarkSuiteResult): string {
+  const lines = [
+    "Braincode demo benchmark",
+    `Mode: ${result.useRouterBrain ? "routeBrain preview (falls back to heuristic if unavailable)" : "heuristic diagnostic"}`,
+    `Started: ${result.startedAt}`,
+    "",
+  ]
+
+  for (const taskResult of result.results) {
+    const source = taskResult.plan?.routing.source ?? "error"
+    const role = taskResult.plan?.role ?? "-"
+    const review = taskResult.plan ? String(taskResult.plan.agentPlan.requiresReview) : "-"
+    const workers = taskResult.plan?.workers.map((worker) => worker.role).join(",") || "-"
+    lines.push(`${taskResult.task.id.padEnd(22)} ${taskResult.status.toUpperCase().padEnd(6)} ${source.padEnd(12)} role=${role.padEnd(8)} review=${review.padEnd(5)} workers=${workers} (${taskResult.durationMs}ms)`)
+
+    const notableChecks = taskResult.checks.filter((check) => check.status !== "passed")
+    for (const check of notableChecks) {
+      const reason = check.reason ? `; ${check.reason}` : ""
+      lines.push(`  ${check.status.toUpperCase().padEnd(7)} ${check.name}: expected ${check.expected}, got ${check.actual}${reason}`)
+    }
+  }
+
+  lines.push(
+    "",
+    `Summary: ${result.summary.passedTasks}/${result.summary.totalTasks} tasks passed; ${result.summary.failedTasks} failed; ${result.summary.skippedChecks} checks skipped; ${result.summary.durationMs}ms total.`,
+  )
+
+  return lines.join("\n")
+}
+
 async function main() {
   const args = process.argv.slice(2)
   const command = args[0]
@@ -109,6 +201,9 @@ async function main() {
       break
     case "run":
       await runTask(args.slice(1))
+      break
+    case "benchmark":
+      await runBenchmark(args.slice(1))
       break
     case "help":
     case "--help":

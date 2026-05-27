@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -36,9 +36,12 @@ Most coding agents ask one model to plan, code, and review itself. Braincode sep
 braincode run "add login validation"
 braincode run --dry-run "add login validation"
 braincode run --dry-run --heuristic "add login validation"
+braincode benchmark
 ```
 
 `braincode run` uses the configured Brain Model. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
+
+`braincode benchmark` runs a deterministic demo suite of representative coding prompts: README edits, failing-test fixes, auth-risk changes, package/script changes, and security-review-only runs. By default it asks routeBrain when credentials are available and labels heuristic fallback checks; use `--heuristic` for a no-provider diagnostic run.
 
 ## How It Works
 
@@ -85,6 +88,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked`; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 - Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.
+- Demo benchmark CLI for representative coding tasks covering docs edits, failing tests, auth-risk implementation, package/script changes, and security-review-only prompts.
 
 ## Remaining Work
 
@@ -150,6 +154,9 @@ bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
 bun run braincode -- run --dry-run --heuristic "review this patch"
 bun run braincode -- run "hello"
+bun run benchmark
+bun run benchmark -- --heuristic
+bun run braincode -- benchmark --task auth-risk-change --json
 ```
 
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.

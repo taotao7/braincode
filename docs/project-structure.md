@@ -104,6 +104,7 @@ Expected commands:
 - `braincode run --dry-run <task>` — inspect mode, brain, role, model selection, and the routeBrain plan.
 - `braincode run --dry-run --heuristic <task>` — inspect deterministic fallback routing without making provider calls.
 - `braincode run <task>` — execute one non-interactive prompt through the configured provider when auth is available.
+- `braincode benchmark [--heuristic] [--task <id>] [--json]` — run the representative coding-task plan benchmark suite.
 
 The CLI should stay thin. It should delegate implementation to packages.
 
@@ -216,6 +217,7 @@ Responsibilities:
 - Emit normalized Braincode events.
 - Persist sessions.
 - Apply Braincode-specific runtime policy.
+- Own the reusable demo benchmark task catalog and plan-level evaluation logic for representative coding workflows.
 
 ### `packages/context`
 
@@ -341,4 +343,5 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` `review_decision` session records.
+- Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

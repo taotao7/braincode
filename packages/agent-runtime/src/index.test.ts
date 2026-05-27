@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runPatchChecks, selectRuntimeModel } from "./index"
+import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -259,6 +259,80 @@ test("normalizeReviewDecisionText falls back to risks when decision is missing",
 
   expect(decision.decision).toBe("changes_requested")
   expect(decision.rationale).toBe("Found an issue.")
+})
+
+test("demo benchmark task catalog covers representative coding categories", () => {
+  expect(new Set(demoBenchmarkTasks.map((task) => task.category))).toEqual(new Set([
+    "readme-edit",
+    "failing-test-fix",
+    "auth-risk-change",
+    "package-change",
+    "security-review-only",
+  ]))
+  expect(new Set(demoBenchmarkTasks.map((task) => task.id)).size).toBe(demoBenchmarkTasks.length)
+  expect(demoBenchmarkTasks.every((task) => task.prompt.trim().length > 0)).toBe(true)
+})
+
+test("evaluateDemoBenchmarkPlan scores router plans against benchmark expectations", () => {
+  const task = demoBenchmarkTasks.find((candidate) => candidate.id === "auth-risk-change")
+  if (!task) throw new Error("missing auth-risk-change task")
+
+  const plan = {
+    routing: { source: "router-brain" },
+    role: "backend",
+    workers: [
+      { role: "security", todoIds: ["security-review"] },
+      { role: "backend", todoIds: ["implement-auth"] },
+      { role: "review", todoIds: ["review-auth"] },
+    ],
+    todos: [
+      { id: "security-review", role: "security" },
+      { id: "implement-auth", role: "backend" },
+      { id: "review-auth", role: "review" },
+    ],
+    agentPlan: { requiresReview: true },
+    context: { childContextIds: ["ctx-security", "ctx-backend", "ctx-review"] },
+  } as RuntimePlan
+
+  expect(evaluateDemoBenchmarkPlan(task, plan).filter((check) => check.status === "failed")).toEqual([])
+})
+
+test("evaluateDemoBenchmarkPlan skips specialist role checks for heuristic fallback", () => {
+  const task = demoBenchmarkTasks.find((candidate) => candidate.id === "package-change")
+  if (!task) throw new Error("missing package-change task")
+
+  const plan = {
+    routing: { source: "heuristic" },
+    role: "rush",
+    workers: [
+      { role: "rush", todoIds: ["todo-01-rush"] },
+      { role: "review", todoIds: ["todo-02-review"] },
+    ],
+    todos: [
+      { id: "todo-01-rush", role: "rush" },
+      { id: "todo-02-review", role: "review" },
+    ],
+    agentPlan: { requiresReview: true },
+    context: { childContextIds: ["ctx-rush", "ctx-review"] },
+  } as RuntimePlan
+
+  const checks = evaluateDemoBenchmarkPlan(task, plan)
+  expect(checks.find((check) => check.name === "primary_role")?.status).toBe("skipped")
+  expect(checks.find((check) => check.name === "review_policy")?.status).toBe("passed")
+})
+
+test("runDemoBenchmarkSuite records plan runner failures", async () => {
+  const result = await runDemoBenchmarkSuite(
+    async () => {
+      throw new Error("no planner")
+    },
+    { taskIds: ["readme-edit"], useRouterBrain: false },
+  )
+
+  expect(result.summary.totalTasks).toBe(1)
+  expect(result.summary.failedTasks).toBe(1)
+  expect(result.results[0]?.checks[0]?.name).toBe("plan_error")
+  expect(result.results[0]?.error).toBe("no planner")
 })
 
 test("runConfiguredHooks executes trusted project command hooks", async () => {

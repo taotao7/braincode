@@ -16,6 +16,7 @@ A `postinstall` step downloads the platform-specific binary from the matching Gi
 braincode          # interactive TUI
 braincode config   # open browser configuration
 braincode run "..." # one-shot task
+braincode benchmark # representative coding-task plan benchmark
 braincode help
 ```
 

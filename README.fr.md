@@ -27,9 +27,13 @@ La plupart des agents de code demandent au même modèle de planifier, coder et 
 ```bash
 braincode run "add login validation"
 braincode run --dry-run "add login validation"
+braincode run --dry-run --heuristic "add login validation"
+braincode benchmark
 ```
 
-`braincode run` utilise le Brain Model configuré. `--dry-run` prévisualise le plan de routage sans appel provider. Utilisez `braincode config` pour changer le Brain Model actif et les réglages provider/modèle.
+`braincode run` utilise le Brain Model configuré. `--dry-run` prévisualise le même chemin de planification routeBrain que l'exécution réelle ; ajoutez `--heuristic` pour un diagnostic sans appel provider. Utilisez `braincode config` pour changer le Brain Model actif et les réglages provider/modèle.
+
+`braincode benchmark` lance une suite de prompts de codage représentatifs : édition de README, correction de test en échec, changement risqué côté auth, changement package/script, et revue de sécurité en lecture seule. Par défaut, il demande routeBrain quand les identifiants existent et signale le fallback heuristique ; `--heuristic` force un diagnostic sans provider.
 
 ## Fonctionnement
 
@@ -124,6 +128,6 @@ Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs u
 
 ## Pour aller plus loin
 
-La TUI actuelle prend en charge `/help` pour afficher les commandes et `/plan <tâche>` pour prévisualiser le routage Brain Model sans appel provider. Elle n'offre volontairement aucune commande de changement direct de modèle ; la configuration des modèles et providers appartient à `braincode config`.
+La TUI actuelle prend en charge `/help` pour afficher les commandes et `/plan <tâche>` pour prévisualiser le routage Brain Model ; utilisez `/plan --heuristic <tâche>` pour un diagnostic sans provider. Elle n'offre volontairement aucune commande de changement direct de modèle ; la configuration des modèles et providers appartient à `braincode config`.
 
 Pour l'architecture complète, les responsabilités des paquets, la disposition des configurations et la feuille de route, consultez la version anglaise du [README.md](./README.md).
