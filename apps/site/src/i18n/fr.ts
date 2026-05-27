@@ -213,7 +213,16 @@ export const fr = {
   docs_cli_cmd_default: "Lancer le TUI interactif dans le répertoire courant.",
   docs_cli_cmd_config: "Démarrer le serveur web de configuration local et afficher l'URL.",
   docs_cli_cmd_run: "Exécuter un prompt non interactif unique et afficher le résultat.",
-  docs_cli_cmd_dry: "Prévisualiser le plan de routage du cerveau sans effectuer d'appels fournisseur.",
+  docs_cli_cmd_dry:
+    "Prévisualiser le vrai plan routeBrain pour une tâche. Il utilise le Brain Model configuré et peut appeler le provider de routeBrain ; si routeBrain est indisponible, la sortie est étiquetée comme fallback heuristic.",
+  docs_cli_cmd_dry_heuristic:
+    "Prévisualiser uniquement le routage heuristic déterministe. À utiliser pour les diagnostics sans provider ou pour vérifier le comportement de fallback.",
+  docs_cli_cmd_plan:
+    "Dans le TUI, prévisualiser la décision routeBrain configurée pour une tâche. Le plan affiche source de routage, confiance, raison, rôle primaire, workers, modèle, mode et budgets.",
+  docs_cli_cmd_plan_heuristic:
+    "Dans le TUI, forcer le routage heuristic déterministe. C'est un chemin de diagnostic, pas le flux normal de planification Braincode.",
+  docs_cli_cmd_intent:
+    "Ouvrir le dernier intent graph. Il montre la décomposition de tâche, les dépendances, les statuts todo, la source de routage, la confiance et la raison.",
   docs_cli_cmd_daemon: "(Planifié) exécuter Braincode comme service local longue durée.",
 
   docs_troubleshoot_title: "11. Dépannage",
@@ -222,7 +231,7 @@ export const fr = {
     "Vérifiez les permissions du fichier ~/.braincode/auth.json (devrait être 0600). Utilisez braincode config pour ré-entrer la clé ; n'éditez pas le fichier manuellement sauf si vous connaissez le schéma.",
   docs_troubleshoot_models_title: "Modèle non sélectionné",
   docs_troubleshoot_models_body:
-    "Confirmez que l'id du modèle dans brains.json correspond à une entrée dans models.json. Exécutez braincode run --dry-run \"<task>\" pour voir le plan de routage sans consommer de tokens.",
+    "Confirmez que l'id du modèle dans brains.json correspond à une entrée dans models.json. Exécutez braincode run --dry-run \"<task>\" pour voir le plan routeBrain, ou ajoutez --heuristic pour inspecter le fallback sans appel provider.",
   docs_troubleshoot_reset_title: "Tout réinitialiser",
   docs_troubleshoot_reset_body:
     "Arrêtez tout processus braincode, supprimez ~/.braincode/, et relancez braincode config. L'état de votre dépôt n'est jamais affecté.",

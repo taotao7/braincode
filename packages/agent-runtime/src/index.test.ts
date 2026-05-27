@@ -449,7 +449,7 @@ test("expandPromptReferences keeps unsupported image formats as text-only refere
   }
 })
 
-test("planRuntimeFromConfig loads settings, brain, and model without executing a provider call", async () => {
+test("planRuntimeFromConfig supports routeBrain previews and heuristic diagnostics", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-test-"))
   try {
     await writeSettings(
@@ -513,7 +513,7 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
       home,
     )
 
-    const plan = await planRuntimeFromConfig("review this patch", home)
+    const plan = await planRuntimeFromConfig("review this patch", home, { useRouterBrain: false })
 
     expect(plan.mode).toBe("radical")
     // No LLM router available in tests → planAgentRouting falls back to rush.
@@ -530,6 +530,11 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     expect(plan.routing.maxTodos).toBe(8)
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
     expect(plan.routing.source).toBe("heuristic")
+    expect(plan.routing.reason).toBe("heuristic diagnostic; router brain not requested")
+
+    const routerPreview = await planRuntimeFromConfig("review this patch", home)
+    expect(routerPreview.routing.source).toBe("heuristic")
+    expect(routerPreview.routing.reason).toBe("router brain unavailable or failed")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

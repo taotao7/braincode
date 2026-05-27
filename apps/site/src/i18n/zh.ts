@@ -212,7 +212,16 @@ export const zh = {
   docs_cli_cmd_default: "在当前目录启动交互式 TUI。",
   docs_cli_cmd_config: "启动本地配置 Web 服务器并打印 URL。",
   docs_cli_cmd_run: "执行单个非交互式提示并打印结果。",
-  docs_cli_cmd_dry: "预览大脑的路由计划，不发起任何供应商调用。",
+  docs_cli_cmd_dry:
+    "预览真实的 routeBrain 计划。它使用当前 Brain Model，可能调用 routeBrain 绑定的 provider；如果 routeBrain 不可用，输出会明确标成 heuristic fallback。",
+  docs_cli_cmd_dry_heuristic:
+    "只预览确定性的 heuristic 路由。用于无 provider 的诊断，或检查 fallback 行为。",
+  docs_cli_cmd_plan:
+    "在 TUI 中预览配置好的 routeBrain 决策。计划会显示路由来源、置信度、原因、主角色、worker、模型、模式和预算。",
+  docs_cli_cmd_plan_heuristic:
+    "在 TUI 中强制使用确定性 heuristic 路由。这是诊断路径，不是 Braincode 的正常规划流程。",
+  docs_cli_cmd_intent:
+    "打开最新 intent graph。它展示当前任务拆解、依赖边、todo 状态、路由来源、置信度和路由原因。",
   docs_cli_cmd_daemon: "（计划中）将 Braincode 作为长期本地服务运行。",
 
   docs_troubleshoot_title: "11. 故障排除",
@@ -221,7 +230,7 @@ export const zh = {
     "检查 ~/.braincode/auth.json 文件权限（应为 0600）。用 braincode config 重新输入密钥；除非你了解 schema，不要手动编辑文件。",
   docs_troubleshoot_models_title: "模型未被选中",
   docs_troubleshoot_models_body:
-    "确认 brains.json 中的模型 id 与 models.json 中的条目匹配。运行 braincode run --dry-run \"<task>\" 查看路由计划，不消耗 token。",
+    "确认 brains.json 中的模型 id 与 models.json 中的条目匹配。运行 braincode run --dry-run \"<task>\" 查看 routeBrain 计划；加 --heuristic 可在不调用 provider 的情况下检查 fallback 路由。",
   docs_troubleshoot_reset_title: "重置一切",
   docs_troubleshoot_reset_body:
     "停止所有 braincode 进程，删除 ~/.braincode/，重新运行 braincode config。你的仓库状态不会被触碰。",

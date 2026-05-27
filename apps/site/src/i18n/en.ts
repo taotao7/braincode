@@ -213,7 +213,16 @@ export const en = {
   docs_cli_cmd_default: "Launch the interactive TUI in the current directory.",
   docs_cli_cmd_config: "Start the local configuration web server and print the URL.",
   docs_cli_cmd_run: "Execute a single non-interactive prompt and print the result.",
-  docs_cli_cmd_dry: "Preview the brain's routing plan without making any provider calls.",
+  docs_cli_cmd_dry:
+    "Preview the real routeBrain plan for a task. This uses the configured Brain Model and may call the routeBrain provider; if routeBrain is unavailable, the output is labeled as a heuristic fallback.",
+  docs_cli_cmd_dry_heuristic:
+    "Preview the deterministic heuristic route only. Use this for no-provider diagnostics or when checking fallback behavior.",
+  docs_cli_cmd_plan:
+    "In the TUI, preview the configured routeBrain decision for a task. The plan shows routing source, confidence, reason, primary role, workers, model, mode, and budgets.",
+  docs_cli_cmd_plan_heuristic:
+    "In the TUI, force the deterministic heuristic route. This is a diagnostic path, not the normal Braincode planning flow.",
+  docs_cli_cmd_intent:
+    "Open the latest intent graph. It shows the current task decomposition, dependency edges, todo status, routing source, confidence, and route reason.",
   docs_cli_cmd_daemon: "(Planned) run Braincode as a long-running local service.",
 
   docs_troubleshoot_title: "11. Troubleshooting",
@@ -222,7 +231,7 @@ export const en = {
     "Check ~/.braincode/auth.json file permissions (should be 0600). Use braincode config to re-enter the key; do not edit the file by hand unless you know the schema.",
   docs_troubleshoot_models_title: "Model not selected",
   docs_troubleshoot_models_body:
-    "Confirm the model id in brains.json matches an entry in models.json. Run braincode run --dry-run \"<task>\" to see the routing plan without spending tokens.",
+    "Confirm the model id in brains.json matches an entry in models.json. Run braincode run --dry-run \"<task>\" to see the routeBrain plan, or add --heuristic to inspect fallback routing without provider calls.",
   docs_troubleshoot_reset_title: "Reset everything",
   docs_troubleshoot_reset_body:
     "Stop any running braincode process, remove ~/.braincode/, and rerun braincode config. Your repository state is never touched.",

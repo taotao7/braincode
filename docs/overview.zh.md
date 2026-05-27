@@ -7,7 +7,7 @@
 - [Architecture](./architecture.md) — 设计意图、模式、Pi 集成、配置布局。
 - [上下文管理](./context-management.zh.md) — Brain 与 worker 上下文如何隔离、有哪些东西可以越过边界。
 - [Agent 通信](./agent-communication.zh.md) — handoff/result 协议、worker 生命周期、运行时事件。
-- [Project structure and plan](./project-structure.md) — 工作区布局、各包职责、里程碑。
+- [Project structure and plan](./project-structure.md) — 工作区布局、各包职责、实现状态。
 - [Visual style](./visual-style.md) — UI / 品牌方向。
 
 ## Braincode 是什么
@@ -150,7 +150,8 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
 bun install
 bun run check        # 整个 workspace 的类型检查
 bun test             # 单元测试（config、brain、llm、context、agent-runtime）
-bun run braincode -- run --dry-run "<prompt>"     # 只规划，不调 provider
+bun run braincode -- run --dry-run "<prompt>"     # routeBrain 规划预览
+bun run braincode -- run --dry-run --heuristic "<prompt>" # 无 provider 诊断
 bun run braincode -- run "<prompt>"               # 真正运行
 bun run braincode                                  # Ink TUI
 bun run config                                     # 浏览器配置 UI

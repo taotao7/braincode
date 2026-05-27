@@ -161,7 +161,7 @@ return ExecutedWorkerResult
 
 两层路由协作产出一个 `AgentRoutingPlan`：
 
-- `packages/brain` 里的 `planAgentRouting(prompt, brain)` —— 确定性的安全兜底。用于 dry-run、provider 失败、以及作为 router brain 细化时的基线。
+- `packages/brain` 里的 `planAgentRouting(prompt, brain)` —— 确定性的安全兜底。用于 heuristic 诊断、provider 失败、以及作为 router brain 细化时的基线。
 - `agent-runtime` 里的 `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` —— 用一个严格 JSON 风格的 prompt 调 brain 的 `planner` / `roles.routeBrain` 模型，解析结果。`normalizeRouterDecision` 会用启发式兜底和 `brain.routing.maxParallelAgents` 校验和裁剪选择。
 
 两条路径最终归一为同一种形状：
@@ -255,6 +255,9 @@ type WorkerLifecycleEvent =
 ```
 
 Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后发 `worker_end`。CLI 用它们填充 BrainPet 下面的「拉起 / 完成」行，并驱动任务队列列表。
+
+- **Intent graph 视图** —— `Ctrl+O` 或 `/intent` 会打开最新 `RuntimePlan` 的任务拆解和依赖路径，并显示路由来源、置信度、原因、worker 和 mode 预算。
+- **Router plan 预览** —— `/plan <task>` 默认请求配置的 `routeBrain`；`/plan --heuristic <task>` 只用于确定性、无 provider 调用的诊断。如果 router 不可用，`RuntimePlan.routing` 会把结果标成 heuristic fallback。
 
 新增需要 UI 感知的生命周期节点时，**优先扩展 `WorkerLifecycleEvent`**，而不是从 `AgentRunRequest` 漏出新的 callback。一条类型化的流比五个 callback 好渲染得多。
 

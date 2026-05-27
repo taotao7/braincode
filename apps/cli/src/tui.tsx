@@ -66,7 +66,7 @@ type CommandDefinition = {
 
 const COMMANDS: CommandDefinition[] = [
   { name: "help", label: "/help", hint: "List all slash commands" },
-  { name: "plan", label: "/plan", hint: "Preview Brain routing for a prompt", insert: "/plan " },
+  { name: "plan", label: "/plan", hint: "Preview routeBrain planning; add --heuristic for diagnostics", insert: "/plan " },
   { name: "intent", label: "/intent", hint: "Show the current task decomposition and dependency graph" },
   { name: "mcp", label: "/mcp", hint: "Interactive MCP control panel" },
   { name: "hooks", label: "/hooks", hint: "Interactive hooks control panel" },
@@ -141,6 +141,12 @@ type BrainPanelState = {
 
 type IntentPanelState = {
   plan: RuntimePlan
+}
+
+type PlanCommandArgument = {
+  prompt: string
+  useRouterBrain: boolean
+  displayText: string
 }
 
 type DecisionOptionId = "approve" | "block"
@@ -1012,32 +1018,33 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   async function previewPlan(prompt: string) {
-    const trimmed = prompt.trim()
-    if (!trimmed) {
-      appendItem({ kind: "error", text: "Usage: /plan <prompt>" })
+    const parsed = parsePlanCommandArgument(prompt)
+    if ("error" in parsed) {
+      appendItem({ kind: "error", text: parsed.error })
       return
     }
     if (running) return
 
     const statusId = crypto.randomUUID()
+    const statusText = parsed.useRouterBrain ? "Planning route with routeBrain..." : "Planning heuristic route..."
     setItems((previous) => [
       ...previous,
-      { id: crypto.randomUUID(), kind: "user", text: `/plan ${trimmed}` },
-      { id: statusId, kind: "status", text: "Planning Braincode route..." },
+      { id: crypto.randomUUID(), kind: "user", text: parsed.displayText },
+      { id: statusId, kind: "status", text: statusText },
     ])
     applyDraftChange("")
-    startRunStatus("Planning Braincode route...")
+    startRunStatus(statusText)
     setRunning(true)
 
     try {
-      const plan = await planRuntimeFromConfig(trimmed)
+      const plan = await planRuntimeFromConfig(parsed.prompt, undefined, { useRouterBrain: parsed.useRouterBrain })
       rememberIntentPlan(plan)
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
         {
           id: crypto.randomUUID(),
           kind: "status",
-          text: `${plan.brain.id} → ${plan.role} → ${plan.piModel.provider}/${plan.piModel.id}`,
+          text: formatPlanPreviewSummary(plan),
           plan,
         },
       ])
@@ -1916,7 +1923,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           {items.map((item) => (
             <Box key={item.id} flexDirection="column" marginBottom={1}>
               <TranscriptLine item={item} />
-              {item.plan ? <Text color="gray">mode={item.plan.mode} routing={item.plan.routing.source} toolExecution={item.plan.toolExecution}</Text> : null}
+              {item.plan ? (
+                <>
+                  <Text color="gray">{formatPlanMetadataLine(item.plan)}</Text>
+                  {item.plan.routing.reason ? <Text color="gray">reason: {truncate(cleanInline(item.plan.routing.reason), 140)}</Text> : null}
+                </>
+              ) : null}
               {item.plan?.todos.length ? (
                 <Box flexDirection="column" marginLeft={2}>
                   {item.plan.todos.map((todo) => (
@@ -2175,6 +2187,42 @@ function filterSessions(sessions: SessionSummary[], filter: string, limit: numbe
   if (!filter) return sessions.slice(0, limit)
   const lower = filter.toLowerCase()
   return sessions.filter((entry) => sessionSearchText(entry).includes(lower)).slice(0, limit)
+}
+
+function parsePlanCommandArgument(argument: string): PlanCommandArgument | { error: string } {
+  const tokens = argument.trim().split(/\s+/).filter(Boolean)
+  let useRouterBrain = true
+  let parsingFlags = true
+  const promptParts: string[] = []
+
+  for (const token of tokens) {
+    if (parsingFlags && token === "--") {
+      parsingFlags = false
+      continue
+    }
+    if (parsingFlags && (token === "--router" || token === "--route-brain")) {
+      useRouterBrain = true
+      continue
+    }
+    if (parsingFlags && (token === "--heuristic" || token === "--no-router")) {
+      useRouterBrain = false
+      continue
+    }
+    if (parsingFlags && token.startsWith("--")) {
+      return { error: `Unknown /plan flag '${token}'. Usage: /plan [--heuristic] <prompt>` }
+    }
+    parsingFlags = false
+    promptParts.push(token)
+  }
+
+  const prompt = promptParts.join(" ").trim()
+  if (!prompt) return { error: "Usage: /plan [--heuristic] <prompt>" }
+
+  return {
+    prompt,
+    useRouterBrain,
+    displayText: useRouterBrain ? `/plan ${prompt}` : `/plan --heuristic ${prompt}`,
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -2451,11 +2499,55 @@ const INTENT_BIT_CHARS: Record<number, string> = {
   15: "┼",
 }
 
+function cleanInline(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
+}
+
+function formatRoutingSourceLabel(source: RuntimePlan["routing"]["source"]): string {
+  switch (source) {
+    case "router-brain": return "routeBrain"
+    case "heuristic": return "heuristic"
+  }
+}
+
+function formatRoutingConfidence(plan: RuntimePlan): string | undefined {
+  return typeof plan.routing.confidence === "number"
+    ? `${Math.round(plan.routing.confidence * 100)}%`
+    : undefined
+}
+
+function formatRoutingDescriptor(plan: RuntimePlan): string {
+  const parts = [formatRoutingSourceLabel(plan.routing.source)]
+  const confidence = formatRoutingConfidence(plan)
+  if (confidence) parts.push(`confidence ${confidence}`)
+  return parts.join(" · ")
+}
+
+function formatPlanPreviewSummary(plan: RuntimePlan): string {
+  return `${plan.brain.id} → ${plan.role} → ${plan.piModel.provider}/${plan.piModel.id} · ${formatRoutingDescriptor(plan)}`
+}
+
+function formatPlanMetadataLine(plan: RuntimePlan): string {
+  return `mode=${plan.mode} · routing=${formatRoutingDescriptor(plan)} · tools=${plan.toolExecution}`
+}
+
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
+  const confidence = formatRoutingConfidence(plan)
+  const workerLabels = plan.workers.map((worker) => worker.role === plan.role ? `${worker.role} (primary)` : worker.role)
+  const budgetParts = [
+    typeof plan.routing.maxWorkerAgents === "number" ? `workers ${plan.routing.maxWorkerAgents}` : "",
+    typeof plan.routing.maxParallelAgents === "number" ? `parallel ${plan.routing.maxParallelAgents}` : "",
+    typeof plan.routing.maxTodos === "number" ? `todos ${plan.routing.maxTodos}` : "",
+  ].filter(Boolean)
   const header = [
-    ...wrapIntentLine(`Intent · ${plan.brain.id}`, width),
+    ...wrapIntentLine(`Intent · ${plan.brain.name || plan.brain.id} (${plan.brain.id})`, width),
+    ...wrapIntentLine(`Mode · ${plan.mode} — ${plan.modeDescription}`, width, "       "),
     ...wrapIntentLine(`Primary · ${plan.role}`, width),
-    ...wrapIntentLine(`Routing · ${plan.routing.source}`, width),
+    ...wrapIntentLine(`Routing · ${formatRoutingSourceLabel(plan.routing.source)}`, width),
+    ...(confidence ? wrapIntentLine(`Confidence · ${confidence}`, width) : []),
+    ...(plan.routing.reason ? wrapIntentLine(`Reason · ${cleanInline(plan.routing.reason)}`, width, "         ") : []),
+    ...wrapIntentLine(`Workers · ${workerLabels.join(", ")}`, width, "          "),
+    ...(budgetParts.length > 0 ? wrapIntentLine(`Budget · ${budgetParts.join(", ")}`, width) : []),
     ...wrapIntentLine(`Model · ${plan.piModel.provider}/${plan.piModel.id}`, width),
     ...wrapIntentLine(`Tools · ${plan.toolExecution}`, width),
     "",
@@ -2523,10 +2615,11 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
 
   const PAD_LEFT = 1
   const GAP = 5
+  const maxLabelWidth = Math.max(18, Math.min(56, Math.floor((width - PAD_LEFT - GAP * Math.max(0, levels.length - 1)) / Math.max(1, levels.length)) - 1))
   const labels = new Map<string, string>()
-  labels.set(ROOT_ID, `● brain root (${plan.role})`)
+  labels.set(ROOT_ID, truncate(`● brain root (${plan.role})`, maxLabelWidth))
   for (const todo of plan.todos) {
-    labels.set(todo.id, `${todoGlyph(todo.status)} ${todo.role}: ${todo.title.replace(/\s+/g, " ").trim()}`)
+    labels.set(todo.id, truncate(`${todoGlyph(todo.status)} ${todo.role}: ${cleanInline(todo.title)}`, maxLabelWidth))
   }
 
   const ROW_STRIDE = 2
@@ -2611,7 +2704,7 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
     }
   }
 
-  const body = charGrid.map((row) => row.join("").replace(/\s+$/, ""))
+  const body = charGrid.map((row) => truncate(row.join("").replace(/\s+$/, ""), width))
 
   const withReasons = explicitDeps.filter((d) => d.reason && d.reason.trim().length > 0)
   const notes: string[] = []
@@ -2626,7 +2719,7 @@ function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
     }
   }
 
-  return [...header, ...body, ...notes]
+  return [...header, "Todo Graph:", ...body, ...notes]
 }
 
 function wrapIntentLine(text: string, width: number, continuationIndent = ""): string[] {
@@ -2646,7 +2739,7 @@ function wrapIntentLine(text: string, width: number, continuationIndent = ""): s
 }
 
 function isIntentGraphHeaderLine(line: string): boolean {
-  return /^(Intent|Primary|Routing|Model|Tools) ·/.test(line)
+  return /^(Intent|Mode|Primary|Routing|Confidence|Reason|Workers|Budget|Model|Tools) ·|^Todo Graph:$/.test(line)
 }
 
 function colorFor(item: TranscriptItem): "blue" | "cyan" | "green" | "red" | "yellow" | "magenta" | "gray" {
@@ -2711,6 +2804,8 @@ function formatHelp(): string {
     "",
     "Tips:",
     "  • Start typing / to open the command palette.",
+    "  • Use /plan <prompt> to preview the configured routeBrain decision.",
+    "  • Use /plan --heuristic <prompt> only for no-provider routing diagnostics.",
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",

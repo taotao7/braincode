@@ -179,6 +179,22 @@ export function Docs() {
                 <p>{t("docs_cli_cmd_dry")}</p>
               </div>
               <div className="file-entry">
+                <h4><code>braincode run --dry-run --heuristic &lt;task&gt;</code></h4>
+                <p>{t("docs_cli_cmd_dry_heuristic")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/plan &lt;task&gt;</code></h4>
+                <p>{t("docs_cli_cmd_plan")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/plan --heuristic &lt;task&gt;</code></h4>
+                <p>{t("docs_cli_cmd_plan_heuristic")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/intent</code> / <code>Ctrl+O</code></h4>
+                <p>{t("docs_cli_cmd_intent")}</p>
+              </div>
+              <div className="file-entry">
                 <h4><code>braincode daemon</code></h4>
                 <p>{t("docs_cli_cmd_daemon")}</p>
               </div>

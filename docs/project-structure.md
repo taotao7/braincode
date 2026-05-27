@@ -1,6 +1,6 @@
 # Project Structure and Plan
 
-This document is the source of truth for the planned workspace layout, package ownership, and milestone order. The current implementation has passed the initial skeleton/runtime/TUI/MCP phases; the active planning focus is now local coding tools, patch artifacts, review gates, and permission policy.
+This document is the source of truth for workspace layout, package ownership, and implementation status. The current implementation has passed the initial skeleton/runtime/TUI/MCP/coding-workflow phases; the only ongoing work is focused test coverage.
 
 ## Goals
 
@@ -101,7 +101,8 @@ Expected commands:
 - `braincode` — start interactive/default mode.
 - `braincode config` — start local configuration server and print/open the URL.
 - `braincode daemon` — future long-running service mode.
-- `braincode run --dry-run <task>` — inspect mode, brain, role, and model selection without making provider calls.
+- `braincode run --dry-run <task>` — inspect mode, brain, role, model selection, and the routeBrain plan.
+- `braincode run --dry-run --heuristic <task>` — inspect deterministic fallback routing without making provider calls.
 - `braincode run <task>` — execute one non-interactive prompt through the configured provider when auth is available.
 
 The CLI should stay thin. It should delegate implementation to packages.
@@ -111,7 +112,8 @@ The interactive TUI is implemented with Ink and should expose Braincode product 
 Early TUI commands:
 
 - `/help` — show Braincode TUI commands and the model-configuration boundary.
-- `/plan <task>` — preview Brain Model routing without making a provider call.
+- `/plan <task>` — ask the configured `routeBrain` for the preview, then label the route source, confidence, and reason; if the router is unavailable, fall back to the heuristic route.
+- `/plan --heuristic <task>` — preview deterministic fallback routing without making a provider call.
 - `/mode auto|radical`, `/auto`, `/radical` — switch top-level execution mode.
 - `/clear` — clear the transcript.
 - `/exit` or `/quit` — leave the TUI.
@@ -258,9 +260,9 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 
 ## Current implementation phase
 
-The project is no longer in a "framework skeleton" phase. The first versions of runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, and approval UI are in place.
+The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, review decisions, and permission policy are in place.
 
-The current product gap is finishing the transition from orchestration to a reliable coding patch engine:
+The coding patch engine now follows this path:
 
 ```text
 local tools
@@ -273,15 +275,9 @@ local tools
   -> session ledger
 ```
 
-Near-term work should prioritize:
+Remaining work:
 
-- Expanding the first-party local coding tools beyond the initial read/search/edit/patch/shell/git/script set as real usage demands.
-- Richer patch ledger records for tool calls and snapshots. Minimal changed-file/diff-stat `patch_summary`, package-script `check_summary`, and typed `review_decision` records are in place.
-- Stronger review gate enforcement and TUI surfacing for typed review decisions.
-- Path-aware and command-aware permission policy.
-- Command policy for shell and script execution.
-- Router-plan UX that clearly distinguishes heuristic dry-runs from routeBrain execution plans.
-- Benchmarks and demo cases that prove the orchestration improves real coding outcomes.
+- Continue focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
 
 ## Initial milestones
 
@@ -317,7 +313,7 @@ MVP-2 starts by establishing the adapter boundary:
 
 - Load `brains.json`.
 - Select model by task role, including specialist roles such as frontend, backend, security, QA, DBA, DevOps, oracle, librarian, and rush.
-- Use deterministic routing for dry-runs and fallback.
+- Use routeBrain for default execution and dry-run planning, with deterministic routing reserved for diagnostics and fallback.
 - Use the configured route brain during real execution when credentials are available.
 - Keep built-in prompts aligned with each role's scope and boundaries.
 - Support thinking level, fallbacks, and escalation policy.
@@ -332,7 +328,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Run mandatory review workers for risky file-editing tasks.
 - Add richer context compaction/summarization policy.
 
-### MVP-5: coding workflow - partially done, active focus
+### MVP-5: coding workflow - done, ongoing focused tests
 
 - Done: `AGENTS.md` durable project instruction context.
 - Done: project MCP server declarations from `.mcp.json`.
@@ -345,5 +341,4 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` `review_decision` session records.
-- Active: richer tool-call/snapshot ledger records.
-- Active: granular permission rules for paths, commands, critical files, and review requirements.
+- Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

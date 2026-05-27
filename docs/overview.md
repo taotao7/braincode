@@ -7,7 +7,7 @@ This is the high-level map of the Braincode codebase. Read this first; the deepe
 - [Architecture](./architecture.md) — design intent, modes, Pi integration, configuration layout.
 - [Context management](./context-management.md) — how Brain and worker contexts are isolated and what crosses the boundary.
 - [Agent communication](./agent-communication.md) — handoff/result protocol, worker lifecycle, runtime events.
-- [Project structure and plan](./project-structure.md) — workspace layout, package responsibilities, milestones.
+- [Project structure and plan](./project-structure.md) — workspace layout, package responsibilities, implementation status.
 - [Visual style](./visual-style.md) — UI/brand direction.
 
 ## What Braincode is
@@ -149,7 +149,8 @@ Project-local support files live next to code:
 bun install
 bun run check        # typecheck across the workspace
 bun test             # unit tests (config, brain, llm, context, agent-runtime)
-bun run braincode -- run --dry-run "<prompt>"     # plan only, no provider call
+bun run braincode -- run --dry-run "<prompt>"     # routeBrain plan preview
+bun run braincode -- run --dry-run --heuristic "<prompt>" # no-provider diagnostic
 bun run braincode -- run "<prompt>"               # real run
 bun run braincode                                  # Ink TUI
 bun run config                                     # config browser UI

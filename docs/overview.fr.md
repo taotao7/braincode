@@ -7,7 +7,7 @@ Ceci est la carte de haut niveau du code Braincode. Lisez d'abord ce document ; 
 - [Architecture](./architecture.md) — intention de conception, modes, intégration Pi, disposition de la configuration.
 - [Gestion du contexte](./context-management.fr.md) — comment les contextes Brain et worker sont isolés et ce qui traverse la frontière.
 - [Communication entre agents](./agent-communication.fr.md) — protocole handoff/result, cycle de vie des workers, événements runtime.
-- [Project structure and plan](./project-structure.md) — disposition de l'espace de travail, responsabilités des paquets, jalons.
+- [Project structure and plan](./project-structure.md) — disposition de l'espace de travail, responsabilités des paquets, état d'implémentation.
 - [Visual style](./visual-style.md) — direction UI / marque.
 
 ## Ce qu'est Braincode
@@ -150,7 +150,8 @@ Les fichiers de support spécifiques au projet vivent à côté du code :
 bun install
 bun run check        # type-check sur tout le workspace
 bun test             # tests unitaires (config, brain, llm, context, agent-runtime)
-bun run braincode -- run --dry-run "<prompt>"     # plan uniquement, pas d'appel provider
+bun run braincode -- run --dry-run "<prompt>"     # aperçu du plan routeBrain
+bun run braincode -- run --dry-run --heuristic "<prompt>" # diagnostic sans provider
 bun run braincode -- run "<prompt>"               # exécution réelle
 bun run braincode                                  # Ink TUI
 bun run config                                     # interface configuration navigateur

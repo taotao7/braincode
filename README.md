@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -35,9 +35,10 @@ Most coding agents ask one model to plan, code, and review itself. Braincode sep
 ```bash
 braincode run "add login validation"
 braincode run --dry-run "add login validation"
+braincode run --dry-run --heuristic "add login validation"
 ```
 
-`braincode run` uses the configured Brain Model. `--dry-run` previews the deterministic routing plan without making provider calls; real execution may refine that plan with `routeBrain`. Use `braincode config` to change the active Brain Model and provider/model settings.
+`braincode run` uses the configured Brain Model. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
 
 ## How It Works
 
@@ -71,7 +72,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, and tool approval decisions.
 - Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, and auth status.
 - Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.
-- `routeBrain` LLM routing during real execution, with deterministic heuristic planning for dry-runs and fallback.
+- `routeBrain` LLM routing during execution and plan previews, with deterministic heuristic routing available for diagnostics and fallback.
 - Isolated support workers, primary executor, and policy-triggered review worker using structured handoff/result packets.
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
 - Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
@@ -83,23 +84,10 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Check runner policy in `tools.json`: checks can be disabled, pinned to explicit package scripts, and bounded by timeout/output limits.
 - Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked`; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
+- Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.
 
-## In Progress
+## Remaining Work
 
-- Richer patch ledger records for tool calls and file snapshots.
-- Command-aware permission policy for shell and script execution.
-- Stronger review gate enforcement and TUI surfacing for typed review decisions.
-- Path-aware, command-aware, and risk-aware permission policy beyond tool-level approval.
-- Router-plan UX so `/plan` can show actual `routeBrain` decisions or clearly label heuristic previews.
-- Benchmarks and demo cases that measure multi-agent patch quality, checks, review decisions, duration, token use, fallbacks, and approvals.
-
-## Roadmap
-
-- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch/check records, configurable check scripts, and approval-aware write/execute flows. First local tool wiring, `patch_summary`, `check_summary`, and check-runner configuration are in place; richer tool-call/snapshot ledger records remain.
-- **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`. First typed `review_decision` records are in place; enforcement and UI polish remain.
-- **v0.5 Permission Policy v2**: project-root read policy, path rules, critical-file review requirements, dangerous-command deny rules, and configurable safe command allowlists.
-- **v0.6 Router Plan UX**: `/plan --router`, routing source labels, confidence/reason display, and clearer TUI intent views.
-- **v0.7 Demo & Benchmark**: representative coding tasks such as README edits, failing-test fixes, auth-risk changes, package changes, and security-review-only runs.
 - Continue focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
 
 ## Brain Models and Roles
@@ -144,7 +132,7 @@ Runtime user configuration belongs under `~/.braincode/`, not inside the reposit
 - [Architecture](./docs/architecture.md) - main system architecture, Brain Model design, context isolation, Pi integration, local config service.
 - [Context management](./docs/context-management.md) - Brain/worker isolation, handoff/result packets, prompt references, session JSONL.
 - [Agent communication](./docs/agent-communication.md) - worker lifecycle, routing, hooks, runtime events, multi-agent runs.
-- [Project structure and plan](./docs/project-structure.md) - goals, non-goals, workspace layout, package responsibilities, milestones.
+- [Project structure and plan](./docs/project-structure.md) - goals, non-goals, workspace layout, package responsibilities, implementation status.
 - [Visual style](./docs/visual-style.md) - Brutalist technical poster direction for UI and brand surfaces.
 - [References](./docs/references.md) - Amp and Pi reference material used for design decisions.
 
@@ -160,9 +148,10 @@ bun run braincode
 bun run config
 bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
+bun run braincode -- run --dry-run --heuristic "review this patch"
 bun run braincode -- run "hello"
 ```
 
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.
 Real `run` and TUI prompts require a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.
-Inside the TUI, use `/help` for commands and `/plan <task>` to preview the deterministic routing plan without calling a provider. Real execution may refine that plan with `routeBrain`. The TUI intentionally has no direct model-switching command.
+Inside the TUI, use `/help` for commands and `/plan <task>` to preview the configured `routeBrain` decision. If the router is unavailable, the plan falls back to the heuristic route and labels that source. Use `/plan --heuristic <task>` only for no-provider diagnostics. The TUI intentionally has no direct model-switching command.

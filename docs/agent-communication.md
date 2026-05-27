@@ -161,7 +161,7 @@ Notes worth internalizing before changing this code:
 
 Two routers cooperate to produce an `AgentRoutingPlan`:
 
-- `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for dry-runs, provider failures, and the baseline the router brain refines.
+- `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for heuristic diagnostics, provider failures, and the baseline the router brain refines.
 - `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `agent-runtime` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
 
 The two paths normalize into the same shape:
@@ -260,7 +260,8 @@ type WorkerLifecycleEvent =
 Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` after the result is normalized. The CLI uses these to populate the spawn/finish lines under BrainPet and to drive the queued-tasks list.
 
 - **`onPlan` / `TodoLifecycleEvent`** from `AgentRunRequest` — Braincode-level todo planning and status updates. `onPlan` gives the UI the initial todo list; `TodoLifecycleEvent` moves each item through pending/running/completed/blocked/failed as the primary, support workers, and review workers finish.
-- **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`.
+- **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`, including routing source, confidence, reason, workers, and mode budgets.
+- **Router plan preview** in the TUI — `/plan <task>` asks the configured `routeBrain` by default; `/plan --heuristic <task>` is reserved for deterministic no-provider diagnostics. Router failures are surfaced as a heuristic fallback in `RuntimePlan.routing`.
 
 When you add a new lifecycle moment that the UI should know about, prefer extending an existing typed event (`AgentEvent`, `WorkerLifecycleEvent`, or `TodoLifecycleEvent`) before adding another callback surface.
 

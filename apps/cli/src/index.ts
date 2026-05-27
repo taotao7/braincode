@@ -16,7 +16,7 @@ function printHelp() {
 Usage:
   braincode [tui]
   braincode config [--port <port>] [--host <host>] [--no-open]
-  braincode run [--dry-run] <prompt>
+  braincode run [--dry-run] [--heuristic] <prompt>
   braincode help
 
 Commands:
@@ -24,6 +24,10 @@ Commands:
   config   Start the local browser configuration service.
   run      Plan or execute a task using the configured brain and model.
   help     Show this help message.
+
+Run flags:
+  --dry-run     Print the routeBrain runtime plan instead of executing.
+  --heuristic   With --dry-run, skip routeBrain and print the deterministic fallback plan.
 `)
 }
 
@@ -71,14 +75,15 @@ async function openInBrowser(url: string): Promise<void> {
 
 async function runTask(args: string[]) {
   const dryRun = args.includes("--dry-run")
-  const prompt = args.filter((arg) => arg !== "--dry-run").join(" ").trim()
+  const heuristic = args.includes("--heuristic") || args.includes("--no-router")
+  const prompt = args.filter((arg) => arg !== "--dry-run" && arg !== "--heuristic" && arg !== "--no-router").join(" ").trim()
 
   if (!prompt) {
-    throw new Error("Missing prompt. Usage: braincode run [--dry-run] <prompt>")
+    throw new Error("Missing prompt. Usage: braincode run [--dry-run] [--heuristic] <prompt>")
   }
 
   if (dryRun) {
-    const plan = await planRuntimeFromConfig(prompt)
+    const plan = await planRuntimeFromConfig(prompt, undefined, { useRouterBrain: !heuristic })
     console.log(JSON.stringify(plan, null, 2))
     return
   }

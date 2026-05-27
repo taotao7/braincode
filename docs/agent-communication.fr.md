@@ -156,7 +156,7 @@ Notes à intérioriser avant de changer ce code :
 
 Deux routeurs coopèrent pour produire un `AgentRoutingPlan` :
 
-- `planAgentRouting(prompt, brain)` dans `packages/brain` — classificateur déterministe regex/mots-clés. Utilisé pour les dry-runs, le fallback et comme base que le router brain raffine.
+- `planAgentRouting(prompt, brain)` dans `packages/brain` — classificateur déterministe regex/mots-clés. Utilisé pour les diagnostics heuristic, le fallback et comme base que le router brain raffine.
 - `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` dans `agent-runtime` — appelle le modèle `planner` / `roles.routeBrain` du brain avec un prompt JSON strict et parse le résultat. `normalizeRouterDecision` valide et plafonne le choix contre le fallback heuristique et `brain.routing.maxParallelAgents`.
 
 Les deux chemins se normalisent vers la même forme :
@@ -251,6 +251,9 @@ type WorkerLifecycleEvent =
 ```
 
 Les workers émettent `worker_start` après que les hooks `SubagentStart` se soient stabilisés et `worker_end` après que le résultat soit normalisé. La CLI les utilise pour peupler les lignes spawn/finish sous BrainPet et piloter la liste des tâches en file.
+
+- **Vue Intent graph** dans la TUI — `Ctrl+O` ou `/intent` ouvre la décomposition de tâche et le chemin de dépendances du dernier `RuntimePlan`, avec source de routage, confiance, raison, workers et budgets de mode.
+- **Aperçu router plan** dans la TUI — `/plan <task>` interroge le `routeBrain` configuré par défaut ; `/plan --heuristic <task>` est réservé au diagnostic déterministe sans provider. Les échecs router sont affichés comme fallback heuristic dans `RuntimePlan.routing`.
 
 Quand vous ajoutez un nouveau moment de cycle de vie que l'UI doit connaître, préférez étendre `WorkerLifecycleEvent` plutôt que de laisser fuir un nouveau callback à travers `AgentRunRequest`. Un seul flux typé est plus facile à rendre que cinq callbacks.
 

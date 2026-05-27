@@ -132,8 +132,8 @@ The Brain Model layer decides:
 
 Routing has two inputs:
 
-- deterministic heuristics in `packages/brain`, used for dry-runs and fallback;
-- the configured `routeBrain`/`planner` model, used during real execution when credentials are available.
+- deterministic heuristics in `packages/brain`, used for diagnostics and fallback;
+- the configured `routeBrain`/`planner` model, used during real execution and default plan previews when credentials are available.
 
 Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned. The routeBrain prompt embeds the full role catalog, including non-routed internal roles, but that catalog describes role identity, capabilities, boundaries, and output contracts only. It must not encode a specific provider or execution engine choice; users bind execution engines to roles in configuration.
 

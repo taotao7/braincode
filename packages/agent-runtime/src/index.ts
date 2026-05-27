@@ -207,6 +207,14 @@ export type RuntimePlan = {
   toolExecution: "sequential" | "parallel"
 }
 
+export type PlanRuntimeOptions = {
+  /**
+   * Defaults to true because Braincode's normal planning path is routeBrain.
+   * Set false only for heuristic-only diagnostics that must not call a provider.
+   */
+  useRouterBrain?: boolean
+}
+
 type RouterPlanDecision = AgentRoutingPlan & {
   confidence?: number
 }
@@ -1175,7 +1183,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   }
   const routing = routerDecision
     ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, ...routingBudget }
-    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "dry-run/default heuristic route", ...routingBudget }
+    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "heuristic diagnostic; router brain not requested", ...routingBudget }
   debugLog("runtime", "planned runtime", { mode: settings.mode, brainId: brain.id, role, routingSource: routing.source, modelId: selection.configured.id, provider: selection.piModel.provider })
 
   return {
@@ -1200,8 +1208,8 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   }
 }
 
-export async function planRuntimeFromConfig(prompt: string, home?: string): Promise<RuntimePlan> {
-  return buildRuntimePlan(prompt, home, false)
+export async function planRuntimeFromConfig(prompt: string, home?: string, options: PlanRuntimeOptions = {}): Promise<RuntimePlan> {
+  return buildRuntimePlan(prompt, home, options.useRouterBrain ?? true)
 }
 
 export type ResolvedPetRuntime = {
