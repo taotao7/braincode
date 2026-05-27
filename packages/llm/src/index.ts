@@ -134,6 +134,7 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
   }
 
   const reasoning = thinkingLevel && thinkingLevel !== "off" ? (thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
+  const maxTokens = reasoning ? 128 : 16
 
   try {
     const { piModel } = resolvePiModel(model)
@@ -150,11 +151,16 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
         systemPrompt: "You are testing model connectivity. Reply with exactly: OK",
         messages: [{ role: "user", content: userContent, timestamp: Date.now() }],
       },
-      { apiKey, maxTokens: 8, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
+      { apiKey, maxTokens, timeoutMs: 30000, maxRetries: 0, cacheRetention: "none", reasoning },
     )
+    debugLog("llm", "connection test completion", summarizeCompletionResult(result))
+    const completionError = extractCompletionError(result)
+    if (completionError) {
+      throw new Error(completionError)
+    }
     const text = typeof result === "string" ? result : extractCompletionText(result)
     if (!text.trim()) {
-      throw new Error("Model generation test returned an empty response")
+      throw new Error("Model generation test returned an empty response: provider returned no visible text content. Check the model API type; for OpenAI-compatible proxies try openai-completions vs openai-responses, and for reasoning models try a lower/off thinking level.")
     }
     return connectionSuccess(model, thinkingLevel)
   } catch (error) {
@@ -271,6 +277,11 @@ export async function callPetCompletion(input: PetCompletionInput): Promise<stri
       },
       { apiKey: input.apiKey, maxTokens, timeoutMs, maxRetries: 0, cacheRetention: "none", reasoning },
     )
+    debugLog("llm", "pet completion", summarizeCompletionResult(result))
+    const completionError = extractCompletionError(result)
+    if (completionError) {
+      throw new Error(completionError)
+    }
     const text = typeof result === "string" ? result : extractCompletionText(result)
     if (!text || !text.trim()) {
       throw new Error("Pet completion returned an empty response")
@@ -325,12 +336,65 @@ export async function callPetCompletion(input: PetCompletionInput): Promise<stri
 }
 
 function extractCompletionText(result: unknown): string {
+  if (typeof result === "string") return result
   if (!result || typeof result !== "object") return ""
   const candidate = (result as { text?: unknown; content?: unknown; message?: { content?: unknown } })
   if (typeof candidate.text === "string") return candidate.text
   if (typeof candidate.content === "string") return candidate.content
+  if (Array.isArray(candidate.content)) {
+    return candidate.content
+      .map((block) => {
+        if (typeof block === "string") return block
+        if (!block || typeof block !== "object") return ""
+        const record = block as { type?: unknown; text?: unknown; content?: unknown }
+        if ((record.type === "text" || record.type === "output_text" || record.type === undefined) && typeof record.text === "string") {
+          return record.text
+        }
+        if (typeof record.content === "string") return record.content
+        return ""
+      })
+      .filter(Boolean)
+      .join("\n")
+  }
   if (candidate.message && typeof candidate.message.content === "string") return candidate.message.content
+  if (candidate.message && Array.isArray(candidate.message.content)) return extractCompletionText({ content: candidate.message.content })
   return ""
+}
+
+function extractCompletionError(result: unknown): string | undefined {
+  if (!result || typeof result !== "object") return undefined
+  const candidate = result as { stopReason?: unknown; errorMessage?: unknown }
+  if (typeof candidate.errorMessage === "string" && candidate.errorMessage.trim()) return candidate.errorMessage
+  if (candidate.stopReason === "error") return "Provider returned an error without a message"
+  if (candidate.stopReason === "aborted") return "Provider request was aborted"
+  return undefined
+}
+
+function summarizeCompletionResult(result: unknown): Record<string, unknown> {
+  if (typeof result === "string") return { kind: "string", textLength: result.length }
+  if (!result || typeof result !== "object") return { kind: typeof result }
+  const record = result as Record<string, unknown>
+  const content = Array.isArray(record.content) ? record.content : undefined
+  return {
+    kind: "object",
+    role: record.role,
+    api: record.api,
+    provider: record.provider,
+    model: record.model,
+    stopReason: record.stopReason,
+    errorMessage: record.errorMessage,
+    content: content
+      ? {
+          count: content.length,
+          types: content.map((block) => (block && typeof block === "object" ? (block as { type?: unknown }).type ?? "object" : typeof block)),
+          textLength: content.reduce((total, block) => {
+            if (!block || typeof block !== "object") return total
+            const text = (block as { text?: unknown }).text
+            return total + (typeof text === "string" ? text.length : 0)
+          }, 0),
+        }
+      : typeof record.content,
+  }
 }
 
 export function toBraincodeModel(model: Model<Api>): BraincodeModel {

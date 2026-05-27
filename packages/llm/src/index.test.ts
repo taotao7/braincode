@@ -58,6 +58,20 @@ let completeSimpleCalls: unknown[][] = []
 let completeSimpleResult: unknown = "OK"
 let completeSimpleError: unknown
 
+function assistantMessage(content: unknown, stopReason = "stop", errorMessage?: string): unknown {
+  return {
+    role: "assistant",
+    content,
+    api: "openai-responses",
+    provider: "proxy",
+    model: "model",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason,
+    ...(errorMessage ? { errorMessage } : {}),
+    timestamp: Date.now(),
+  }
+}
+
 class MockEventStream<TEvent = unknown, TResult = unknown> {
   push(_event: TEvent) {}
   end(_result?: TResult) {}
@@ -208,10 +222,14 @@ test("built-in connection and pet completion use Pi completions", async () => {
     supportsVision: true,
   }
 
+  completeSimpleResult = assistantMessage([{ type: "text", text: "OK" }])
   await expect(testModelConnection(model, "key", "xhigh")).resolves.toMatchObject({ reachable: true })
   expect(completeSimpleCalls).toHaveLength(1)
   expect(((completeSimpleCalls[0]?.[1] as { messages: Array<{ content: unknown }> }).messages[0]?.content)).toBeArray()
   expect((completeSimpleCalls[0]?.[2] as { reasoning?: string }).reasoning).toBe("xhigh")
+
+  completeSimpleResult = assistantMessage([{ type: "text", text: " pi pet " }])
+  await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).resolves.toBe("pi pet")
 
   completeSimpleResult = " direct pet "
   await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).resolves.toBe("direct pet")
@@ -224,6 +242,9 @@ test("built-in connection and pet completion use Pi completions", async () => {
 
   completeSimpleResult = { message: { content: " message pet " } }
   await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).resolves.toBe("message pet")
+
+  completeSimpleResult = assistantMessage([], "error", "provider exploded")
+  await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).rejects.toThrow("provider exploded")
 
   completeSimpleResult = {}
   await expect(callPetCompletion({ model, apiKey: "key", systemPrompt: "system", userPrompt: "user" })).rejects.toThrow("empty response")
@@ -317,6 +338,9 @@ test("testModelConnection reports OpenAI-compatible success and failed response 
   completeSimpleResult = "OK"
   await expect(testModelConnection(model, "key", "low")).resolves.toMatchObject({ reachable: true, message: "Model generated a test response successfully (thinking=low)." })
 
+  completeSimpleResult = assistantMessage([{ type: "text", text: "OK" }])
+  await expect(testModelConnection(model, "key", "low")).resolves.toMatchObject({ reachable: true })
+
   completeSimpleResult = ""
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "invalid-response" })
 
@@ -362,7 +386,8 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
     modelId: "kimi-for-coding",
     baseUrl: "https://api.kimi.com/coding/v1",
   }
-  completeSimpleError = new Error("Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc.")
+  completeSimpleError = undefined
+  completeSimpleResult = assistantMessage([], "error", "Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc.")
 
   await expect(testModelConnection(kimiModel, "key", "low")).resolves.toMatchObject({
     reachable: false,
@@ -370,7 +395,7 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
     message: expect.stringContaining("specific coding-agent clients"),
     detail: expect.stringContaining("Kimi For Coding is currently only available"),
   })
-  expect((completeSimpleCalls.at(-1)?.[2] as { maxTokens?: number }).maxTokens).toBe(8)
+  expect((completeSimpleCalls.at(-1)?.[2] as { maxTokens?: number }).maxTokens).toBe(128)
 })
 
 test("callPetCompletion handles OpenAI-compatible success and errors", async () => {
