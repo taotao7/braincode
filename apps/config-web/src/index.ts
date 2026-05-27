@@ -139,6 +139,13 @@ export const configWebHtml = `<!doctype html>
         border-color: var(--accent);
         box-shadow: 0 0 0 3px var(--accent-soft);
       }
+      input[type="checkbox"] {
+        width: auto;
+        min-width: 16px;
+        height: 16px;
+        padding: 0;
+        accent-color: var(--accent);
+      }
       pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       pre {
         margin: 0;
@@ -184,10 +191,31 @@ export const configWebHtml = `<!doctype html>
       .card { padding: var(--gap-md); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
       .stack { display: flex; flex-direction: column; gap: var(--gap-md); }
       .field { display: flex; flex-direction: column; gap: 4px; }
+      .checkbox-field label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 32px;
+        margin: 0;
+      }
       .list { display: grid; gap: 8px; }
       .item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 12px; font: 12px/1.45 var(--font-mono); white-space: pre-line; }
       .item-header { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
       .item-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+      .model-summary { min-width: 0; overflow-wrap: anywhere; }
+      .model-edit-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: var(--gap-md);
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+        white-space: normal;
+        font-family: var(--font-body);
+      }
+      .model-edit-form .test-result,
+      .model-edit-actions { grid-column: 1 / -1; }
+      .model-edit-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
       .test-result { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-hover); }
       .test-result.ok { color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
       .test-result.fail { color: var(--danger-fg); box-shadow: inset 4px 0 0 var(--danger-fg); }
@@ -270,6 +298,7 @@ export const configWebHtml = `<!doctype html>
               <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
               <div class="field"><label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select></div>
               <div class="field"><label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select></div>
+              <div class="field checkbox-field"><label for="catalog-vision"><input id="catalog-vision" type="checkbox" /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
               <div class="field"><label for="catalog-api-key" data-i18n="apiKey">API key</label><input id="catalog-api-key" type="password" autocomplete="off" placeholder="Optional token saved for the selected provider" /></div>
               <button class="primary" type="submit" data-i18n="addSelectedModel">Add selected model</button>
             </form>
@@ -285,7 +314,7 @@ export const configWebHtml = `<!doctype html>
                 <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai-responses">openai-responses</option><option value="openai-completions">openai-completions</option><option value="anthropic">anthropic</option><option value="google">google</option></select></div>
                 <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
                 <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
-                <div class="field"><label for="manual-vision"><input id="manual-vision" type="checkbox" checked /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
+                <div class="field checkbox-field"><label for="manual-vision"><input id="manual-vision" type="checkbox" checked /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
               </div>
               <div class="row-between">
                 <button id="test-manual-model" type="button" data-i18n="testConnection">Test connection</button>
@@ -336,7 +365,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
-          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
+          loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
           roleLabel_routeBrain: "Router Brain", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
@@ -361,7 +390,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
-          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
+          loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
           roleLabel_routeBrain: "路由大脑", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
@@ -384,6 +413,7 @@ export const configWebHtml = `<!doctype html>
 
       const roles = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
+      const apiTypes = ["openai-responses", "openai-completions", "anthropic", "google"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
       const status = document.querySelector("#status")
@@ -404,6 +434,7 @@ export const configWebHtml = `<!doctype html>
       const loadProviderModelsButton = document.querySelector("#load-provider-models")
       const providerSelect = document.querySelector("#provider-select")
       const catalogModelSelect = document.querySelector("#catalog-model-select")
+      const catalogVisionInput = document.querySelector("#catalog-vision")
       const catalogApiKeyInput = document.querySelector("#catalog-api-key")
       const manualProviderInput = document.querySelector("#manual-provider")
       const manualModelIdInput = document.querySelector("#manual-model-id")
@@ -428,6 +459,7 @@ export const configWebHtml = `<!doctype html>
       let currentModels = { models: [] }
       let currentTools = { tools: [] }
       let catalog = { providers: [] }
+      let editingModelId = null
       let currentLang = localStorage.getItem("braincode-config-lang") || "en"
       language.value = currentLang
 
@@ -509,6 +541,7 @@ export const configWebHtml = `<!doctype html>
         const entry = catalog.providers.find((candidate) => candidate.provider === providerSelect.value)
         catalogModelSelect.replaceChildren(...(entry?.models || []).map((model) => option(model.id, model.name + " / " + model.modelId)))
         enhanceSelect(catalogModelSelect)
+        syncCatalogVision()
       }
 
       function renderSavedProviders() {
@@ -527,6 +560,17 @@ export const configWebHtml = `<!doctype html>
       function selectedCatalogModel() {
         const provider = catalog.providers.find((entry) => entry.provider === providerSelect.value)
         return provider?.models.find((candidate) => candidate.id === catalogModelSelect.value)
+      }
+
+      function syncCatalogVision() {
+        const model = selectedCatalogModel()
+        catalogVisionInput.disabled = !model
+        catalogVisionInput.checked = model?.supportsVision === true
+      }
+
+      function selectedCatalogModelFromForm() {
+        const model = selectedCatalogModel()
+        return model ? { ...model, supportsVision: catalogVisionInput.checked } : undefined
       }
 
       function normalizeBaseUrl(value) {
@@ -556,24 +600,232 @@ export const configWebHtml = `<!doctype html>
       }
 
       function mergeConfiguredModel(model) {
-        return currentModels.models.some((candidate) => candidate.id === model.id) ? currentModels.models : [...currentModels.models, model]
+        const index = currentModels.models.findIndex((candidate) => candidate.id === model.id)
+        if (index === -1) return [...currentModels.models, model]
+        const nextModels = [...currentModels.models]
+        nextModels[index] = { ...nextModels[index], ...model }
+        return nextModels
+      }
+
+      function makeField(id, labelKey, control) {
+        const field = document.createElement("div")
+        field.className = "field"
+        const label = document.createElement("label")
+        label.htmlFor = id
+        label.textContent = t(labelKey)
+        control.id = id
+        field.append(label, control)
+        return field
+      }
+
+      function makeTextInput(value, required = false) {
+        const input = document.createElement("input")
+        input.autocomplete = "off"
+        input.value = value || ""
+        input.required = required
+        return input
+      }
+
+      function makeNumberInput(value) {
+        const input = document.createElement("input")
+        input.type = "number"
+        input.min = "1"
+        input.value = String(value || 128000)
+        return input
+      }
+
+      function makeSelectInput(values, value) {
+        const select = document.createElement("select")
+        select.replaceChildren(...values.map((entry) => option(entry, entry)))
+        select.value = values.includes(value) ? value : values[0]
+        return select
+      }
+
+      function makeCheckboxField(id, checked) {
+        const field = document.createElement("div")
+        field.className = "field checkbox-field"
+        const label = document.createElement("label")
+        label.htmlFor = id
+        const input = document.createElement("input")
+        input.id = id
+        input.type = "checkbox"
+        input.checked = checked
+        const text = document.createElement("span")
+        text.textContent = t("supportsVision")
+        label.append(input, text)
+        field.append(label)
+        return { field, input }
+      }
+
+      function editedModelFromControls(previousModel, controls) {
+        const provider = controls.provider.value.trim()
+        const modelId = controls.modelId.value.trim()
+        const name = controls.name.value.trim() || modelId
+        const baseUrl = normalizeBaseUrl(controls.baseUrl.value)
+        const contextWindow = Number(controls.contextWindow.value) || 128000
+        const nextModel = {
+          ...previousModel,
+          id: provider + "/" + modelId,
+          provider,
+          modelId,
+          name,
+          api: controls.api.value,
+          contextWindow,
+          supportsTools: true,
+          supportsVision: controls.vision.checked,
+          defaultThinkingLevel: controls.thinking.value,
+        }
+        if (baseUrl) nextModel.baseUrl = baseUrl
+        else delete nextModel.baseUrl
+        return nextModel
+      }
+
+      function replaceModelIdInBrains(previousId, nextId) {
+        if (previousId === nextId) return currentBrains
+        const nextBrains = structuredClone(currentBrains)
+        for (const brain of nextBrains.brains || []) {
+          replaceModelIdInPolicy(brain?.planner, previousId, nextId)
+          for (const policy of Object.values(brain?.roles || {})) {
+            replaceModelIdInPolicy(policy, previousId, nextId)
+          }
+        }
+        return nextBrains
+      }
+
+      function replaceModelIdInPolicy(policy, previousId, nextId) {
+        if (!policy || typeof policy !== "object") return
+        if (policy.modelId === previousId) policy.modelId = nextId
+        if (Array.isArray(policy.fallbackModelIds)) {
+          policy.fallbackModelIds = policy.fallbackModelIds.map((modelId) => modelId === previousId ? nextId : modelId)
+        }
+      }
+
+      function showResultError(resultElement, error) {
+        const message = t("failed") + ": " + String(error?.message || error)
+        resultElement.hidden = false
+        resultElement.className = "test-result fail"
+        resultElement.textContent = message
+        status.textContent = message
+      }
+
+      function createModelEditForm(model, index) {
+        const prefix = "edit-model-" + index + "-"
+        const form = document.createElement("form")
+        form.className = "model-edit-form"
+        const controls = {
+          provider: makeTextInput(model.provider, true),
+          modelId: makeTextInput(model.modelId, true),
+          name: makeTextInput(model.name || model.modelId),
+          baseUrl: makeTextInput(model.baseUrl || ""),
+          apiKey: makeTextInput(""),
+          api: makeSelectInput(apiTypes, model.api || "openai-responses"),
+          contextWindow: makeNumberInput(model.contextWindow),
+          thinking: makeSelectInput(thinkingLevels, model.defaultThinkingLevel || "medium"),
+        }
+        controls.apiKey.type = "password"
+        controls.apiKey.placeholder = "Optional token saved for this provider"
+        const vision = makeCheckboxField(prefix + "vision", model.supportsVision === true)
+        controls.vision = vision.input
+        const result = document.createElement("div")
+        result.className = "test-result"
+        result.hidden = true
+        const testButton = document.createElement("button")
+        testButton.type = "button"
+        testButton.textContent = t("testConnection")
+        const cancelButton = document.createElement("button")
+        cancelButton.type = "button"
+        cancelButton.textContent = t("cancel")
+        const saveButton = document.createElement("button")
+        saveButton.type = "submit"
+        saveButton.className = "primary"
+        saveButton.textContent = t("save")
+        const actions = document.createElement("div")
+        actions.className = "model-edit-actions"
+        actions.append(testButton, cancelButton, saveButton)
+        form.append(
+          makeField(prefix + "provider", "provider", controls.provider),
+          makeField(prefix + "model-id", "modelId", controls.modelId),
+          makeField(prefix + "name", "modelName", controls.name),
+          makeField(prefix + "base-url", "baseUrl", controls.baseUrl),
+          makeField(prefix + "api-key", "apiKey", controls.apiKey),
+          makeField(prefix + "api", "apiType", controls.api),
+          makeField(prefix + "context-window", "contextWindow", controls.contextWindow),
+          makeField(prefix + "thinking", "thinkingLevel", controls.thinking),
+          vision.field,
+          actions,
+          result,
+        )
+        enhanceSelect(controls.api)
+        enhanceSelect(controls.thinking)
+        cancelButton.addEventListener("click", () => { editingModelId = null; renderConfiguredModels() })
+        testButton.addEventListener("click", () => testEditedModel(model, controls, testButton, result).catch((error) => showResultError(result, error)))
+        form.addEventListener("submit", (event) => {
+          event.preventDefault()
+          saveEditedModel(model.id, editedModelFromControls(model, controls), controls.apiKey.value.trim(), result).catch((error) => showResultError(result, error))
+        })
+        return form
+      }
+
+      async function testEditedModel(previousModel, controls, button, resultElement) {
+        const model = editedModelFromControls(previousModel, controls)
+        if (!model.provider || !model.modelId) return
+        const previous = button.textContent
+        button.disabled = true
+        button.textContent = t("testing") + "..."
+        resultElement.hidden = false
+        resultElement.className = "test-result"
+        resultElement.textContent = t("testing") + " " + model.id + "..."
+        status.textContent = t("testing") + " " + model.id
+        try {
+          const result = await postJson("/api/models/test-config", { model, apiKey: controls.apiKey.value.trim(), thinkingLevel: controls.thinking.value })
+          renderConnectionTestResult(result, resultElement)
+        } finally {
+          button.disabled = false
+          button.textContent = previous
+        }
+      }
+
+      async function saveEditedModel(previousId, model, apiKey, resultElement) {
+        if (!model.provider || !model.modelId) return
+        const duplicatesAnotherModel = previousId !== model.id && currentModels.models.some((candidate) => candidate.id === model.id)
+        if (duplicatesAnotherModel) throw new Error(t("duplicateModel"))
+        status.textContent = t("saving") + " models..."
+        const saveKey = apiKey ? postJson("/api/provider-api-key", { provider: model.provider, apiKey }) : Promise.resolve(null)
+        const auth = await saveKey
+        if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+        const nextModels = currentModels.models.map((candidate) => candidate.id === previousId ? model : candidate)
+        currentModels = await putJson("/api/models", { ...currentModels, models: nextModels })
+        if (previousId !== model.id) {
+          currentBrains = await putJson("/api/brains", replaceModelIdInBrains(previousId, model.id))
+        }
+        editingModelId = null
+        renderSavedProviders()
+        renderConfiguredModels()
+        renderBrainRouting()
+        resultElement.hidden = true
+        status.textContent = t("saved") + " models"
       }
 
       function renderConfiguredModels() {
         if (currentModels.models.length === 0) { configuredModels.innerHTML = '<div class="item">' + t("none") + '</div>'; return }
-        configuredModels.replaceChildren(...currentModels.models.map((model) => {
+        configuredModels.replaceChildren(...currentModels.models.map((model, index) => {
           const item = document.createElement("div")
           item.className = "item"
           const header = document.createElement("div")
           header.className = "item-header"
           const text = document.createElement("div")
-          const visionTag = model.supportsVision === false ? "" : " · " + t("visionBadge")
+          text.className = "model-summary"
+          const visionTag = model.supportsVision === true ? " · " + t("visionBadge") : ""
           text.textContent = model.name + visionTag + "\\n" + model.id + "\\n" + model.provider
           const button = document.createElement("button")
           button.type = "button"
           button.className = "danger"
           button.textContent = t("remove")
           button.addEventListener("click", () => removeModel(model.id))
+          const editButton = document.createElement("button")
+          editButton.type = "button"
+          editButton.textContent = t("edit")
+          editButton.addEventListener("click", () => { editingModelId = model.id; renderConfiguredModels() })
           const testButton = document.createElement("button")
           testButton.type = "button"
           testButton.textContent = t("testConnection")
@@ -583,9 +835,10 @@ export const configWebHtml = `<!doctype html>
           testButton.addEventListener("click", () => testModel(model.id, testButton, result))
           const actions = document.createElement("div")
           actions.className = "item-actions"
-          actions.append(testButton, button)
+          actions.append(editButton, testButton, button)
           header.append(text, actions)
           item.append(header, result)
+          if (editingModelId === model.id) item.append(createModelEditForm(model, index))
           return item
         }))
       }
@@ -861,6 +1114,7 @@ export const configWebHtml = `<!doctype html>
       loadProviderModelsButton.addEventListener("click", () => loadProviderModels().catch(showError))
       testManualModelButton.addEventListener("click", () => testManualModel().catch(showError))
       providerSelect.addEventListener("change", renderCatalogModels)
+      catalogModelSelect.addEventListener("change", syncCatalogVision)
       brainSelect.addEventListener("change", renderBrainRouting)
       applyAllRoles.addEventListener("click", () => {
         for (const select of roleModels.querySelectorAll("select[data-role]")) {
@@ -878,7 +1132,7 @@ export const configWebHtml = `<!doctype html>
 
       modelForm.addEventListener("submit", (event) => {
         event.preventDefault()
-        const model = selectedCatalogModel()
+        const model = selectedCatalogModelFromForm()
         if (!model) return
         status.textContent = t("saving") + " models..."
         const saveKey = catalogApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: catalogApiKeyInput.value.trim() }) : Promise.resolve(null)
