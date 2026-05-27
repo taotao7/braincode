@@ -1,6 +1,6 @@
 # Project Structure and Plan
 
-This document is the source of truth for the planned workspace layout, package ownership, and milestone order.
+This document is the source of truth for the planned workspace layout, package ownership, and milestone order. The current implementation has passed the initial skeleton/runtime/TUI/MCP phases; the active planning focus is now local coding tools, patch artifacts, review gates, and permission policy.
 
 ## Goals
 
@@ -239,13 +239,14 @@ This package should stay dependency-light.
 
 ### `packages/tools`
 
-Owns tool definitions and permissions.
+Owns tool definitions and permissions. Today this package defines built-in tool metadata, defaults, and approval configuration. First-party local tool execution is the next implementation target; MCP tools are already bridged through `packages/agent-runtime`.
 
 Responsibilities:
 
-- Register coding tools such as read, write, edit, shell, search.
-- Register project MCP tools declared in `.mcp.json` once MCP runtime wiring is implemented.
-- Define safe execution policies.
+- Register coding tools such as read, write, edit, shell, search, patch application, git diff, changed-file inspection, and check/script execution.
+- Provide first-party local implementations for the default coding toolset.
+- Coordinate with `packages/agent-runtime` for project/user MCP tools declared through `.mcp.json` and user MCP config.
+- Define safe execution policies that can account for path, command, risk, and review requirements.
 - Keep permission checks outside individual UI surfaces.
 - Support future project-specific tool configuration.
 
@@ -255,9 +256,35 @@ Small dependency-light shared utilities and primitive types.
 
 Do not turn this into a dumping ground. If code has a domain owner, keep it in that package.
 
+## Current implementation phase
+
+The project is no longer in a "framework skeleton" phase. The first versions of runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, and approval UI are in place.
+
+The current product gap is turning that orchestration into a reliable coding patch engine:
+
+```text
+local tools
+  -> file edits
+  -> changed files
+  -> git diff
+  -> checks
+  -> review decision
+  -> final patch report
+  -> session ledger
+```
+
+Near-term work should prioritize:
+
+- First-party local coding tools that work without MCP setup.
+- Patch ledger records for tool calls, snapshots, changed files, diffs, checks, and review decisions.
+- Diff/check-based review input and a typed review decision.
+- Path-aware and command-aware permission policy.
+- Router-plan UX that clearly distinguishes heuristic dry-runs from routeBrain execution plans.
+- Benchmarks and demo cases that prove the orchestration improves real coding outcomes.
+
 ## Initial milestones
 
-### MVP-0: repository skeleton
+### MVP-0: repository skeleton - done
 
 - Create Bun workspace.
 - Add root scripts.
@@ -265,14 +292,14 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 - Add config home resolver for `~/.braincode/`.
 - Add local config server skeleton.
 
-### MVP-1: configuration UI
+### MVP-1: configuration UI - done
 
 - Start `braincode config`.
 - Serve a minimal web page.
 - Read/write `settings.json`.
 - Show auth/model/brain config sections.
 
-### MVP-2: single-agent runtime
+### MVP-2: single-agent runtime - done
 
 - Integrate Pi AI/Core.
 - Run one agent session.
@@ -285,7 +312,7 @@ MVP-2 starts by establishing the adapter boundary:
 - `packages/agent-runtime` creates Pi-backed agent runtime instances from Braincode mode, model policy, and system prompt.
 - Real provider execution is added after model/auth configuration is reliable.
 
-### MVP-3: Brain Model routing
+### MVP-3: Brain Model routing - first version done
 
 - Load `brains.json`.
 - Select model by task role, including specialist roles such as frontend, backend, security, QA, DBA, DevOps, oracle, librarian, and rush.
@@ -294,7 +321,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Keep built-in prompts aligned with each role's scope and boundaries.
 - Support thinking level, fallbacks, and escalation policy.
 
-### MVP-4: isolated worker agents
+### MVP-4: isolated worker agents - first version done
 
 - Implement handoff packets.
 - Encode Brain-to-agent and agent-to-Brain context transfer directions.
@@ -304,12 +331,14 @@ MVP-2 starts by establishing the adapter boundary:
 - Run mandatory review workers for risky file-editing tasks.
 - Add richer context compaction/summarization policy.
 
-### MVP-5: coding workflow
+### MVP-5: coding workflow - partially done, active focus
 
-- Add read/search/edit/shell tools with permissions.
-- Use `AGENTS.md` as durable project instruction context.
-- Load project MCP server declarations from `.mcp.json`.
-- Load project-local skills from `.agents/skill`.
-- Load and run trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
-- Add review agent for risky file edits.
-- Add user confirmation flows where needed.
+- Done: `AGENTS.md` durable project instruction context.
+- Done: project MCP server declarations from `.mcp.json`.
+- Done: project-local skills from `.agents/skill`.
+- Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
+- Done: review worker execution for risky tasks.
+- Done: user confirmation flows for risky tool calls in the TUI.
+- Active: read/search/edit/shell/apply-patch/git/check tools as first-party local implementations.
+- Active: patch ledger and diff/check artifact pipeline.
+- Active: granular permission rules for paths, commands, critical files, and review requirements.

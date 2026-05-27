@@ -12,6 +12,8 @@ It is not another AI CLI that asks one model to plan, code, and review itself. B
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+<img width="1774" height="887" alt="Braincode routing diagram" src="./apps/site/src/assets/routing-diagram.png" />
+
 ## Why Braincode?
 
 Most coding agents ask one model to plan, code, and review itself. Braincode separates these roles.
@@ -29,7 +31,7 @@ braincode run "add login validation"
 braincode run --dry-run "add login validation"
 ```
 
-`braincode run` uses the configured Brain Model. `--dry-run` previews the routing plan without making provider calls. Use `braincode config` to change the active Brain Model and provider/model settings.
+`braincode run` uses the configured Brain Model. `--dry-run` previews the deterministic routing plan without making provider calls; real execution may refine that plan with `routeBrain`. Use `braincode config` to change the active Brain Model and provider/model settings.
 
 ## How It Works
 
@@ -58,24 +60,37 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Current Status
 
-- Bun workspace and package skeleton are in place.
-- `braincode` starts a Braincode-owned Ink TUI.
-- `braincode config` starts a local configuration service backed by `~/.braincode/`.
-- The config UI can edit settings, execution mode, brains, models, and tools; auth currently exposes status only and does not display secrets.
-- `braincode run` builds a runtime plan from the configured Brain Model.
-- Runtime execution can run support workers in isolated contexts, pass structured results to the primary executor, and run a review worker when policy requires it.
-- Session JSONL, project/user support files, hooks, MCP server loading, model fallback, and provider auth wiring are started.
+- Bun monorepo with `apps/*` and `packages/*` workspaces.
+- CLI entrypoints for `braincode`, `braincode run`, `braincode run --dry-run`, and `braincode config`.
+- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, and tool approval decisions.
+- Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, and auth status.
+- Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.
+- `routeBrain` LLM routing during real execution, with deterministic heuristic planning for dry-runs and fallback.
+- Isolated support workers, primary executor, and policy-triggered review worker using structured handoff/result packets.
+- Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
+- Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
+- MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
+- Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
+- Prompt references for `@file`, compact `@@session` context, and image attachments.
+
+## In Progress
+
+- First-party local coding tools for zero-config file reads, search, edits, patch application, shell commands, git diff, and changed-file inspection.
+- Patch ledger records for tool calls, file snapshots, changed files, diff stats, check results, patch summaries, and review decisions.
+- Check runner integration for test, typecheck, lint, and project scripts.
+- Diff/check-based review gate that reviews patch artifacts instead of primary-agent prose.
+- Path-aware, command-aware, and risk-aware permission policy beyond tool-level approval.
+- Router-plan UX so `/plan` can show actual `routeBrain` decisions or clearly label heuristic previews.
+- Benchmarks and demo cases that measure multi-agent patch quality, checks, review decisions, duration, token use, fallbacks, and approvals.
 
 ## Roadmap
 
-- Stabilize Brain Model routing policy and role selection.
-- Tighten coding tool permissions, edit previews, and review gates.
-- Improve TUI workflows for intent graphs, worker progress, approvals, and final reports.
-- Expand config migrations, model catalog support, and provider setup.
-- Add focused tests for routing, context isolation, hooks, permissions, and failure recovery.
-- Keep packaging and release automation simple across npm, Homebrew, and prebuilt binaries.
-
-<img width="1774" height="887" alt="ChatGPT Image 2026年5月25日 14_44_11" src="https://github.com/user-attachments/assets/d1d8a807-7438-470f-96a8-e7fc94c45cfe" />
+- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch records, and approval-aware write/execute flows.
+- **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`.
+- **v0.5 Permission Policy v2**: project-root read policy, path rules, critical-file review requirements, dangerous-command deny rules, and configurable safe command allowlists.
+- **v0.6 Router Plan UX**: `/plan --router`, routing source labels, confidence/reason display, and clearer TUI intent views.
+- **v0.7 Demo & Benchmark**: representative coding tasks such as README edits, failing-test fixes, auth-risk changes, package changes, and security-review-only runs.
+- Continue focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
 
 ## Brain Models and Roles
 
@@ -139,4 +154,4 @@ bun run braincode -- run "hello"
 
 The `config` command starts the local browser configuration service and creates missing files under `~/.braincode/`.
 Real `run` and TUI prompts require a provider key in `~/.braincode/auth.json`, for example `providers.anthropic.apiKey` for the default model.
-Inside the TUI, use `/help` for commands and `/plan <task>` to preview Brain Model routing without calling a provider. The TUI intentionally has no direct model-switching command.
+Inside the TUI, use `/help` for commands and `/plan <task>` to preview the deterministic routing plan without calling a provider. Real execution may refine that plan with `routeBrain`. The TUI intentionally has no direct model-switching command.
