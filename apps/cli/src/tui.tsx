@@ -1920,6 +1920,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userMcpCount = userSupport?.mcp?.serverNames.length ?? 0
   const projectSkillCount = projectSupport?.skills.length ?? 0
   const userSkillCount = userSupport?.skills.length ?? 0
+  const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
+  const draftWindow = clipDraftToWindow(draft, cursor, inputWidth, INPUT_MAX_LINES)
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -2123,24 +2125,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       <Box justifyContent="flex-end">
         <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
       </Box>
-      <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="column">
-        {running ? (
-          <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current }} />
-        ) : (
-          (() => {
-            const innerWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
-            const window = clipDraftToWindow(draft, cursor, innerWidth, INPUT_MAX_LINES)
-            return (
-              <>
-                {window.hiddenAbove > 0 ? <Text color="gray">↑ {window.hiddenAbove} more line{window.hiddenAbove === 1 ? "" : "s"}</Text> : null}
-                {window.lines.map((line, index) => (
-                  <Text key={index} color="green" wrap="truncate-end">{line || " "}</Text>
-                ))}
-                {window.hiddenBelow > 0 ? <Text color="gray">↓ {window.hiddenBelow} more line{window.hiddenBelow === 1 ? "" : "s"}</Text> : null}
-              </>
-            )
-          })()
-        )}
+      <Box borderStyle="single" borderColor={running ? "yellow" : "green"} paddingX={1} flexDirection="column">
+        {running ? <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current }} /> : null}
+        {draftWindow.hiddenAbove > 0 ? <Text color="gray">↑ {draftWindow.hiddenAbove} more line{draftWindow.hiddenAbove === 1 ? "" : "s"}</Text> : null}
+        {draftWindow.lines.map((line, index) => (
+          <Text key={index} color={running ? "yellow" : "green"} wrap="truncate-end">{line || " "}</Text>
+        ))}
+        {draftWindow.hiddenBelow > 0 ? <Text color="gray">↓ {draftWindow.hiddenBelow} more line{draftWindow.hiddenBelow === 1 ? "" : "s"}</Text> : null}
       </Box>
       <Text color="gray">
         Enter submits · / commands · /mode auto|radical · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
