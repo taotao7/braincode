@@ -12,6 +12,7 @@ import { fuzzyFilter, listProjectFiles } from "./project-files"
 import { BrainPet } from "./brain-pet"
 import { usePetWatcher, type PetWatcherSnapshotItem } from "./pet-watcher"
 import { buildEditPreview, displayEditPath, extractEditArgs, resolveEditPath, snapshotFileContent, type EditArgs, type EditPreview, type EditRow } from "./tool-edit-preview"
+import { isWideChar, moveDraftCursorVertically } from "./input-cursor"
 
 type TranscriptItem = {
   id: string
@@ -178,6 +179,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 }
 
 const INPUT_MAX_LINES = 6
+const INPUT_PROMPT_PREFIX = "› "
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
 const RUN_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 
@@ -231,6 +233,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const usageByTurn = useRef<Map<string, TokenUsageSnapshot>>(new Map())
   const activeUsageKey = useRef<string | null>(null)
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage())
+  const verticalCursorColumn = useRef<number | null>(null)
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion((value) => value + 1)
 
@@ -1325,6 +1328,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const onWorkerEvent = (event: WorkerLifecycleEvent) => {
       finalizeStreamingBuffers()
       const key = workerKey(event)
+      const phaseLabel = formatWorkerPhase(event.phase)
       if (event.type === "worker_start") {
         const itemId = crypto.randomUUID()
         workerItems.set(key, { itemId, startedAt: Date.now() })
@@ -1333,9 +1337,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           kind: "worker",
           workerStatus: "running",
           startedAt: Date.now(),
-          text: `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  ${event.modelId}  ${event.goal ? `· goal: ${truncate(event.goal, 80)}` : ""}`,
+          text: `${phaseLabel} · ${event.role}  →  ${event.modelId}  ${event.goal ? `· goal: ${truncate(event.goal, 80)}` : ""}`,
         })
-        updateStatus(`Worker ${event.role} running…`)
+        updateStatus(`${phaseLabel} ${event.role} running…`)
         return
       }
       // worker_end
@@ -1344,10 +1348,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const elapsed = tracked ? Date.now() - tracked.startedAt : undefined
       if (itemId) workerItems.delete(key)
       const text = event.status === "completed"
-        ? `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  done${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
+        ? `${phaseLabel} · ${event.role}  →  done${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
         : event.status === "blocked"
-          ? `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  blocked${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
-          : `${event.phase === "review" ? "review" : "worker"} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`
+          ? `${phaseLabel} · ${event.role}  →  blocked${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
+          : `${phaseLabel} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`
       if (itemId) {
         updateItem(itemId, {
           workerStatus: event.status,
@@ -1357,7 +1361,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       } else {
         appendItemRaw({ id: crypto.randomUUID(), kind: "worker", workerStatus: event.status, finishedAt: Date.now(), text })
       }
-      updateStatus(`Worker ${event.role} ${event.status}.`)
+      updateStatus(`${phaseLabel} ${event.role} ${event.status}.`)
     }
 
     const onMcpReport = (report: import("@braincode/agent-runtime").McpHubConnectReport) => {
@@ -1484,6 +1488,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   function applyDraftChange(next: string, nextCursor?: number) {
     const cursorPosition = clamp(nextCursor ?? next.length, 0, next.length)
+    verticalCursorColumn.current = null
     setDraft(next)
     setCursor(cursorPosition)
     setOverlay(computeOverlay(next, cursorPosition, overlay))
@@ -1510,7 +1515,24 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function moveCursor(delta: number) {
+    verticalCursorColumn.current = null
     setCursor((current) => clamp(current + delta, 0, draft.length))
+  }
+
+  function moveCursorVertical(delta: -1 | 1): boolean {
+    const width = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
+    const result = moveDraftCursorVertically({
+      draft,
+      cursor,
+      width,
+      delta,
+      desiredColumn: verticalCursorColumn.current,
+      promptPrefix: INPUT_PROMPT_PREFIX,
+    })
+    if (!result.moved) return false
+    verticalCursorColumn.current = result.desiredColumn
+    setCursor(result.cursor)
+    return true
   }
 
   async function handlePaste() {
@@ -1548,7 +1570,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (command.insert) {
         applyDraftChange(command.insert)
       } else {
-        setDraft("")
+        applyDraftChange("")
         setOverlay(null)
         handleCommand(`/${command.name}`)
       }
@@ -1827,6 +1849,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
 
+    if (!overlay && (key.upArrow || key.downArrow)) {
+      const moved = moveCursorVertical(key.downArrow ? 1 : -1)
+      if (moved || key.downArrow) return
+    }
+
     if (key.upArrow && !overlay && queueRef.current.length > 0) {
       const queue = queueRef.current
       const last = queue[queue.length - 1]!
@@ -1847,10 +1874,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return
     }
     if (key.ctrl && input === "a") {
+      verticalCursorColumn.current = null
       setCursor(0)
       return
     }
     if (key.ctrl && input === "e") {
+      verticalCursorColumn.current = null
       setCursor(draft.length)
       return
     }
@@ -2114,7 +2143,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         )}
       </Box>
       <Text color="gray">
-        Enter submits · / commands · /mode auto|radical · @ files · @@ sessions · Ctrl+O intent · ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · /mode auto|radical · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color="yellow">
@@ -2235,23 +2264,7 @@ function composeDraftLine(draft: string, cursor: number): string {
   const position = clamp(cursor, 0, draft.length)
   const head = draft.slice(0, position)
   const tail = draft.slice(position)
-  return `› ${head}|${tail}`
-}
-
-function isWideChar(char: string): boolean {
-  const code = char.codePointAt(0) ?? 0
-  return (
-    (code >= 0x1100 && code <= 0x115f) ||
-    (code >= 0x2e80 && code <= 0x9fff) ||
-    (code >= 0xa000 && code <= 0xa4cf) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe30 && code <= 0xfe4f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6) ||
-    (code >= 0x20000 && code <= 0x2fffd) ||
-    (code >= 0x30000 && code <= 0x3fffd)
-  )
+  return `${INPUT_PROMPT_PREFIX}${head}|${tail}`
 }
 
 function wrapByVisualWidth(text: string, width: number): string[] {
@@ -2942,6 +2955,12 @@ function formatElapsed(ms: number): string {
   const hours = Math.floor(totalMinutes / 60)
   if (hours === 0) return `${minutes}m ${seconds}s`
   return `${hours}h ${minutes}m ${seconds}s`
+}
+
+function formatWorkerPhase(phase: WorkerLifecycleEvent["phase"]): string {
+  if (phase === "primary") return "agent"
+  if (phase === "review") return "review"
+  return "worker"
 }
 
 function classifyToolCall(toolName: string, args: unknown): ToolCategory {

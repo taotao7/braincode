@@ -42,8 +42,8 @@ export type ToolApprovalDecision = {
 }
 
 export type WorkerLifecycleEvent =
-  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "support" | "review"; modelId: string; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; todoIds?: string[] }
-  | { type: "worker_end"; role: RoutedAgentRole; phase: "support" | "review"; status: "completed" | "blocked" | "failed"; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; summary?: string; error?: string; todoIds?: string[] }
+  | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "primary" | "support" | "review"; modelId: string; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; todoIds?: string[] }
+  | { type: "worker_end"; role: RoutedAgentRole; phase: "primary" | "support" | "review"; status: "completed" | "blocked" | "failed"; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; summary?: string; error?: string; todoIds?: string[] }
 
 export type TodoLifecycleEvent = {
   type: "todo_update"
@@ -1908,9 +1908,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const userSupport = await readUserSupport(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
+  const primaryWorker = plan.workers.find((worker) => worker.role === plan.role)
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
   const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
     updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
+  const emitWorkerEvent = async (event: WorkerLifecycleEvent) => {
+    if (!request.onWorkerEvent) return
+    try {
+      await request.onWorkerEvent(event)
+    } catch {
+      // ignore listener errors
+    }
+  }
   const patchBaseline = await collectPatchBaseline(cwd)
   const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
@@ -1952,6 +1961,21 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
+      const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
+      const primaryHandoffId = `primary:${primaryTaskId}`
+      const primaryGoal = primaryWorker?.goal ?? request.prompt
+      await emitWorkerEvent({
+        type: "worker_start",
+        role: plan.role,
+        goal: primaryGoal,
+        phase: "primary",
+        modelId: selection.configured.id,
+        handoffId: primaryHandoffId,
+        taskId: primaryTaskId,
+        parentId: plan.context.id,
+        progress: { status: "running", summary: primaryGoal },
+        todoIds: primaryTodoIds,
+      })
 
       const runtime = createBraincodeAgentRuntime({
         mode: plan.mode,
@@ -1969,6 +1993,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
+        await emitWorkerEvent({
+          type: "worker_end",
+          role: plan.role,
+          phase: "primary",
+          status: "completed",
+          handoffId: primaryHandoffId,
+          taskId: primaryTaskId,
+          parentId: plan.context.id,
+          progress: { status: "completed", summary: primarySummary.trim() },
+          summary: primarySummary.trim(),
+          todoIds: primaryTodoIds,
+        })
         const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
         const checks = hasPatchActivity(patchAfterPrimary) ? await runPatchChecks(cwd, checkOptions) : undefined
         if (checks) {
@@ -2013,6 +2049,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
+        await emitWorkerEvent({
+          type: "worker_end",
+          role: plan.role,
+          phase: "primary",
+          status: "failed",
+          handoffId: primaryHandoffId,
+          taskId: primaryTaskId,
+          parentId: plan.context.id,
+          progress: { status: "failed", summary: message },
+          error: message,
+          todoIds: primaryTodoIds,
+        })
         await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
       }
     }
