@@ -33,6 +33,82 @@ test("ensureBraincodeHome creates config files and directories", async () => {
   expect((await stat(paths.cache)).isDirectory()).toBe(true)
 })
 
+test("path helpers derive user and project support locations", async () => {
+  const home = await makeTempHome()
+  const root = await mkdtemp(join(tmpdir(), "braincode-config-paths-project-"))
+  try {
+    const braincodePaths = getBraincodePaths(home)
+    const projectPaths = getProjectSupportPaths(root)
+    const userPaths = getUserSupportPaths(home)
+
+    expect(braincodePaths.tools).toBe(join(home, "tools.json"))
+    expect(projectPaths.agents).toBe(join(root, "AGENTS.md"))
+    expect(projectPaths.skills).toBe(join(root, ".agents", "skill"))
+    expect(userPaths.mcp).toBe(join(home, "mcp.json"))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("MCP server entries can be listed and toggled disabled", async () => {
+  const home = await makeTempHome()
+  const filePath = join(home, "mcp.json")
+  await Bun.write(filePath, JSON.stringify({
+    servers: {
+      zeta: { command: "zeta" },
+      alpha: { command: "alpha" },
+    },
+  }))
+
+  expect(extractMcpServerEntries({ servers: { b: { command: "b" }, a: { command: "a" } } }).map((entry) => entry.name)).toEqual(["a", "b"])
+
+  await setMcpServerDisabled(filePath, "alpha", true)
+  let parsed = JSON.parse(await Bun.file(filePath).text())
+  expect(parsed.servers.alpha.disabled).toBe(true)
+
+  await setMcpServerDisabled(filePath, "alpha", false)
+  parsed = JSON.parse(await Bun.file(filePath).text())
+  expect(parsed.servers.alpha.disabled).toBeUndefined()
+  await expect(setMcpServerDisabled(filePath, "missing", true)).rejects.toThrow("not found")
+})
+
+test("normalizeHooks keeps trusted command metadata and filters invalid groups", () => {
+  const hooks = normalizeHooks({
+    hooks: {
+      Stop: [
+        {
+          matcher: "done",
+          hooks: [
+            {
+              command: "echo stop",
+              commandWindows: "cmd /c echo stop",
+              command_windows: "cmd /c echo stop",
+              timeout: 2,
+              statusMessage: "Stopping",
+              async: true,
+              trusted: true,
+            },
+            null,
+          ],
+        },
+        { hooks: [] },
+      ],
+      NotAnEvent: [{ hooks: [{ command: "ignored" }] }],
+    },
+  })
+
+  const handler = hooks.hooks.Stop?.[0]?.hooks[0]
+  expect(hooks.hooks.Stop).toHaveLength(1)
+  expect(hooks.hooks.UserPromptSubmit).toBeUndefined()
+  expect(handler?.command).toBe("echo stop")
+  expect(handler?.commandWindows).toBe("cmd /c echo stop")
+  expect(handler?.command_windows).toBe("cmd /c echo stop")
+  expect(handler?.timeout).toBe(2)
+  expect(handler?.statusMessage).toBe("Stopping")
+  expect(handler?.async).toBe(true)
+  expect(handler?.trusted).toBe(true)
+})
+
 test("readProjectSupport discovers AGENTS, MCP config, and local skills", async () => {
   const projectRoot = await makeTempHome()
   await Bun.write(join(projectRoot, "AGENTS.md"), "Use Bun for scripts.\n")
@@ -82,6 +158,25 @@ test("readHookSources discovers user and project hook config", async () => {
   expect(sources.map((source) => source.kind)).toEqual(["user", "project"])
   expect(sources[0]?.document.hooks.UserPromptSubmit?.[0]?.hooks[0]?.trusted).toBe(true)
   expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(false)
+})
+
+test("readUserSupport discovers user MCP config and skills", async () => {
+  const home = await makeTempHome()
+  await Bun.write(
+    join(home, "mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        browser: { command: "browser-mcp" },
+      },
+    }),
+  )
+  await mkdir(join(home, "skills"), { recursive: true })
+  await Bun.write(join(home, "skills", "review.md"), "# Review skill\n")
+
+  const support = await readUserSupport(home)
+
+  expect(support.mcp?.serverNames).toEqual(["browser"])
+  expect(support.skills.map((skill) => skill.id)).toEqual(["review"])
 })
 
 test("default tool configuration enables local coding tools with approval for writes and execution", async () => {
@@ -276,6 +371,17 @@ test("auth status lists configured provider names without returning secrets", as
   await Bun.write(paths.auth, JSON.stringify({ providers: { anthropic: { apiKey: "secret" } } }))
 
   await expect(readAuthStatus(home)).resolves.toEqual({ configuredProviders: ["anthropic"] })
+})
+
+test("writeProviderApiKey trims provider and key and ignores empty keys", async () => {
+  const home = await makeTempHome()
+
+  await writeProviderApiKey(" anthropic ", " key ", home)
+  await writeProviderApiKey("openai", "   ", home)
+
+  expect(await readProviderApiKey("anthropic", home)).toBe("key")
+  expect(await readProviderApiKey("openai", home)).toBeUndefined()
+  await expect(writeProviderApiKey(" ", "key", home)).rejects.toThrow("provider is required")
 })
 
 test("getProviderApiKey supports string and object auth entries", () => {

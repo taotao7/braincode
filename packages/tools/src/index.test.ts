@@ -248,7 +248,8 @@ test("shell and run_script return process results without throwing on nonzero ex
     const scriptResult = await runScript.execute("script-1", { script: "echoargs", args: ["a", "b"] } as never)
 
     expect(textContent(shellResult)).toContain("exit: 7")
-    expect(textContent(scriptResult)).toContain("a,b")
+    expect(textContent(scriptResult)).toContain("bun run echoargs a b")
+    expect(textContent(scriptResult)).toContain("stdout:\nb")
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
