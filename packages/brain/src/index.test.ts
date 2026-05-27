@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -38,6 +38,23 @@ const brain: BrainModel = {
 test("mode policies distinguish auto and radical", () => {
   expect(getModePolicy("auto").mode).toBe("auto")
   expect(getModePolicy("radical").mode).toBe("radical")
+  expect(getModePolicy("auto").routing.strategy).toBe("focused")
+  expect(getModePolicy("radical").routing.strategy).toBe("expansive")
+})
+
+test("mode routing limits make radical materially more parallel", () => {
+  expect(getModeRoutingLimits("auto", 2)).toEqual({
+    configuredMaxParallelAgents: 2,
+    maxParallelAgents: 2,
+    maxWorkerAgents: 2,
+    maxTodos: 6,
+  })
+  expect(getModeRoutingLimits("radical", 2)).toEqual({
+    configuredMaxParallelAgents: 2,
+    maxParallelAgents: 4,
+    maxWorkerAgents: 4,
+    maxTodos: 8,
+  })
 })
 
 test("planAgentRouting falls back to rush deterministically (LLM-driven routing lives in agent-runtime)", () => {

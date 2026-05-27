@@ -524,6 +524,10 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     expect(plan.context.layer).toBe("brain")
     expect(plan.context.childContextIds).toEqual(plan.workers.map((worker) => worker.contextId))
     expect(plan.toolExecution).toBe("parallel")
+    expect(plan.routing.configuredMaxParallelAgents).toBe(2)
+    expect(plan.routing.maxParallelAgents).toBe(4)
+    expect(plan.routing.maxWorkerAgents).toBe(4)
+    expect(plan.routing.maxTodos).toBe(8)
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
     expect(plan.routing.source).toBe("heuristic")
   } finally {
@@ -611,6 +615,9 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
     ])
     expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-02-review"])
     expect(plan.workers.find((worker) => worker.role === "rush")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
+    expect(plan.routing.maxParallelAgents).toBe(2)
+    expect(plan.routing.maxWorkerAgents).toBe(2)
+    expect(plan.routing.maxTodos).toBe(6)
     expect(plan.routing.source).toBe("heuristic")
   } finally {
     await rm(home, { recursive: true, force: true })

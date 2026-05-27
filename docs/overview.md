@@ -90,8 +90,8 @@ The interactive TUI variant follows the same path. The TUI also subscribes to `A
 
 Modes are a Braincode-level concept; they bias the orchestration, not the model.
 
-- **`auto`** — default. Tools execute sequentially per agent. Routing is conservative; review is required when policy says so.
-- **`radical`** — autonomous. Tools execute in parallel within an agent. Routing is freer. Permission boundaries still apply.
+- **`auto`** — default. Tools execute sequentially per agent. Routing is focused; the router can use up to the configured worker/concurrency limit and up to 6 todos.
+- **`radical`** — autonomous. Tools execute in parallel within an agent. routeBrain is instructed to decompose more broadly, use specialist support earlier, plan up to 8 todos, and use at least 4 routed workers / 4-way support concurrency when dependencies allow. Permission boundaries still apply.
 
 `getModePolicy` in `packages/brain` is the source of truth.
 

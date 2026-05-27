@@ -137,7 +137,7 @@ return ExecutedWorkerResult
 2. expandPromptReferences：解析 @<file>、@@<session> -> 拼到 prompt 末尾。
 3. buildRuntimePlan：先启发式路由，再用 router brain 细化。
    - --team 强制角色时，覆盖 plan.workers。
-4. runSupportWorkers（独立 worker 并发，受 brain.routing.maxParallelAgents 限制）：
+4. runSupportWorkers（独立 worker 并发，受 mode 调整后的 routing limit 限制）：
    - 每个 worker 独立。worker 之间互不可见。
    - 如果 todo 依赖要求一个 support 结果先出来，Brain 会先跑上游 worker，并只把归一化后的摘要交给依赖它的 worker。
 5. 通过 McpToolHub 连 MCP server -> 把工具注入主 agent。
@@ -175,7 +175,7 @@ type AgentRoutingPlan = {
 }
 ```
 
-`buildRuntimePlan` 然后用 `createRuntimeWorkerPlan` 把每个 `AgentWorkerPlan` 展开成 `RuntimeWorkerPlan`，给每个 worker 分配稳定的 agent context id，解析该角色配置的执行策略，并生成运行时 todo 列表和依赖图。最终的 `RuntimePlan` 才是后续编排消费的东西。
+`buildRuntimePlan` 然后用 `createRuntimeWorkerPlan` 把每个 `AgentWorkerPlan` 展开成 `RuntimeWorkerPlan`，给每个 worker 分配稳定的 agent context id，解析该角色配置的执行策略，并生成运行时 todo 列表和依赖图。它还会应用 mode routing limit：auto 使用配置里的 worker / 并发上限和 6 个 todo；radical 会把有效 worker 和 support 并发预算至少提高到 4，并允许 8 个 todo。最终的 `RuntimePlan` 才是后续编排消费的东西。
 
 加新角色时：
 

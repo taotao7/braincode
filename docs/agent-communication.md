@@ -137,7 +137,7 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
 2. expandPromptReferences:   resolve @<file>, @@<session>  -> appended sections.
 3. buildRuntimePlan:         heuristic routing, then router-brain refinement.
    - When --team forced roles are supplied, plan.workers is overridden.
-4. runSupportWorkers (parallel when independent, capped by brain.routing.maxParallelAgents):
+4. runSupportWorkers (parallel when independent, capped by the mode-adjusted routing limit):
    - Each worker is independent. No worker sees another's handoff or transcript.
    - If todo dependencies require one support result before another, Brain runs the upstream worker first and supplies only its normalized summary to the dependent worker.
 5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
@@ -177,7 +177,7 @@ type AgentRoutingPlan = {
 }
 ```
 
-`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
+`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. It also applies mode routing limits: auto uses the configured worker/concurrency cap and 6 todos; radical raises the effective worker and support-concurrency budgets to at least 4 and allows 8 todos. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
 If you add a new role:
 

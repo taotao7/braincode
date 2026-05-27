@@ -470,6 +470,12 @@ export type ModePolicy = {
   mode: BraincodeMode
   description: string
   requiresExplicitApprovalForRiskyActions: boolean
+  routing: {
+    maxTodos: number
+    minParallelAgents: number
+    minWorkerAgents: number
+    strategy: "focused" | "expansive"
+  }
 }
 
 export const modePolicies: Record<BraincodeMode, ModePolicy> = {
@@ -477,16 +483,52 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
     mode: "auto",
     description: "Plan by intent and route work to suitable agents and models.",
     requiresExplicitApprovalForRiskyActions: true,
+    routing: {
+      maxTodos: 6,
+      minParallelAgents: 1,
+      minWorkerAgents: 1,
+      strategy: "focused",
+    },
   },
   radical: {
     mode: "radical",
     description: "Use a more aggressive autonomous strategy while preserving tool permission boundaries.",
     requiresExplicitApprovalForRiskyActions: true,
+    routing: {
+      maxTodos: 8,
+      minParallelAgents: 4,
+      minWorkerAgents: 4,
+      strategy: "expansive",
+    },
   },
 }
 
 export function getModePolicy(mode: BraincodeMode): ModePolicy {
   return modePolicies[mode]
+}
+
+export type ModeRoutingLimits = {
+  configuredMaxParallelAgents: number
+  maxParallelAgents: number
+  maxWorkerAgents: number
+  maxTodos: number
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback
+}
+
+export function getModeRoutingLimits(mode: BraincodeMode, configuredMaxParallelAgents: unknown): ModeRoutingLimits {
+  const policy = getModePolicy(mode)
+  const configured = normalizePositiveInteger(configuredMaxParallelAgents, 1)
+  return {
+    configuredMaxParallelAgents: configured,
+    maxParallelAgents: Math.max(configured, policy.routing.minParallelAgents),
+    maxWorkerAgents: Math.max(configured, policy.routing.minWorkerAgents),
+    maxTodos: policy.routing.maxTodos,
+  }
 }
 
 export function selectBrain(brains: BrainModel[], brainId: string): BrainModel {

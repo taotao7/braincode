@@ -89,7 +89,7 @@ export const zh = {
   radical_title: "Radical 模式",
   radical_tagline: "激进并行，火力全开。",
   radical_body:
-    "工具并行调用。路由自由度最高，牺牲一点稳定换极限速度。适合熟悉项目结构的硬核开发者。",
+    "工具并行调用、更广的角色拆分、最多 8 个计划 todo，并在依赖允许时至少 4 路 support agent 并发。",
   radical_meta: "-> 谨慎使用",
   section_roles_eyebrow: "14 个角色 · 角色优先",
   section_roles_title: "Workflow engine，不是单模型 CLI。",
@@ -166,11 +166,11 @@ export const zh = {
 
   docs_modes_title: "4. 执行模式",
   docs_modes_intro:
-    "Braincode 有两种顶级执行模式。模式控制大脑在规划、并行化和升级到更强模型时的激进程度。",
+    "Braincode 有两种顶级执行模式。模式控制大脑在规划、并行化和升级到专家角色时的激进程度。",
   docs_modes_auto_body:
     "默认模式。工具串行执行。危险动作（文件编辑、Shell 命令）触发 Review Agent。适合日常稳定迭代。",
   docs_modes_radical_body:
-    "并行工具调用、更广的规划、更快启用强模型。安全仍经过工具权限系统，但牺牲一些稳定换速度。",
+    "并行工具调用、更广的规划、更早使用专家 support、最多 8 个 todo，并在依赖允许时至少 4 路 support agent 同时运行。安全仍经过工具权限系统。",
   docs_modes_switch_hint:
     "在 TUI 中用 /auto 或 /radical 切换，或在 settings.json 中设置 defaultMode。",
 

@@ -6,7 +6,7 @@ import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./m
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
@@ -196,7 +196,10 @@ export type RuntimePlan = {
     source: "router-brain" | "heuristic"
     confidence?: number
     reason?: string
+    configuredMaxParallelAgents?: number
     maxParallelAgents?: number
+    maxWorkerAgents?: number
+    maxTodos?: number
   }
   model: BraincodeModel
   policy: ModelPolicy
@@ -929,7 +932,7 @@ function isAgentRole(value: unknown): value is AgentRole {
   return value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
-function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, maxWorkers: number): RouterPlanDecision {
+function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">): RouterPlanDecision {
   const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
   const workersByRole = new Map<RoutedAgentRole, AgentRoutingPlan["workers"][number]>()
   if (Array.isArray(value.workers)) {
@@ -952,11 +955,11 @@ function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; tod
   if (!workers.some((worker) => worker.role === primaryRole)) {
     workers.unshift({ role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
   }
-  const cappedWorkers = workers.slice(0, Math.max(1, maxWorkers))
+  const cappedWorkers = workers.slice(0, Math.max(1, limits.maxWorkerAgents))
   if (!cappedWorkers.some((worker) => worker.role === primaryRole)) {
     cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, { role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
   }
-  const todoInputs = normalizeRouterTodos(value.todos, primaryRole)
+  const todoInputs = normalizeRouterTodos(value.todos, primaryRole, limits.maxTodos)
   const workerRoles = new Set(cappedWorkers.map((worker) => worker.role))
   const routedTodoInputs = todoInputs.map((todo) => workerRoles.has(todo.role) ? todo : { ...todo, role: primaryRole })
   const normalized = normalizeAgentRoutingPlan({
@@ -974,15 +977,17 @@ function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; tod
     todos: normalized.todos,
     dependencies: normalized.dependencies,
     requiresReview: fallback.requiresReview,
-    confidence: typeof value.confidence === "number" ? value.confidence : undefined,
+    confidence: typeof value.confidence === "number" && Number.isFinite(value.confidence)
+      ? Math.max(0, Math.min(1, value.confidence))
+      : undefined,
     reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
   }
 }
 
-function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole): AgentTodoItem[] {
+function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole, maxTodos: number): AgentTodoItem[] {
   if (!Array.isArray(value)) return []
   const todos: AgentTodoItem[] = []
-  for (const [index, item] of value.entries()) {
+  for (const [index, item] of value.slice(0, Math.max(1, maxTodos)).entries()) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
     const candidate = item as { id?: unknown; title?: unknown; task?: unknown; goal?: unknown; role?: unknown; reason?: unknown }
     const title = [candidate.title, candidate.task, candidate.goal].find((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
@@ -1024,7 +1029,33 @@ function extractJsonObject(text: string): unknown {
   return JSON.parse(candidate)
 }
 
-async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string): Promise<RouterPlanDecision | undefined> {
+function formatModeRoutingDirective(mode: BraincodeMode, policy: ModePolicy, limits: ModeRoutingLimits): string {
+  if (mode === "radical") {
+    return [
+      `Execution mode: radical (${policy.description})`,
+      `Runtime budgets: up to ${limits.maxWorkerAgents} routed workers, up to ${limits.maxParallelAgents} support agents in parallel when dependencies allow, and up to ${limits.maxTodos} todos.`,
+      "Radical routing rules:",
+      "- Decompose substantial work proactively. Prefer several independent specialist workers over a single broad worker when their outputs can reduce implementation uncertainty.",
+      "- Use librarian early for unfamiliar repositories, large edits, or tasks needing symbol/architecture mapping.",
+      "- Use oracle earlier for ambiguous architecture, cross-domain tradeoffs, deep debugging, or low-confidence routing.",
+      "- Add QA for implementation work that needs meaningful verification planning or regression coverage.",
+      "- Add security, DBA, DevOps, designer, frontend, or backend support whenever that domain materially affects correctness.",
+      "- Keep rush only for genuinely tiny chores; do not route multi-step coding work to rush just because it is quick to describe.",
+      "- Prefer independent todos that can run in parallel. Add dependencies only where a downstream agent needs a prior summary.",
+    ].join("\n")
+  }
+
+  return [
+    `Execution mode: auto (${policy.description})`,
+    `Runtime budgets: up to ${limits.maxWorkerAgents} routed workers, up to ${limits.maxParallelAgents} support agents in parallel when dependencies allow, and up to ${limits.maxTodos} todos.`,
+    "Auto routing rules:",
+    "- Keep the plan focused. Use support workers only when their independent result clearly improves the primary outcome.",
+    "- Prefer the smallest role set that can complete the task safely.",
+    "- Use rush for tiny chores and direct conversational replies.",
+  ].join("\n")
+}
+
+async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, modePolicy: ModePolicy, routingLimits: ModeRoutingLimits, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string): Promise<RouterPlanDecision | undefined> {
   const routerPolicy = brain.planner ?? brain.roles.routeBrain
   if (!routerPolicy?.modelId) return undefined
 
@@ -1042,6 +1073,8 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
     const roleEnum = routedAgentRoles.map((role) => `"${role}"`).join("|")
 
     await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
+
+${formatModeRoutingDirective(mode, modePolicy, routingLimits)}
 
 Allowed routed roles:
 ${formatRoutedAgentRoleCatalog()}
@@ -1063,12 +1096,12 @@ Output constraints:
 - "role" MUST be one of the enum values above. Do not invent role names. Do not include "coding", "fastReply", or "research" — they are deprecated.
 - Pick exactly one primary role in "role".
 - Include only workers that would materially improve the task.
-- Break the work into 1-6 concrete todos in execution order.
+- Break the work into 1-${routingLimits.maxTodos} concrete todos in execution order.
 - Assign every todo to the agent role that should complete it.
 - Use short lowercase todo ids with letters, numbers, dashes, or underscores.
 - Include dependencies only when one todo materially needs another todo's output.
 - Do not include routeBrain or pet as a worker role.
-- Prefer no more than ${brain.routing.maxParallelAgents} workers.
+- Prefer no more than ${routingLimits.maxWorkerAgents} workers.
 - "confidence" is a number in [0,1] reflecting how confident you are in the routing decision.
 
 User prompt:
@@ -1077,7 +1110,7 @@ ${prompt}`, images.length > 0 ? images : undefined)
     const text = extractAssistantText(runtime.agent.state.messages)
     const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }
 
-    const decision = normalizeRouterDecision(parsed, fallback, brain.routing.maxParallelAgents)
+    const decision = normalizeRouterDecision(parsed, fallback, routingLimits)
     debugLog("runtime", "router brain selected role", decision)
     return decision
   } catch (error) {
@@ -1091,9 +1124,11 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
+  const modePolicy = getModePolicy(settings.mode)
+  const routingLimits = getModeRoutingLimits(settings.mode, brain.routing?.maxParallelAgents)
   const heuristicPlan = planAgentRouting(prompt, brain)
   const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
-    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, heuristicPlan, images, home)
+    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, modePolicy, routingLimits, heuristicPlan, images, home)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
   const agentPlan = normalizeAgentRoutingPlan(forceRoles && forceRoles.length > 0
@@ -1132,11 +1167,15 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
       summary: `Planned ${runtimeTodoPlan.todos.length} todo${runtimeTodoPlan.todos.length === 1 ? "" : "s"} across ${workers.length} worker context${workers.length === 1 ? "" : "s"}.`,
     },
   })
-  const modePolicy = getModePolicy(settings.mode)
-  const maxParallelAgents = brain.routing?.maxParallelAgents
+  const routingBudget = {
+    configuredMaxParallelAgents: routingLimits.configuredMaxParallelAgents,
+    maxParallelAgents: routingLimits.maxParallelAgents,
+    maxWorkerAgents: routingLimits.maxWorkerAgents,
+    maxTodos: routingLimits.maxTodos,
+  }
   const routing = routerDecision
-    ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, maxParallelAgents }
-    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "dry-run/default heuristic route", maxParallelAgents }
+    ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, ...routingBudget }
+    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "dry-run/default heuristic route", ...routingBudget }
   debugLog("runtime", "planned runtime", { mode: settings.mode, brainId: brain.id, role, routingSource: routing.source, modelId: selection.configured.id, provider: selection.piModel.provider })
 
   return {

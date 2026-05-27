@@ -90,7 +90,7 @@ export const en = {
   radical_title: "Radical Mode",
   radical_tagline: "Aggressive and parallel. Full throttle.",
   radical_body:
-    "Parallel tool calls. Maximum routing freedom, trading some stability for raw speed. For hardcore devs who know the codebase.",
+    "Parallel tool calls, broader role decomposition, up to 8 planned todos, and at least 4-way support-agent concurrency when dependencies allow.",
   radical_meta: "-> use with caution",
   section_roles_eyebrow: "14 ROLES · ROLE-FIRST",
   section_roles_title: "Workflow engine, not a one-model CLI.",
@@ -167,11 +167,11 @@ export const en = {
 
   docs_modes_title: "4. Execution Modes",
   docs_modes_intro:
-    "Braincode has two top-level execution modes. The mode controls how aggressive the brain is allowed to be when planning, parallelizing, and escalating to stronger models.",
+    "Braincode has two top-level execution modes. The mode controls how aggressive the brain is allowed to be when planning, parallelizing, and escalating to specialist roles.",
   docs_modes_auto_body:
     "Default mode. Tools run serially. Risky actions (file edits, shell commands) trigger a Review Agent. Best for everyday stability.",
   docs_modes_radical_body:
-    "Parallel tool calls, broader planning, stronger models sooner. Safety still goes through the tool permission system, but it trades some stability for raw speed.",
+    "Parallel tool calls, broader planning, earlier specialist support, up to 8 todos, and at least 4 support agents in flight when dependencies allow. Safety still goes through the tool permission system.",
   docs_modes_switch_hint:
     "Switch modes from the TUI with /auto or /radical, or set defaultMode in settings.json.",
 
