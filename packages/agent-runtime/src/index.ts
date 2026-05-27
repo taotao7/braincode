@@ -674,9 +674,10 @@ function summarizeProviderPayload(payload: unknown): Record<string, unknown> {
     input: summarizeProviderMessageList(record.input),
     messages: summarizeProviderMessageList(record.messages),
     tools: Array.isArray(record.tools)
-      ? record.tools.map((tool) => summarizeProviderTool(tool)).slice(0, 30)
+      ? record.tools.map((tool) => summarizeProviderTool(tool)).slice(0, 12)
       : undefined,
     toolCount: Array.isArray(record.tools) ? record.tools.length : undefined,
+    toolsTruncated: Array.isArray(record.tools) ? record.tools.length > 12 : undefined,
     reasoning: record.reasoning,
     temperature: record.temperature,
     maxTokens: record.max_tokens ?? record.max_completion_tokens ?? record.max_output_tokens,
@@ -1465,9 +1466,17 @@ function requireAssistantText(messages: unknown[], debugContext: Record<string, 
     messages: messages.slice(-4).map((message) => summarizeAgentMessage(message)),
   })
 
-  const model = [debugContext.provider, debugContext.modelId].filter(Boolean).join("/")
+  const model = formatDebugModelLabel(debugContext)
   const api = debugContext.api ? ` via ${String(debugContext.api)}` : ""
   throw new Error(`Provider returned an empty assistant response${model ? ` from ${model}` : ""}${api}.`)
+}
+
+function formatDebugModelLabel(debugContext: Record<string, unknown>): string {
+  const modelId = typeof debugContext.modelId === "string" ? debugContext.modelId : ""
+  const provider = typeof debugContext.provider === "string" ? debugContext.provider : ""
+  if (!modelId) return provider
+  if (!provider || modelId.includes("/")) return modelId
+  return `${provider}/${modelId}`
 }
 
 function summarizeAgentMessage(message: unknown): Record<string, unknown> {
