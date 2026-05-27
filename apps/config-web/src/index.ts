@@ -565,7 +565,7 @@ export const configWebHtml = `<!doctype html>
       function syncCatalogVision() {
         const model = selectedCatalogModel()
         catalogVisionInput.disabled = !model
-        catalogVisionInput.checked = model?.supportsVision === true
+        catalogVisionInput.checked = model ? model.supportsVision !== false : false
       }
 
       function selectedCatalogModelFromForm() {
@@ -724,7 +724,7 @@ export const configWebHtml = `<!doctype html>
         }
         controls.apiKey.type = "password"
         controls.apiKey.placeholder = "Optional token saved for this provider"
-        const vision = makeCheckboxField(prefix + "vision", model.supportsVision === true)
+        const vision = makeCheckboxField(prefix + "vision", model.supportsVision !== false)
         controls.vision = vision.input
         const result = document.createElement("div")
         result.className = "test-result"
@@ -815,7 +815,7 @@ export const configWebHtml = `<!doctype html>
           header.className = "item-header"
           const text = document.createElement("div")
           text.className = "model-summary"
-          const visionTag = model.supportsVision === true ? " · " + t("visionBadge") : ""
+          const visionTag = model.supportsVision === false ? "" : " · " + t("visionBadge")
           text.textContent = model.name + visionTag + "\\n" + model.id + "\\n" + model.provider
           const button = document.createElement("button")
           button.type = "button"
