@@ -31,6 +31,20 @@ type TranscriptItem = {
 
 type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool"
 
+type TokenUsageSnapshot = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  total: number
+}
+
+type RunStatusState = {
+  startedAt: number
+  label: string
+  tokens: TokenUsageSnapshot
+}
+
 type QueuedTask = {
   id: string
   prompt: string
@@ -157,6 +171,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 
 const INPUT_MAX_LINES = 6
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
+const RUN_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 
 const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
@@ -198,12 +213,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [intentPlan, setIntentPlan] = useState<RuntimePlan | null>(null)
   const [intentPanel, setIntentPanel] = useState<IntentPanelState | null>(null)
   const [decisionPanel, setDecisionPanel] = useState<DecisionPanelState | null>(null)
+  const [runStatus, setRunStatus] = useState<RunStatusState | null>(null)
   const [statusFlash, setStatusFlash] = useState<string>("")
   const initialRan = useRef(false)
   const lastEscapeAt = useRef(0)
   const DOUBLE_ESC_MS = 500
   const queueRef = useRef<QueuedTask[]>([])
   const pendingDecisionResolve = useRef<((decision: ToolApprovalDecision) => void) | null>(null)
+  const usageByTurn = useRef<Map<string, TokenUsageSnapshot>>(new Map())
+  const activeUsageKey = useRef<string | null>(null)
+  const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage())
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion((value) => value + 1)
 
@@ -300,6 +319,36 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function flash(text: string) {
     setStatusFlash(text)
     setTimeout(() => setStatusFlash((current) => (current === text ? "" : current)), 2500)
+  }
+
+  function startRunStatus(label: string) {
+    usageByTurn.current = new Map()
+    activeUsageKey.current = null
+    runUsage.current = emptyTokenUsage()
+    setRunStatus({ startedAt: Date.now(), label, tokens: runUsage.current })
+  }
+
+  function updateRunStatus(label: string) {
+    setRunStatus((previous) => previous
+      ? { ...previous, label, tokens: runUsage.current }
+      : { startedAt: Date.now(), label, tokens: runUsage.current })
+  }
+
+  function stopRunStatus() {
+    activeUsageKey.current = null
+    setRunStatus(null)
+  }
+
+  function beginUsageTurn() {
+    activeUsageKey.current = crypto.randomUUID()
+  }
+
+  function registerTokenUsage(message: unknown, key = activeUsageKey.current) {
+    const usage = extractTokenUsage(message)
+    if (!usage || !key) return
+    usageByTurn.current.set(key, usage)
+    runUsage.current = sumTokenUsage(Array.from(usageByTurn.current.values()))
+    setRunStatus((previous) => previous ? { ...previous, tokens: runUsage.current } : previous)
   }
 
   function rememberIntentPlan(plan: RuntimePlan) {
@@ -766,6 +815,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       },
     ])
     applyDraftChange("")
+    startRunStatus(mode === "other"
+      ? `Summarizing session ${previousId.slice(0, 8)} for handoff...`
+      : "Summarizing this session for handoff...")
     setRunning(true)
 
     let summary = ""
@@ -778,9 +830,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         { id: crypto.randomUUID(), kind: "error", text: `Handoff summarization failed: ${humanizeRuntimeError(error)}` },
       ])
       setRunning(false)
+      stopRunStatus()
       return
     }
     setRunning(false)
+    stopRunStatus()
 
     if (mode === "other") {
       setItems((previous) => [
@@ -970,6 +1024,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       { id: statusId, kind: "status", text: "Planning Braincode route..." },
     ])
     applyDraftChange("")
+    startRunStatus("Planning Braincode route...")
     setRunning(true)
 
     try {
@@ -991,6 +1046,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ])
     } finally {
       setRunning(false)
+      stopRunStatus()
       void refreshSessionSuggestions()
     }
   }
@@ -1054,6 +1110,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       { id: statusId, kind: "status", text: "Routing through Braincode..." },
     ])
     applyDraftChange("")
+    startRunStatus("Routing through Braincode...")
     setRunning(true)
 
     const currentAssistant = { id: null as string | null, text: "" }
@@ -1068,6 +1125,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     const updateStatus = (next: string) => {
       updateItem(statusId, { text: next })
+      updateRunStatus(next)
     }
     const finalizeStreamingBuffers = () => {
       if (currentAssistant.id && currentAssistant.text.length === 0) {
@@ -1106,11 +1164,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           updateStatus("Agent starting…")
           return
         case "turn_start":
+          beginUsageTurn()
           finalizeStreamingBuffers()
           updateStatus("Turn in progress…")
           return
+        case "message_start":
+          if (!activeUsageKey.current) beginUsageTurn()
+          registerTokenUsage(event.message)
+          return
         case "message_update": {
           const update = event.assistantMessageEvent
+          registerTokenUsage("partial" in update ? update.partial : undefined)
+          if (update.type === "done") registerTokenUsage(update.message)
+          if (update.type === "error") registerTokenUsage(update.error)
           if (update.type === "text_delta") {
             const id = ensureAssistantItem()
             currentAssistant.text += update.delta
@@ -1130,6 +1196,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           }
           return
         }
+        case "message_end":
+          registerTokenUsage(event.message)
+          return
         case "tool_execution_start": {
           finalizeStreamingBuffers()
           const itemId = crypto.randomUUID()
@@ -1169,6 +1238,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           return
         }
         case "turn_end":
+          registerTokenUsage(event.message)
+          activeUsageKey.current = null
           finalizeStreamingBuffers()
           updateStatus("Turn complete · waiting for next step…")
           return
@@ -1264,6 +1335,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (report.skipped.length > 0) parts.push(`skipped: ${report.skipped.map((entry) => `${entry.name}(${entry.reason})`).join(", ")}`)
       const text = `MCP · ${parts.join(" · ")}`
       setItems((previous) => previous.map((item) => item.id === statusId ? { ...item, text } : item))
+      updateRunStatus(text)
     }
 
     const onToolApproval = async (request: ToolApprovalRequest, signal?: AbortSignal): Promise<ToolApprovalDecision> => {
@@ -1343,12 +1415,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onToolApproval, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
       rememberIntentPlan(result.plan)
       finalizeStreamingBuffers()
+      const tokenSummary = formatRunTokenSummary(runUsage.current)
       setItems((previous) => {
         const next = previous.filter((item) => item.id !== statusId)
         next.push({
           id: crypto.randomUUID(),
           kind: "status",
-          text: `${result.plan.brain.id} → ${result.plan.role} → ${result.plan.piModel.provider}/${result.plan.piModel.id}`,
+          text: `${result.plan.brain.id} → ${result.plan.role} → ${result.plan.piModel.provider}/${result.plan.piModel.id}${tokenSummary ? ` · ${tokenSummary}` : ""}`,
           plan: result.plan,
         })
         const trimmedSummary = (result.summary ?? "").trim()
@@ -1369,6 +1442,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ])
     } finally {
       setRunning(false)
+      stopRunStatus()
     }
     if (queueRef.current.length > 0) {
       void drainQueue()
@@ -1983,7 +2057,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       </Box>
       <Box borderStyle="single" borderColor={running ? "gray" : "green"} paddingX={1} flexDirection="column">
         {running ? (
-          <Text color="gray">… wait for the current run to finish</Text>
+          <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current }} />
         ) : (
           (() => {
             const innerWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
@@ -2217,6 +2291,27 @@ function TranscriptLine({ item }: { item: TranscriptItem }) {
     )
   }
   return <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+}
+
+function RuntimeStatusLine({ status }: { status: RunStatusState }) {
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 120)
+    return () => clearInterval(interval)
+  }, [])
+
+  const spinner = RUN_SPINNER_FRAMES[frame % RUN_SPINNER_FRAMES.length]
+  const label = truncate(status.label.replace(/\s+/g, " ").trim() || "Thinking…", 80)
+  const elapsed = formatElapsed(Date.now() - status.startedAt)
+  const tokens = formatRunStatusTokens(status.tokens)
+
+  return (
+    <Text>
+      <Text color="redBright" bold>{spinner} </Text>
+      <Text color="redBright">{label}</Text>
+      <Text color="gray"> ({elapsed}{tokens ? ` · ${tokens}` : " · tokens pending"})</Text>
+    </Text>
+  )
 }
 
 function labelFor(item: TranscriptItem): string {
@@ -2578,6 +2673,77 @@ function isLikelySessionId(token: string): boolean {
 function truncateForStatus(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim()
   return truncate(collapsed, 80)
+}
+
+function emptyTokenUsage(): TokenUsageSnapshot {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+}
+
+function extractTokenUsage(message: unknown): TokenUsageSnapshot | null {
+  if (!message || typeof message !== "object") return null
+  const usage = (message as { usage?: unknown }).usage
+  if (!usage || typeof usage !== "object") return null
+  const input = readUsageNumber(usage, ["input", "promptTokens", "prompt_tokens"])
+  const output = readUsageNumber(usage, ["output", "completionTokens", "completion_tokens"])
+  const cacheRead = readUsageNumber(usage, ["cacheRead", "cache_read", "cacheReadTokens", "cache_read_tokens"])
+  const cacheWrite = readUsageNumber(usage, ["cacheWrite", "cache_write", "cacheWriteTokens", "cache_write_tokens"])
+  const explicitTotal = readUsageNumber(usage, ["totalTokens", "total_tokens", "total"])
+  const total = explicitTotal || input + output + cacheRead + cacheWrite
+  if (total <= 0) return null
+  return { input, output, cacheRead, cacheWrite, total }
+}
+
+function readUsageNumber(usage: object, keys: string[]): number {
+  const record = usage as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value
+  }
+  return 0
+}
+
+function sumTokenUsage(usages: TokenUsageSnapshot[]): TokenUsageSnapshot {
+  return usages.reduce((total, usage) => ({
+    input: total.input + usage.input,
+    output: total.output + usage.output,
+    cacheRead: total.cacheRead + usage.cacheRead,
+    cacheWrite: total.cacheWrite + usage.cacheWrite,
+    total: total.total + usage.total,
+  }), emptyTokenUsage())
+}
+
+function formatRunStatusTokens(tokens: TokenUsageSnapshot): string {
+  if (tokens.total <= 0) return ""
+  const parts = [`↓ ${formatCompactTokenCount(tokens.total)} tokens`]
+  if (tokens.input > 0) parts.push(`in ${formatCompactTokenCount(tokens.input)}`)
+  if (tokens.output > 0) parts.push(`out ${formatCompactTokenCount(tokens.output)}`)
+  return parts.join(" · ")
+}
+
+function formatRunTokenSummary(tokens: TokenUsageSnapshot): string {
+  if (tokens.total <= 0) return ""
+  return `${formatCompactTokenCount(tokens.total)} tokens`
+}
+
+function formatCompactTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${trimTrailingZero((value / 1_000_000).toFixed(1))}m`
+  if (value >= 1_000) return `${trimTrailingZero((value / 1_000).toFixed(1))}k`
+  return `${Math.round(value)}`
+}
+
+function trimTrailingZero(value: string): string {
+  return value.endsWith(".0") ? value.slice(0, -2) : value
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const seconds = totalSeconds % 60
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  if (totalMinutes === 0) return `${seconds}s`
+  const minutes = totalMinutes % 60
+  const hours = Math.floor(totalMinutes / 60)
+  if (hours === 0) return `${minutes}m ${seconds}s`
+  return `${hours}h ${minutes}m ${seconds}s`
 }
 
 function classifyToolCall(toolName: string, args: unknown): ToolCategory {

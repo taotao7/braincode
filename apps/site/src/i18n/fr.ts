@@ -6,6 +6,8 @@ export const fr = {
   nav_modes: "Exécution",
   nav_install: "Installation",
   nav_github: "GitHub",
+  nav_docs: "Docs",
+  nav_home: "Accueil",
   release_label: "VERSION",
   hero_title_1: "Un harness,",
   hero_title_2: "pas un agent.",
@@ -96,4 +98,126 @@ export const fr = {
   footer_docs: "Docs",
   footer_github: "GitHub",
   footer_license: "Licence",
+
+  /* Page Docs */
+  docs_page_title: "Documentation",
+  docs_page_lead:
+    "Tout ce dont vous avez besoin pour installer, configurer et exécuter Braincode sur votre machine. Cette page est intégrée dans le même HTML que le site principal — lisible hors ligne.",
+  docs_toc_title: "Sur cette page",
+  docs_back_home: "← Retour à l'accueil",
+
+  docs_setup_title: "1. Installation",
+  docs_setup_intro:
+    "Braincode est fourni comme un CLI basé sur Bun. Choisissez l'une des trois méthodes ci-dessous. Le CLI lance un TUI Ink par défaut et expose un serveur de configuration local dans le navigateur.",
+  docs_setup_npm_title: "Installer via npm",
+  docs_setup_npm_body:
+    "Le paquet npm est la méthode recommandée. Il installe le binaire braincode dans votre répertoire global et fonctionne sur macOS, Linux et Windows (WSL).",
+  docs_setup_brew_title: "Installer via Homebrew",
+  docs_setup_brew_body:
+    "Homebrew installe un binaire Bun précompilé avec l'entrée braincode, vous n'avez pas besoin d'installer Bun vous-même.",
+  docs_setup_source_title: "Construire depuis les sources",
+  docs_setup_source_body:
+    "Clonez le dépôt, exécutez bun install, puis lancez braincode directement depuis le workspace. C'est le chemin utilisé par les contributeurs.",
+  docs_setup_first_run_title: "Première exécution",
+  docs_setup_first_run_body:
+    "Exécutez braincode dans un répertoire vide pour lancer le TUI, ou braincode config pour démarrer le serveur de configuration local (http://127.0.0.1:5181 par défaut).",
+
+  docs_home_title: "2. Le répertoire ~/.braincode/",
+  docs_home_intro:
+    "Toute la configuration utilisateur runtime vit dans ~/.braincode/. Le dépôt ne contient jamais vos secrets ; vous pouvez effacer ~/.braincode/ à tout moment et relancer braincode config pour recréer les valeurs par défaut.",
+  docs_home_files_title: "Fichiers et dossiers",
+  docs_home_settings_title: "settings.json",
+  docs_home_settings_body:
+    "Préférences utilisateur de haut niveau : id du Brain Model sélectionné, mode d'exécution par défaut (auto ou radical), thème TUI, drapeau de télémétrie.",
+  docs_home_auth_title: "auth.json",
+  docs_home_auth_body:
+    "Clés API fournisseur et tokens OAuth. Écrit avec des permissions restrictives (0600). Ne jamais commettre, journaliser, ou coller dans un prompt. Braincode les masque dans le TUI.",
+  docs_home_brains_title: "brains.json",
+  docs_home_brains_body:
+    "Vos Brain Models. Chaque entrée est une politique de routage : quel modèle prend le rôle planificateur, quel modèle prend chaque rôle spécialiste, chaîne de repli, règles d'escalade.",
+  docs_home_models_title: "models.json",
+  docs_home_models_body:
+    "Registre fournisseur/modèle : id fournisseur, id modèle, fenêtre de contexte, indices de coût, flags de capacité. brains.json y fait référence par id.",
+  docs_home_tools_title: "tools.json",
+  docs_home_tools_body:
+    "Carte de permissions pour les outils intégrés (read, write, edit, shell, search) et les outils MCP découverts depuis .mcp.json. Détermine quels outils nécessitent une approbation.",
+  docs_home_hooks_title: "hooks.json",
+  docs_home_hooks_body:
+    "Hooks de cycle de vie utilisateur. Les hooks de commande doivent porter trusted: true avant que Braincode ne les exécute.",
+  docs_home_sessions_title: "sessions/",
+  docs_home_sessions_body:
+    "Logs de session JSONL pour la reprise et l'audit. Chaque session contient aussi les packets de handoff de chaque exécution worker.",
+  docs_home_logs_title: "logs/ et cache/",
+  docs_home_logs_body:
+    "Logs runtime rotatifs et cache éphémère (résumés de compaction, résultats de sonde de modèle). Supprimables pour récupérer de l'espace disque.",
+
+  docs_brain_title: "3. Brain Models",
+  docs_brain_intro:
+    "Un Brain Model est une politique de routage, pas un LLM unique. Il mappe chaque rôle d'agent à une politique de modèle avec niveau de réflexion, chaîne de repli et seuils d'escalade. Le Brain Model sélectionné dicte comment chaque tâche est décomposée et routée.",
+  docs_brain_example_title: "Exemple brains.json",
+  docs_brain_roles_title: "Rôles intégrés",
+  docs_brain_roles_body:
+    "Braincode v0.2.0 est livré avec 14 emplacements de rôles. coding, fastReply, et research ont été supprimés et absorbés dans les spécialistes de domaine, rush, et librarian.",
+
+  docs_modes_title: "4. Modes d'exécution",
+  docs_modes_intro:
+    "Braincode a deux modes d'exécution de haut niveau. Le mode contrôle le degré d'agressivité autorisé du cerveau lors de la planification, la parallélisation et l'escalade vers des modèles plus puissants.",
+  docs_modes_auto_body:
+    "Mode par défaut. Outils en série. Les actions risquées (éditions de fichiers, commandes shell) déclenchent un Review Agent. Idéal pour la stabilité quotidienne.",
+  docs_modes_radical_body:
+    "Appels d'outils en parallèle, planification plus large, modèles plus puissants plus tôt. La sécurité passe toujours par le système de permissions, mais sacrifie un peu de stabilité pour la vitesse.",
+  docs_modes_switch_hint:
+    "Changez de mode depuis le TUI avec /auto ou /radical, ou définissez defaultMode dans settings.json.",
+
+  docs_mcp_title: "5. MCP — Model Context Protocol",
+  docs_mcp_intro:
+    "Braincode charge les déclarations de serveurs MCP de projet depuis .mcp.json à la racine du dépôt. MCP vous permet d'exposer des outils externes (bases de données, navigateurs, APIs internes) comme outils Braincode sans modifier le runtime central.",
+  docs_mcp_file_title: ".mcp.json",
+  docs_mcp_file_body:
+    "Déclarez chaque serveur MCP avec un nom, un transport (stdio ou http), commande/args ou url, et des variables d'environnement optionnelles. Ne mettez pas de secrets bruts ici — référencez-les par nom d'env. Braincode résout les valeurs d'environnement depuis votre shell ou ~/.braincode/auth.json.",
+  docs_mcp_security_title: "Modèle de sécurité",
+  docs_mcp_security_body:
+    "Les outils MCP héritent du système de permissions de Braincode. Chaque appel MCP porte une étiquette dans le TUI ([MCP] toolName) et les outils risqués (écritures, appels de type shell) demandent une approbation sauf s'ils sont explicitement sur la liste blanche dans tools.json.",
+
+  docs_skills_title: "6. Skills",
+  docs_skills_intro:
+    "Les Skills sont des documents Markdown locaux au projet qui enseignent à Braincode un workflow spécialisé. Ils se trouvent sous .agents/skill/<skill-id>/SKILL.md (ou .agents/skill/*.md au niveau supérieur) et sont chargés comme contexte de prompt quand le cerveau juge qu'ils sont pertinents.",
+  docs_skills_file_title: "Structure d'un Skill",
+  docs_skills_file_body:
+    "Un dossier skill contient SKILL.md (le prompt) plus tout document de référence. Le premier titre est le nom du skill. Le cerveau peut sélectionner un skill selon l'intention utilisateur — vous n'avez pas besoin de l'invoquer manuellement.",
+  docs_skills_use_title: "Quand écrire un Skill",
+  docs_skills_use_body:
+    "Écrivez un skill quand un workflow est répétitif, opinionné, et non évident depuis le seul codebase — par exemple : « Lancer la suite QA », « Déployer en staging », « Écrire un ADR ». Un skill par intention.",
+
+  docs_agents_title: "7. AGENTS.md",
+  docs_agents_intro:
+    "AGENTS.md à la racine du dépôt est un contexte projet durable. Braincode le lit dans l'agent principal et chaque worker. Utilisez-le pour les règles d'ingénierie, les conventions de code et les liens vers les docs plus profondes — pas pour des notes de tâches transitoires.",
+
+  docs_hooks_title: "8. Hooks",
+  docs_hooks_intro:
+    "Les Hooks sont des commandes ou scripts déclenchés à des points du cycle de vie (pre-tool, post-tool, on-session-end). Les hooks projet vivent dans .agents/hooks.json ; les hooks utilisateur dans ~/.braincode/hooks.json. Les hooks de commande exigent trusted: true ; Braincode refusera d'exécuter un hook de commande non fiable même s'il est déclaré.",
+
+  docs_config_ui_title: "9. Interface de configuration navigateur",
+  docs_config_ui_intro:
+    "Exécutez braincode config pour lancer le serveur de configuration local. Il se lie à 127.0.0.1 par défaut et sert l'application web de configuration. Les modifications passent par l'API typée et persistent dans ~/.braincode/ — l'application web n'écrit jamais directement le répertoire home.",
+
+  docs_cli_title: "10. Référence CLI",
+  docs_cli_intro:
+    "Le CLI braincode est intentionnellement minimal. La plupart du comportement produit se trouve dans les packages ; le CLI sert à les connecter et à héberger le TUI Ink.",
+  docs_cli_cmd_default: "Lancer le TUI interactif dans le répertoire courant.",
+  docs_cli_cmd_config: "Démarrer le serveur web de configuration local et afficher l'URL.",
+  docs_cli_cmd_run: "Exécuter un prompt non interactif unique et afficher le résultat.",
+  docs_cli_cmd_dry: "Prévisualiser le plan de routage du cerveau sans effectuer d'appels fournisseur.",
+  docs_cli_cmd_daemon: "(Planifié) exécuter Braincode comme service local longue durée.",
+
+  docs_troubleshoot_title: "11. Dépannage",
+  docs_troubleshoot_keys_title: "Clés API non détectées",
+  docs_troubleshoot_keys_body:
+    "Vérifiez les permissions du fichier ~/.braincode/auth.json (devrait être 0600). Utilisez braincode config pour ré-entrer la clé ; n'éditez pas le fichier manuellement sauf si vous connaissez le schéma.",
+  docs_troubleshoot_models_title: "Modèle non sélectionné",
+  docs_troubleshoot_models_body:
+    "Confirmez que l'id du modèle dans brains.json correspond à une entrée dans models.json. Exécutez braincode run --dry-run \"<task>\" pour voir le plan de routage sans consommer de tokens.",
+  docs_troubleshoot_reset_title: "Tout réinitialiser",
+  docs_troubleshoot_reset_body:
+    "Arrêtez tout processus braincode, supprimez ~/.braincode/, et relancez braincode config. L'état de votre dépôt n'est jamais affecté.",
 } as const;

@@ -6,6 +6,8 @@ export const zh = {
   nav_modes: "执行模式",
   nav_install: "安装",
   nav_github: "GitHub",
+  nav_docs: "文档",
+  nav_home: "首页",
   release_label: "版本",
   hero_title_1: "一套 harness，",
   hero_title_2: "不是单个 agent。",
@@ -95,4 +97,126 @@ export const zh = {
   footer_docs: "文档",
   footer_github: "GitHub",
   footer_license: "许可证",
+
+  /* 文档页 */
+  docs_page_title: "文档",
+  docs_page_lead:
+    "安装、配置和运行 Braincode 所需的一切。此页面和首页打包在同一个 HTML 里——完全离线可读。",
+  docs_toc_title: "本页目录",
+  docs_back_home: "← 返回首页",
+
+  docs_setup_title: "1. 安装",
+  docs_setup_intro:
+    "Braincode 以 Bun CLI 发布。从以下三种安装方式中选一种。CLI 默认启动 Ink 终端 UI，同时暴露一个本地浏览器配置服务器。",
+  docs_setup_npm_title: "通过 npm 安装",
+  docs_setup_npm_body:
+    "推荐使用 npm。安装 braincode 二进制到全局 bin 目录，支持 macOS、Linux 和 Windows (WSL)。",
+  docs_setup_brew_title: "通过 Homebrew 安装",
+  docs_setup_brew_body:
+    "Homebrew 安装预构建的 Bun 二进制及 braincode 入口，无需手动安装 Bun。",
+  docs_setup_source_title: "从源码构建",
+  docs_setup_source_body:
+    "克隆仓库，运行 bun install，然后直接从工作区运行 braincode。这是贡献者使用的方式。",
+  docs_setup_first_run_title: "首次运行",
+  docs_setup_first_run_body:
+    "在空目录运行 braincode 启动 TUI，或运行 braincode config 启动本地配置服务器（默认 http://127.0.0.1:5181）。",
+
+  docs_home_title: "2. ~/.braincode/ 主目录",
+  docs_home_intro:
+    "所有运行时用户配置存放在 ~/.braincode/。仓库不包含你的密钥；随时可以删除 ~/.braincode/，重新运行 braincode config 即可重建默认值。",
+  docs_home_files_title: "文件与目录",
+  docs_home_settings_title: "settings.json",
+  docs_home_settings_body:
+    "顶级用户偏好：选中的 Brain Model id、默认执行模式（auto 或 radical）、TUI 主题、遥测开关。",
+  docs_home_auth_title: "auth.json",
+  docs_home_auth_body:
+    "供应商 API 密钥和 OAuth token。写入时带限制权限（0600）。绝不提交、绝不日志、绝不贴进提示词。TUI 中密钥被遮蔽。",
+  docs_home_brains_title: "brains.json",
+  docs_home_brains_body:
+    "你的 Brain Models。每条是一个路由策略：哪个模型承担规划角色、哪个模型承担每个专家角色、回退链、升级规则。",
+  docs_home_models_title: "models.json",
+  docs_home_models_body:
+    "供应商/模型注册表：供应商 id、模型 id、上下文窗口、成本提示、能力标志。brains.json 通过 id 引用这些。",
+  docs_home_tools_title: "tools.json",
+  docs_home_tools_body:
+    "内置工具（read、write、edit、shell、search）和 .mcp.json 发现的 MCP 工具的权限映射。决定哪些工具需要审批。",
+  docs_home_hooks_title: "hooks.json",
+  docs_home_hooks_body:
+    "用户级生命周期钩子。命令钩子必须带 trusted: true 才会被执行。",
+  docs_home_sessions_title: "sessions/",
+  docs_home_sessions_body:
+    "JSONL 会话日志，用于恢复和审计。每个会话也包含每次 Worker 运行的 Handoff packets。",
+  docs_home_logs_title: "logs/ 和 cache/",
+  docs_home_logs_body:
+    "轮转运行日志和临时缓存（压缩摘要、模型探测结果）。删除可回收磁盘空间。",
+
+  docs_brain_title: "3. Brain Models",
+  docs_brain_intro:
+    "Brain Model 是路由策略，不是单个 LLM。它把每个 Agent 角色映射到一个模型策略，包括思考级别、回退链和升级阈值。选中的 Brain Model 决定每个任务如何拆解和路由。",
+  docs_brain_example_title: "brains.json 示例",
+  docs_brain_roles_title: "内置角色",
+  docs_brain_roles_body:
+    "Braincode v0.2.0 内置 14 个角色槽。coding、fastReply、research 已移除，分别合并进领域专家、rush 和 librarian。",
+
+  docs_modes_title: "4. 执行模式",
+  docs_modes_intro:
+    "Braincode 有两种顶级执行模式。模式控制大脑在规划、并行化和升级到更强模型时的激进程度。",
+  docs_modes_auto_body:
+    "默认模式。工具串行执行。危险动作（文件编辑、Shell 命令）触发 Review Agent。适合日常稳定迭代。",
+  docs_modes_radical_body:
+    "并行工具调用、更广的规划、更快启用强模型。安全仍经过工具权限系统，但牺牲一些稳定换速度。",
+  docs_modes_switch_hint:
+    "在 TUI 中用 /auto 或 /radical 切换，或在 settings.json 中设置 defaultMode。",
+
+  docs_mcp_title: "5. MCP — 模型上下文协议",
+  docs_mcp_intro:
+    "Braincode 从仓库根目录的 .mcp.json 加载项目 MCP 服务器声明。MCP 让你将外部工具（数据库、浏览器、内部 API）作为 Braincode 工具暴露，无需修改核心运行时。",
+  docs_mcp_file_title: ".mcp.json",
+  docs_mcp_file_body:
+    "声明每个 MCP 服务器：名称、传输方式（stdio 或 http）、命令/参数或 URL，以及可选环境变量。不要在这里放原始密钥——用环境变量名引用。Braincode 从你的 shell 或 ~/.braincode/auth.json 解析环境值。",
+  docs_mcp_security_title: "安全模型",
+  docs_mcp_security_body:
+    "MCP 工具继承 Braincode 的权限系统。每个 MCP 调用在 TUI 中带标签（[MCP] toolName），危险工具（写入、类 Shell 调用）除非在 tools.json 中明确白名单，否则提示审批。",
+
+  docs_skills_title: "6. Skills",
+  docs_skills_intro:
+    "Skills 是项目本地的 Markdown 文档，教 Braincode 一个专业化工作流。它们放在 .agents/skill/<skill-id>/SKILL.md（或顶级 .agents/skill/*.md），在大脑判断相关时作为提示上下文加载。",
+  docs_skills_file_title: "Skill 目录结构",
+  docs_skills_file_body:
+    "一个 skill 文件夹包含 SKILL.md（提示）加任何参考文档。第一个标题是 skill 名称。大脑可能根据用户意图自动选择 skill——你不需要手动调用。",
+  docs_skills_use_title: "何时写一个 Skill",
+  docs_skills_use_body:
+    "当一个工作流是重复的、有主见的、且从代码库本身不直观时，写一个 skill——例如：「运行 QA 套件」「部署到 staging」「写一个 ADR」。每个意图保持一个 skill。",
+
+  docs_agents_title: "7. AGENTS.md",
+  docs_agents_intro:
+    "仓库根目录的 AGENTS.md 是持久化项目上下文。Braincode 把它读入主 Agent 和每个 Worker。用它写工程规则、编码约定和深层文档链接——不要写临时任务笔记。",
+
+  docs_hooks_title: "8. Hooks",
+  docs_hooks_intro:
+    "Hooks 是在生命周期点（pre-tool、post-tool、on-session-end）触发的命令或脚本。项目钩子放在 .agents/hooks.json；用户钩子放在 ~/.braincode/hooks.json。命令钩子需要 trusted: true；Braincode 会拒绝运行未信任的命令钩子，即使它已被声明。",
+
+  docs_config_ui_title: "9. 浏览器配置 UI",
+  docs_config_ui_intro:
+    "运行 braincode config 启动本地配置服务器。默认绑定 127.0.0.1，提供配置 Web 应用。编辑通过类型化 API 流转并持久化到 ~/.braincode/——Web 应用不会直接写入主目录。",
+
+  docs_cli_title: "10. CLI 参考",
+  docs_cli_intro:
+    "braincode CLI 故意保持精简。大部分产品行为在 packages 中；CLI 的作用是把它们组装起来并托管 Ink TUI。",
+  docs_cli_cmd_default: "在当前目录启动交互式 TUI。",
+  docs_cli_cmd_config: "启动本地配置 Web 服务器并打印 URL。",
+  docs_cli_cmd_run: "执行单个非交互式提示并打印结果。",
+  docs_cli_cmd_dry: "预览大脑的路由计划，不发起任何供应商调用。",
+  docs_cli_cmd_daemon: "（计划中）将 Braincode 作为长期本地服务运行。",
+
+  docs_troubleshoot_title: "11. 故障排除",
+  docs_troubleshoot_keys_title: "API 密钥未被识别",
+  docs_troubleshoot_keys_body:
+    "检查 ~/.braincode/auth.json 文件权限（应为 0600）。用 braincode config 重新输入密钥；除非你了解 schema，不要手动编辑文件。",
+  docs_troubleshoot_models_title: "模型未被选中",
+  docs_troubleshoot_models_body:
+    "确认 brains.json 中的模型 id 与 models.json 中的条目匹配。运行 braincode run --dry-run \"<task>\" 查看路由计划，不消耗 token。",
+  docs_troubleshoot_reset_title: "重置一切",
+  docs_troubleshoot_reset_body:
+    "停止所有 braincode 进程，删除 ~/.braincode/，重新运行 braincode config。你的仓库状态不会被触碰。",
 } as const;
