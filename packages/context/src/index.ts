@@ -88,7 +88,7 @@ export function createBrainTaskContext(input: CreateBrainTaskContextInput): Brai
   }
 }
 
-export function createHandoffAgentMessage(handoff: HandoffPacket, messageId = crypto.randomUUID()): AgentMessage {
+export function createHandoffAgentMessage(handoff: HandoffPacket, messageId: string = crypto.randomUUID()): AgentMessage {
   return {
     id: messageId,
     parentId: handoff.task.parentId,

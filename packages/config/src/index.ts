@@ -1,7 +1,7 @@
 import { appendFile, chmod, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { agentRoleSystemPrompts } from "@braincode/brain";
+import { agentRoleSystemPrompts, type AgentRole } from "@braincode/brain";
 import {
   BRAINCODE_HOME_DIR_NAME,
   DEFAULT_CONFIG_HOST,
@@ -994,12 +994,13 @@ export async function readSessionContext(
       }
     } else if (record.type === "worker_end") {
       const result = objectField(record, "result");
+      const progress = result ? objectField(result, "progress") : undefined;
       entries.push({
         type: "worker",
         timestamp,
         phase: stringField(record, "phase"),
         role: stringField(record, "worker"),
-        status: workerSessionStatus(result?.status),
+        status: workerSessionStatus(result?.status ?? progress?.status),
         summary: result ? stringField(result, "summary") : undefined,
         attempt,
       });
@@ -1335,11 +1336,21 @@ export async function readBrains(
   return brains;
 }
 
-const legacySystemPromptPatterns = {
-  routeBrain: [/Prefer coding as the primary role/],
-  librarian: [/Own codebase understanding: map unfamiliar repositories/],
-  rush: [/Own odd jobs and quick one-off chores/],
-} as const;
+const legacySystemPromptPatterns: Partial<Record<AgentRole, readonly RegExp[]>> = {
+  routeBrain: [/Prefer coding as the primary role/, /choose only worker agents that materially improve the result/],
+  frontend: [/Own user-facing UI behavior: components, state, accessibility/],
+  backend: [/Own server-side behavior: APIs, services, validation/],
+  designer: [/Own UX quality: task flow, information architecture/],
+  dba: [/Own database safety and performance: schema design/],
+  devops: [/Own build and runtime operations: CI\/CD/],
+  security: [/Own security posture: authentication, authorization/],
+  qa: [/Own verification quality: test strategy/],
+  review: [/Own defect finding: correctness bugs/],
+  summarize: [/Own compact handoff: preserve the user goal/],
+  oracle: [/Own hard thinking: architecture decisions/],
+  librarian: [/Own codebase understanding: map unfamiliar repositories/, /Own codebase understanding AND fact finding/],
+  rush: [/Own odd jobs and quick one-off chores/, /Own quick one-off chores AND short conversational replies/],
+};
 
 function refreshLegacySystemPrompt(
   value: unknown,
@@ -1350,6 +1361,7 @@ function refreshLegacySystemPrompt(
   if (!record) return false;
   const systemPrompt = record.systemPrompt;
   if (typeof systemPrompt !== "string") return false;
+  if (systemPrompt === prompt) return false;
   if (!patterns.some((pattern) => pattern.test(systemPrompt))) return false;
   record.systemPrompt = prompt;
   return true;
@@ -1372,39 +1384,17 @@ function migrateBrains(document: BraincodeBrains): boolean {
       refreshLegacySystemPrompt(
         record.planner,
         agentRoleSystemPrompts.routeBrain,
-        legacySystemPromptPatterns.routeBrain,
+        legacySystemPromptPatterns.routeBrain ?? [],
       )
     ) {
       changed = true;
     }
     const roles = record.roles as Record<string, unknown> | undefined;
     if (roles && typeof roles === "object") {
-      if (
-        refreshLegacySystemPrompt(
-          roles.routeBrain,
-          agentRoleSystemPrompts.routeBrain,
-          legacySystemPromptPatterns.routeBrain,
-        )
-      ) {
-        changed = true;
-      }
-      if (
-        refreshLegacySystemPrompt(
-          roles.librarian,
-          agentRoleSystemPrompts.librarian,
-          legacySystemPromptPatterns.librarian,
-        )
-      ) {
-        changed = true;
-      }
-      if (
-        refreshLegacySystemPrompt(
-          roles.rush,
-          agentRoleSystemPrompts.rush,
-          legacySystemPromptPatterns.rush,
-        )
-      ) {
-        changed = true;
+      for (const [role, patterns] of Object.entries(legacySystemPromptPatterns) as Array<[AgentRole, readonly RegExp[]]>) {
+        if (refreshLegacySystemPrompt(roles[role], agentRoleSystemPrompts[role], patterns)) {
+          changed = true;
+        }
       }
       if (!roles.pet) {
         const fallback = (roles.summarize ?? roles.rush) as Record<string, unknown> | undefined;

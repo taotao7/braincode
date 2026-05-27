@@ -135,9 +135,9 @@ Routing has two inputs:
 - deterministic heuristics in `packages/brain`, used for dry-runs and fallback;
 - the configured `routeBrain`/`planner` model, used during real execution when credentials are available.
 
-Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned.
+Both paths normalize into an `AgentRoutingPlan` with one primary routed role, zero or more worker plans, a review requirement flag, and a short routing reason. Role definitions and built-in role prompts live with the Brain Model logic so the router, defaults, and runtime prompts stay aligned. The routeBrain prompt embeds the full role catalog, including non-routed internal roles, but that catalog describes role identity, capabilities, boundaries, and output contracts only. It must not encode a specific provider or execution engine choice; users bind execution engines to roles in configuration.
 
-Routing also produces a todo plan and dependency graph. Each todo has a stable id, title, assigned routed role, status, and optional summary. Dependency edges identify which todo must produce output before another todo can proceed. Worker plans carry the todo ids they own. During execution the runtime records `todo_plan` and `todo_update` session JSONL events, emits live todo updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. The TUI can show the current decomposition graph with `Ctrl+O` or `/intent`. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
+Routing also produces a todo plan and dependency graph. Each todo has a stable id, title, assigned routed role, status, and optional summary. Dependency edges identify which todo must produce output before another todo can proceed. Worker plans carry the todo ids they own and runtime worker plans carry stable child context ids. During execution the runtime records `context_plan`, `todo_plan`, `todo_update`, and `agent_message` session JSONL events, emits live todo and worker updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. Independent support workers run concurrently up to `brain.routing.maxParallelAgents`; dependent support workers wait until Brain has an upstream worker summary to pass along. The TUI can show the current decomposition graph with `Ctrl+O` or `/intent`. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
 
 Tool execution emits a separate, user-visible surface from normal assistant text. The TUI labels tool transcript rows by action class (`Web Search`, `Execute`, `Read`, `Write`, `MCP`, or generic `Tool`) and keeps tool start, streaming update, completion, failure, duration, arguments, and result summaries scannable. Risky tool categories can pause through the runtime's tool approval callback before Pi executes the call; the TUI presents those approval requests as checkable `Ask User` decisions and returns an approve/block result to the runtime. Tool approval honors `~/.braincode/tools.json`: tools enabled with `approvalPolicy: "allow"` in the Web UI are not prompted again.
 
@@ -148,6 +148,7 @@ Workers must not share full conversation history.
 ```text
 Brain orchestration context
   id: <brain-task-id>
+  -> RuntimePlan.context (Brain task id + child agent context ids)
   -> compact Brain-to-agent handoff packet
     -> isolated subagent task context
        id: <agent-task-id>
@@ -167,7 +168,7 @@ The ownership rule is:
 - Context crosses layers only through typed packets. Brain-to-agent handoff packets carry the subagent context id, parent id, goal, progress, constraints, references, and expected result. Agent-to-Brain result packets carry task id, parent id, progress, summary, artifacts, risks, and next questions.
 - Full transcripts, private reasoning, and unrelated tool output do not cross layers. If prior work is needed, Brain should reference or summarize the relevant part instead of copying an entire thread.
 
-Core packet types:
+Core packet and message types:
 
 - `ContextRef`
 - `BrainTaskContext`
@@ -176,7 +177,7 @@ Core packet types:
 - `WorkerResult`
 - `AgentMessage`
 
-The current runtime executes support workers from compact handoff prompts, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries, project facts, and thread references remain future extensions of the same packet boundary.
+The current runtime executes support workers from compact handoff prompts, records typed `AgentMessage` envelopes for handoffs and results, runs the primary role with only structured worker results as advisory context, and runs a review worker when Brain policy marks the task as risky. Richer context summaries, project facts, and thread references remain future extensions of the same packet boundary.
 
 Prompt references follow the same boundary. `@<path>` attaches project files or images to the root user request. `@@<session-id>` attaches a compact session context snapshot built from session JSONL records: user prompts, final summaries, worker summaries, and errors. It must not inline a full transcript or worker-private context; workers receive only the expanded root request plus their own handoff packet. When images are attached, Braincode passes the same image inputs to routeBrain, supporting role agents, the primary role, and review so frontend/design workers can inspect visual context instead of seeing only an attachment marker.
 

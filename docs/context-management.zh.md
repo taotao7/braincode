@@ -42,7 +42,7 @@ export type AgentTaskContext = {
 }
 ```
 
-- **Brain task** 就是这次 run。它持有用户目标、子任务 id 列表，以及 Brain 想保留的引用（精选的 file/thread/summary/artifact）。一次 run 只有一个。
+- **Brain task** 就是这次 run。它持有用户目标、子任务 id 列表，以及 Brain 想保留的引用（精选的 file/thread/summary/artifact）。一次 run 只有一个，存放在 `RuntimePlan.context`，并写入 `context_plan` session 记录。
 - **Agent task** 属于一次 worker 调用。它有自己的 id，`parentId` 指回 Brain task，记录角色、worker 自己的目标、自己的进度。Worker 看不到其他 worker 的 `AgentTaskContext`。
 
 稳定 id 不是装饰 —— 这是 session JSONL 把事件穿起来的方式，也是未来 resume / replay 功能能复原「谁跑了什么」的前提。
@@ -102,11 +102,14 @@ export type ContextRef = {
 
 1. **Prompt 展开** —— `expandPromptReferences` 把 `@<path>` 和 `@@<session-id>` 标记重写为内联段落，追加到 prompt 末尾。原 token 保留，方便模型引用。上限：单个文件 64 KB，单次会话快照 24 KB。
 2. **项目支持文件组装** —— `readProjectSupport` 收集 `AGENTS.md`、`.mcp.json` 元数据、`.agents/skill/*` 内容。`formatProjectSupportPromptSection` 用于 prompt 文本；`projectSupportContextRefs` 把它打包成 `ContextRef[]` 进 handoff packet。
-3. **Handoff 构造** —— `createWorkerHandoff` 给每个 worker 生成一个 `HandoffPacket`，新发一个 `task.id`，`parentId` 设为 Brain session id，`constraints` 填进隔离规则（见下），`expectedResult` 描述 worker 该返回的 JSON 形状。
-4. **Worker 运行** —— `runWorkerFromPlan` 为 worker 新建一个 Pi `Agent`。prompt 由 `buildSupportWorkerPrompt` 组装：项目支持段 + 原始用户请求 + handoff packet（JSON）+ 期望回复形状。Worker 没法访问编排器的 `Agent` 状态。
-5. **结果归一化** —— `normalizeWorkerResultText` 把 worker 的回复解析成 `WorkerResult`。如果回复是纯文本而不是 JSON，会包成一个 `completed` 状态、`summary` = 文本的 `WorkerResult`。这是故意做的容错：provider 漂移不应该弄垮编排。
-6. **主 prompt** —— `buildPrimaryPrompt` 给主 agent 的内容是：用户请求 + 格式化后的 worker 摘要列表（role、status、goal、progress、summary、risks、open questions）。**不** 给主 agent 任何 worker 的对话历史。
-7. **可选的 review** —— 如果 plan 要求 review，且主 agent 自身不是 review，`buildReviewPrompt` 会拉一个 review worker，给它主 agent 摘要、worker 结果、新的 handoff packet。
+3. **运行时 context 计划** —— `buildRuntimePlan` 创建一个 `BrainTaskContext`；真实执行时它的 id 就是 session id，同时给每个 `RuntimeWorkerPlan` 分配稳定的子 `contextId`。
+4. **Handoff 构造** —— `createWorkerHandoff` 给每个 worker 生成一个 `HandoffPacket`，使用 worker 计划里的 `contextId` 作为 `task.id`，`parentId` 设为 Brain session id，`constraints` 填进隔离规则（见下），`expectedResult` 描述 worker 该返回的 JSON 形状。
+5. **Worker 运行** —— `runWorkerFromPlan` 为 worker 新建一个 Pi `Agent`。prompt 由 `buildSupportWorkerPrompt` 组装：项目支持段 + 原始用户请求 + todo 依赖需要时由 Brain 提供的上游 worker 摘要 + handoff packet（JSON）+ 期望回复形状。Worker 没法访问编排器的 `Agent` 状态。
+6. **结果归一化** —— `normalizeWorkerResultText` 把 worker 的回复解析成 `WorkerResult`。如果回复是纯文本而不是 JSON，会包成一个 `completed` 状态、`summary` = 文本的 `WorkerResult`。这是故意做的容错：provider 漂移不应该弄垮编排。
+7. **通信记录** —— Brain 会把 handoff 和 result/error 信封记录成 `agent_message` 事件，后续 replay 或远程 worker 可以共用同一条消息流。
+8. **主 prompt** —— `buildPrimaryPrompt` 给主 agent 的内容是：用户请求 + 格式化后的 worker 摘要列表（role、status、goal、progress、summary、risks、open questions）。**不** 给主 agent 任何 worker 的对话历史。
+9. **Todo 更新** —— runtime 会在 primary / worker / review 的 owner 启动和结束时，把 todo 标为 running、completed、blocked 或 failed。
+10. **可选的 review** —— 如果 plan 要求 review，且主 agent 自身不是 review，`buildReviewPrompt` 会拉一个 review worker，给它主 agent 摘要、worker 结果、新的 handoff packet。
 
 每个 support handoff 中烧进去的约束清单（来自 `createWorkerHandoff`）：
 
@@ -139,6 +142,10 @@ Worker 不会单独拿到这些引用的副本。它们只看到展开后的根�
 | `run_start` | `executePromptFromConfig` | prompt、plan、项目支持摘要、尝试次数 |
 | `run_end` | 同上 | 最终摘要 + worker 结果 |
 | `run_error` | 同上 | 错误信息、是否重试 |
+| `context_plan` | 同上 | Brain task context id、子 agent context id、context refs |
+| `todo_plan` | 同上 | routing 产出的可勾选任务和依赖边 |
+| `todo_update` | 同上 / `runWorkerFromPlan` | primary 或 worker 拥有的 todo id 状态变化 |
+| `agent_message` | `runWorkerFromPlan` | Brain-agent 通信用的 typed handoff/result/error 信封 |
 | `worker_start` | `runWorkerFromPlan` | 阶段、角色、目标、handoff、模型、尝试次数 |
 | `worker_end` | 同上 | 已执行的 `WorkerResult` |
 | `worker_error` | 同上 | 错误、是否兜底 |

@@ -521,6 +521,8 @@ test("planRuntimeFromConfig loads settings, brain, and model without executing a
     expect(plan.role).toBe("rush")
     expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
     expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["rush", "pending"]])
+    expect(plan.context.layer).toBe("brain")
+    expect(plan.context.childContextIds).toEqual(plan.workers.map((worker) => worker.contextId))
     expect(plan.toolExecution).toBe("parallel")
     expect(plan.piModel.name).toBe("Claude Sonnet 4.5")
     expect(plan.routing.source).toBe("heuristic")
@@ -601,6 +603,8 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
     expect(plan.role).toBe("rush")
     expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["rush"])
     expect(plan.workers.map((worker) => worker.role)).toEqual(["rush", "review"])
+    expect(plan.context.childContextIds).toEqual(plan.workers.map((worker) => worker.contextId))
+    expect(new Set(plan.context.childContextIds).size).toBe(plan.workers.length)
     expect(plan.todos.map((todo) => todo.role)).toEqual(["rush", "review"])
     expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
       ["todo-01-rush", "todo-02-review"],

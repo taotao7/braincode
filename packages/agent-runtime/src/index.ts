@@ -1086,7 +1086,7 @@ ${prompt}`, images.length > 0 ? images : undefined)
   }
 }
 
-async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId = crypto.randomUUID()): Promise<RuntimePlan> {
+async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId: string = crypto.randomUUID()): Promise<RuntimePlan> {
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models

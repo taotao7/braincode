@@ -97,7 +97,7 @@ packages/
 
 ## Brain Model
 
-一个 **Brain Model** = 每个角色一份 `ModelPolicy` + 路由 / 上下文默认值。角色目录集中定义在 `packages/brain` 的 `agentRoleProfiles` + `agentRoleSystemPrompts` —— router 的提示词、默认值、运行时系统提示永远不会漂移。
+一个 **Brain Model** = 每个角色一份 `ModelPolicy` + 路由 / 上下文默认值。角色目录集中定义在 `packages/brain` 的 `agentRoleProfiles` + `agentRoleSystemPrompts` —— router 的提示词、默认值、运行时系统提示永远不会漂移。routeBrain 会看到完整角色目录，但目录只描述角色身份、能力边界和输出契约；具体模型由用户在配置里绑定。
 
 可被路由到的角色（worker 可以是这些），v0.2.0：
 `frontend · backend · designer · dba · devops · security · qa · review · summarize · oracle · librarian · rush`

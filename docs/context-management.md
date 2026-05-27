@@ -42,7 +42,7 @@ export type AgentTaskContext = {
 }
 ```
 
-- The **Brain task** is the run. It carries the user goal, the list of child task ids, and references to anything Brain wants to keep around (selected file/thread/summary/artifact refs). There is exactly one per run.
+- The **Brain task** is the run. It carries the user goal, the list of child task ids, and references to anything Brain wants to keep around (selected file/thread/summary/artifact refs). There is exactly one per run, stored on `RuntimePlan.context` and written as a `context_plan` session record.
 - An **Agent task** belongs to one worker invocation. It has its own id, a `parentId` back to the Brain task, the role, the per-worker goal, and its own progress. Workers never see another worker's `AgentTaskContext`.
 
 Stable ids are not cosmetic — they are how the session JSONL ties events together and how a future resume/replay feature will reconstruct who ran what.
@@ -102,12 +102,14 @@ The orchestrator is `executePromptFromConfig` in `packages/agent-runtime/src/ind
 
 1. **Prompt expansion** — `expandPromptReferences` rewrites `@<path>` and `@@<session-id>` markers into inlined sections appended to the prompt. The original tokens are kept so the model can refer to them. Limits: 64 KB per file, 24 KB per session snapshot.
 2. **Project support assembly** — `readProjectSupport` collects `AGENTS.md`, `.mcp.json` metadata, and `.agents/skill/*` content. `formatProjectSupportPromptSection` formats this for prompts; `projectSupportContextRefs` packs it as `ContextRef[]` for handoff packets.
-3. **Worker handoff construction** — `createWorkerHandoff` builds one `HandoffPacket` per worker, mints a fresh `task.id`, sets `parentId` to the Brain session id, fills `constraints` with the isolation rules (see below), and sets `expectedResult` to the JSON shape the worker should return.
-4. **Worker run** — `runWorkerFromPlan` creates a brand-new Pi `Agent` for the worker. Its prompt is composed by `buildSupportWorkerPrompt`: project support section + original user request + the handoff packet (as JSON) + the expected reply shape. The worker has no access to the orchestrator's `Agent` state.
-5. **Result normalization** — `normalizeWorkerResultText` parses the worker's reply into a `WorkerResult`. If the reply is plain text instead of JSON, it is wrapped into a completed `WorkerResult` with `summary` = the text. This is intentional resilience: provider drift should not break orchestration.
-6. **Primary prompt** — `buildPrimaryPrompt` gives the primary agent the user request plus a formatted list of worker summaries (role, status, goal, progress, summary, risks, open questions). It does *not* hand the primary any worker transcripts.
-7. **Todo updates** — the runtime marks the primary/worker/review todos as running, completed, blocked, or failed as each owner starts or finishes.
-8. **Optional review** — if the plan requires review and the primary isn't already the review role, `buildReviewPrompt` runs a review worker with the primary's summary, the worker results, and a fresh handoff packet.
+3. **Runtime context plan** — `buildRuntimePlan` creates one `BrainTaskContext` whose id is the session id during real execution, then assigns every `RuntimeWorkerPlan` a stable child `contextId`.
+4. **Worker handoff construction** — `createWorkerHandoff` builds one `HandoffPacket` per worker, uses the worker's planned `contextId` as `task.id`, sets `parentId` to the Brain session id, fills `constraints` with the isolation rules (see below), and sets `expectedResult` to the JSON shape the worker should return.
+5. **Worker run** — `runWorkerFromPlan` creates a brand-new Pi `Agent` for the worker. Its prompt is composed by `buildSupportWorkerPrompt`: project support section + original user request + optional Brain-supplied prior worker summaries for todo dependencies + the handoff packet (as JSON) + the expected reply shape. The worker has no access to the orchestrator's `Agent` state.
+6. **Result normalization** — `normalizeWorkerResultText` parses the worker's reply into a `WorkerResult`. If the reply is plain text instead of JSON, it is wrapped into a completed `WorkerResult` with `summary` = the text. This is intentional resilience: provider drift should not break orchestration.
+7. **Communication record** — Brain records `agent_message` events for the handoff and the result/error envelope so later replay or remote worker work has a canonical message stream.
+8. **Primary prompt** — `buildPrimaryPrompt` gives the primary agent the user request plus a formatted list of worker summaries (role, status, goal, progress, summary, risks, open questions). It does *not* hand the primary any worker transcripts.
+9. **Todo updates** — the runtime marks the primary/worker/review todos as running, completed, blocked, or failed as each owner starts or finishes.
+10. **Optional review** — if the plan requires review and the primary isn't already the review role, `buildReviewPrompt` runs a review worker with the primary's summary, the worker results, and a fresh handoff packet.
 
 The constraint list baked into every support handoff (from `createWorkerHandoff`) is:
 
@@ -140,8 +142,10 @@ If you add a new reference kind, follow the same compaction discipline: a snapsh
 | `run_start` | `executePromptFromConfig` | prompt, plan, project support summary, attempt number |
 | `run_end` | same | final summary + worker results |
 | `run_error` | same | error message, retry intent |
+| `context_plan` | same | Brain task context id, child agent context ids, and context refs |
 | `todo_plan` | same | the checkable tasks and dependency edges produced by routing |
 | `todo_update` | same / `runWorkerFromPlan` | status changes for todo ids owned by primary or worker roles |
+| `agent_message` | `runWorkerFromPlan` | typed handoff/result/error envelope for Brain-agent communication |
 | `worker_start` | `runWorkerFromPlan` | phase, role, goal, handoff, model, attempt |
 | `worker_end` | same | the executed `WorkerResult` |
 | `worker_error` | same | error, fallback intent |

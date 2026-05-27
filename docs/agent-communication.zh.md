@@ -57,7 +57,7 @@ export type AgentMessage = {
 }
 ```
 
-`AgentMessage` 是任何需要被寻址 / 路由的通信的 **外层信封**。当前的进程内编排器还没把每一步都序列化成 `AgentMessage` —— 它直接传 `HandoffPacket` / `WorkerResult` —— 但任何最终要跨进程的东西（未来的远程 worker、跨机部署、外部客户端）都应该把 payload 包成 `AgentMessage`，保持一个统一信封。
+`AgentMessage` 是任何需要被寻址 / 路由的通信的 **外层信封**。当前的进程内编排器仍然把 `HandoffPacket` / `WorkerResult` 直接传给本地函数，同时也会把 Brain -> agent 的 handoff 和 agent -> Brain 的结果记录成 `agent_message` JSONL 事件。任何最终要跨进程的东西（未来的远程 worker、跨机部署、外部客户端）都应该沿用同一个信封。
 
 `packages/context/src/index.ts` —— 今天实际使用的具体 payload：
 
@@ -98,6 +98,9 @@ WorkerResult = AgentToBrainContextTransfer & {
 plan 出一个 worker  -->  createWorkerHandoff(worker, parentId, phase)
                             |
                             v
+append agent_message(handoff)
+                            |
+                            v
 SubagentStart hook       （可能追加上下文，可能阻断）
                             |
                             v
@@ -116,6 +119,7 @@ SubagentStop hook（成功时）
                             |
                             v
 appendSessionRecord("worker_end", ...)
+append agent_message(result)
 emit WorkerLifecycleEvent("worker_end", "completed")
 return ExecutedWorkerResult
 ```
@@ -133,8 +137,9 @@ return ExecutedWorkerResult
 2. expandPromptReferences：解析 @<file>、@@<session> -> 拼到 prompt 末尾。
 3. buildRuntimePlan：先启发式路由，再用 router brain 细化。
    - --team 强制角色时，覆盖 plan.workers。
-4. runSupportWorkers（并发，受 brain.routing.maxParallelAgents 限制）：
+4. runSupportWorkers（独立 worker 并发，受 brain.routing.maxParallelAgents 限制）：
    - 每个 worker 独立。worker 之间互不可见。
+   - 如果 todo 依赖要求一个 support 结果先出来，Brain 会先跑上游 worker，并只把归一化后的摘要交给依赖它的 worker。
 5. 通过 McpToolHub 连 MCP server -> 把工具注入主 agent。
 6. 逐个尝试主角色的模型候选：
      buildPrimaryPrompt(原始用户请求, workerResults, primaryRole, projectSupport)
@@ -156,7 +161,7 @@ return ExecutedWorkerResult
 
 两层路由协作产出一个 `AgentRoutingPlan`：
 
-- `packages/brain` 里的 `planAgentRouting(prompt, brain)` —— 确定性的正则 / 关键词分类器。用于 dry-run、兜底、以及作为 router brain 细化时的基线。
+- `packages/brain` 里的 `planAgentRouting(prompt, brain)` —— 确定性的安全兜底。用于 dry-run、provider 失败、以及作为 router brain 细化时的基线。
 - `agent-runtime` 里的 `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` —— 用一个严格 JSON 风格的 prompt 调 brain 的 `planner` / `roles.routeBrain` 模型，解析结果。`normalizeRouterDecision` 会用启发式兜底和 `brain.routing.maxParallelAgents` 校验和裁剪选择。
 
 两条路径最终归一为同一种形状：
@@ -170,16 +175,15 @@ type AgentRoutingPlan = {
 }
 ```
 
-`buildRuntimePlan` 然后用 `createRuntimeWorkerPlan` 把每个 `AgentWorkerPlan` 展开成 `RuntimeWorkerPlan`，绑定模型和 Pi model 摘要。最终的 `RuntimePlan` 才是后续编排消费的东西。
+`buildRuntimePlan` 然后用 `createRuntimeWorkerPlan` 把每个 `AgentWorkerPlan` 展开成 `RuntimeWorkerPlan`，给每个 worker 分配稳定的 agent context id，解析该角色配置的执行策略，并生成运行时 todo 列表和依赖图。最终的 `RuntimePlan` 才是后续编排消费的东西。
 
 加新角色时：
 
 1. 把它加入 `routedAgentRoles` 和 `BrainModel.roles`。
 2. 在 `agentRoleProfiles` 加 profile，在 `agentRoleSystemPrompts` 加系统提示。
-3. 在 `roleSignals` 加一个 `RoleSignal`，启发式路径才能选中。
-4. 更新 `routePromptWithBrain` 的 router-brain prompt enum（JSON schema 里内联了允许的角色 —— 保持同步）。
+3. 确保 router-brain prompt 使用 `routedAgentRoles` 生成允许角色枚举。
 
-router-brain prompt enum 是唯一字符串重复的地方；其它都是同一个 TypeScript union。
+router prompt 会嵌入来自 `agentRoleProfiles` 的完整角色目录。目录只描述角色身份、能力、边界和输出契约；用户配置决定每个角色绑定到哪个执行引擎。
 
 ## 发给 worker 的 prompt
 

@@ -97,7 +97,7 @@ Modes are a Braincode-level concept; they bias the orchestration, not the model.
 
 ## Brain Model
 
-A **Brain Model** is a `ModelPolicy` per role plus routing/context defaults. The role catalog is defined in one place — `agentRoleProfiles` + `agentRoleSystemPrompts` in `packages/brain` — so the router prompt, defaults, and runtime system prompts never drift apart.
+A **Brain Model** is a `ModelPolicy` per role plus routing/context defaults. The role catalog is defined in one place — `agentRoleProfiles` + `agentRoleSystemPrompts` in `packages/brain` — so the router prompt, defaults, and runtime system prompts never drift apart. routeBrain sees the full role catalog, but the catalog only describes role identity, capability boundaries, and output contracts; the user binds concrete models in configuration.
 
 Routed roles (the ones a worker can be), v0.2.0:
 `frontend · backend · designer · dba · devops · security · qa · review · summarize · oracle · librarian · rush`

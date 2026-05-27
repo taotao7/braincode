@@ -369,7 +369,7 @@ export const configWebHtml = `<!doctype html>
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
           roleLabel_routeBrain: "Router Brain", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
-          roleDesc_routeBrain: "Main router: reads user intent and decides which role handles the task. Best for the strongest reasoning model, default GPT-5.5 xhigh.",
+          roleDesc_routeBrain: "Main router: reads user intent, creates the todo/dependency plan, and decides which role handles the task.",
           roleDesc_frontend: "Frontend: UI, browser behavior, CSS, components, accessibility, and user-facing polish. There is no generic coding role — code work is split by domain.",
           roleDesc_backend: "Backend: APIs, services, validation, persistence boundaries, and server behavior.",
           roleDesc_designer: "Designer: UX flows, visual direction, interaction design, and implementable product layout guidance.",
@@ -377,12 +377,12 @@ export const configWebHtml = `<!doctype html>
           roleDesc_devops: "DevOps: CI/CD, deployment, containers, infrastructure, observability, and operations.",
           roleDesc_security: "Security: auth, permissions, secrets, vulnerabilities, threat models, and secure defaults.",
           roleDesc_qa: "QA: focused tests, edge cases, regression checks, reproducible bugs, and quality strategy.",
-          roleDesc_review: "Audit and review: handles code review, risk auditing, and regression hunting. Best for rigorous reasoning and long-context models.",
-          roleDesc_summarize: "Summary and handoff: compresses context, generates handoffs, and consolidates results. Best for cheap, fast models.",
-          roleDesc_oracle: "Deep reasoning: handles complex architecture, hard bugs, and major decisions. Best for the strongest reasoning model, usually xhigh.",
-          roleDesc_librarian: "Codebase comprehension and fact finding: reads repos, locates symbols, gathers references and external facts. Absorbs what used to be a separate research role. Best for long-context, code-savvy models.",
-          roleDesc_rush: "Rush: small one-off chores AND short conversational replies. Absorbs what used to be a separate fast-reply role. Best for fast, cheap models that just get the chore done.",
-          roleDesc_pet: "BrainPet status reporter: watches the live agent run and produces short progress lines for the TUI pet panel. Read-only, never routes work. Best for the fastest, cheapest model."
+          roleDesc_review: "Audit and review: handles code review, risk auditing, and regression hunting.",
+          roleDesc_summarize: "Summary and handoff: compresses context, generates handoffs, and consolidates results.",
+          roleDesc_oracle: "Deep reasoning: handles complex architecture, hard bugs, and major decisions.",
+          roleDesc_librarian: "Codebase comprehension and fact finding: reads repos, locates symbols, gathers references and external facts. Absorbs what used to be a separate research role.",
+          roleDesc_rush: "Rush: small one-off chores AND short conversational replies. Absorbs what used to be a separate fast-reply role.",
+          roleDesc_pet: "BrainPet status reporter: watches the live agent run and produces short progress lines for the TUI pet panel. Read-only, never routes work."
         },
         zh: {
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
@@ -394,7 +394,7 @@ export const configWebHtml = `<!doctype html>
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
           roleLabel_routeBrain: "路由大脑", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
-          roleDesc_routeBrain: "主控路由：先读用户意图，决定交给哪个角色处理。适合最强推理模型，默认 GPT-5.5 xhigh。",
+          roleDesc_routeBrain: "主控路由：读取用户意图，生成 todo / 依赖计划，并决定交给哪个角色处理。",
           roleDesc_frontend: "前端：负责 UI、浏览器行为、CSS、组件、可访问性和用户侧打磨。已经没有通用的 coding 角色，代码工作按领域细分。",
           roleDesc_backend: "后端：负责 API、服务、校验、持久化边界和服务端行为。",
           roleDesc_designer: "设计师：负责 UX 流程、视觉方向、交互设计和可落地的产品布局建议。",
@@ -402,12 +402,12 @@ export const configWebHtml = `<!doctype html>
           roleDesc_devops: "DevOps：负责 CI/CD、部署、容器、基础设施、可观测性和运维。",
           roleDesc_security: "安全：负责认证、权限、密钥、漏洞、威胁建模和安全默认值。",
           roleDesc_qa: "QA：负责测试计划、边界场景、回归检查、可复现 bug 和质量策略。",
-          roleDesc_review: "审查检查：负责 code review、风险审计、找回归。适合严谨推理和长上下文模型。",
-          roleDesc_summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。适合便宜快速模型。",
-          roleDesc_oracle: "深度推理：负责复杂架构、疑难 bug、重大决策。适合最强推理模型，通常 xhigh。",
-          roleDesc_librarian: "代码库理解 + 信息检索：读仓库、定位符号、查资料、整理事实。已合并了原来的 research 角色。适合长上下文和代码理解强的模型。",
-          roleDesc_rush: "打杂：各种杂事、一次性任务，以及简单的对话回复。已合并了原来的 fastReply 角色。适合便宜快速的模型，干完就走不啰嗦。",
-          roleDesc_pet: "BrainPet 状态报告：观察当前 agent 的运行情况，给 TUI 右侧 pet 面板生成简短进度文字。只读，不参与路由。选最快最便宜的模型即可。"
+          roleDesc_review: "审查检查：负责 code review、风险审计、找回归。",
+          roleDesc_summarize: "总结交接：负责压缩上下文、生成 handoff、整理结果。",
+          roleDesc_oracle: "深度推理：负责复杂架构、疑难 bug、重大决策。",
+          roleDesc_librarian: "代码库理解 + 信息检索：读仓库、定位符号、查资料、整理事实。已合并了原来的 research 角色。",
+          roleDesc_rush: "打杂：各种杂事、一次性任务，以及简单的对话回复。已合并了原来的 fastReply 角色。",
+          roleDesc_pet: "BrainPet 状态报告：观察当前 agent 的运行情况，给 TUI 右侧 pet 面板生成简短进度文字。只读，不参与路由。"
         }
       }
 

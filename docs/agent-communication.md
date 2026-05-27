@@ -57,7 +57,7 @@ export type AgentMessage = {
 }
 ```
 
-`AgentMessage` is the **outer envelope** for any communication that needs to be addressed/routed. The current in-process orchestrator does not yet serialize through `AgentMessage` for every step — it passes `HandoffPacket` / `WorkerResult` directly — but anything that eventually crosses a process boundary (a future remote worker runtime, a multi-machine setup, an external client) should wrap its payload in `AgentMessage` so we keep one canonical envelope.
+`AgentMessage` is the **outer envelope** for any communication that needs to be addressed/routed. The current in-process orchestrator still passes `HandoffPacket` / `WorkerResult` directly to local functions, and it also records Brain-to-agent handoffs plus agent-to-Brain results as `agent_message` JSONL events. Anything that eventually crosses a process boundary (a future remote worker runtime, a multi-machine setup, an external client) should use the same envelope.
 
 `packages/context/src/index.ts` — the concrete payloads used today:
 
@@ -98,6 +98,9 @@ Mapping the two:
 plan a worker  -->  createWorkerHandoff(worker, parentId, phase)
                        |
                        v
+append agent_message(handoff)
+                       |
+                       v
 SubagentStart hook  --(may add context, may block)
                        |
                        v
@@ -116,6 +119,7 @@ SubagentStop hook (on success)
                        |
                        v
 appendSessionRecord("worker_end", ...)
+append agent_message(result)
 emit WorkerLifecycleEvent("worker_end", "completed")
 return ExecutedWorkerResult
 ```
@@ -133,8 +137,9 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
 2. expandPromptReferences:   resolve @<file>, @@<session>  -> appended sections.
 3. buildRuntimePlan:         heuristic routing, then router-brain refinement.
    - When --team forced roles are supplied, plan.workers is overridden.
-4. runSupportWorkers (parallel, capped by brain.routing.maxParallelAgents):
+4. runSupportWorkers (parallel when independent, capped by brain.routing.maxParallelAgents):
    - Each worker is independent. No worker sees another's handoff or transcript.
+   - If todo dependencies require one support result before another, Brain runs the upstream worker first and supplies only its normalized summary to the dependent worker.
 5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
 6. Try each model candidate for the primary role:
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
@@ -156,7 +161,7 @@ Notes worth internalizing before changing this code:
 
 Two routers cooperate to produce an `AgentRoutingPlan`:
 
-- `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic regex/keyword classifier. Used for dry-runs, fallback, and as the baseline the router brain refines.
+- `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for dry-runs, provider failures, and the baseline the router brain refines.
 - `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `agent-runtime` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
 
 The two paths normalize into the same shape:
@@ -172,16 +177,15 @@ type AgentRoutingPlan = {
 }
 ```
 
-`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan` by resolving its model + Pi model summary via `createRuntimeWorkerPlan`. It also builds the runtime todo list and dependency graph, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
+`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
 If you add a new role:
 
 1. Add it to `routedAgentRoles` and to `BrainModel.roles`.
 2. Add a profile in `agentRoleProfiles` and a system prompt in `agentRoleSystemPrompts`.
-3. Add a `RoleSignal` to `roleSignals` so the heuristic path can pick it.
-4. Update the router-brain prompt enum in `routePromptWithBrain` (the JSON schema lists allowed roles inline — keep it in sync).
+3. Make sure the new role appears in the router-brain prompt by using `routedAgentRoles` as the generated enum source.
 
-The router-brain prompt enum is the only string-duplicated place; the rest is one TypeScript union.
+The router prompt includes the full role catalog from `agentRoleProfiles`. It describes role identity, capabilities, boundaries, and output contracts only; user configuration decides which execution engine each role uses.
 
 ## Prompts sent to a worker
 

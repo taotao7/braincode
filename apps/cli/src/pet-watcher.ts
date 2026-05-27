@@ -7,7 +7,7 @@ export type PetWatcherSnapshotItem = {
   text: string
   toolName?: string
   toolStatus?: "running" | "ok" | "failed"
-  workerStatus?: "running" | "completed" | "failed"
+  workerStatus?: "running" | "completed" | "blocked" | "failed"
 }
 
 export type PetWatcherInput = {

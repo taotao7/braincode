@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -74,9 +74,14 @@ test("routedAgentRoles contains exactly the 12 routed roles (no coding/fastReply
 
 test("agent role prompts cover every routed role and the router", () => {
   expect(agentRoleSystemPrompts.routeBrain).toContain("intelligent routing")
+  expect(agentRoleSystemPrompts.routeBrain).toContain("Agent role catalog")
   for (const role of routedAgentRoles) {
     expect(agentRoleSystemPrompts[role]).toContain("Braincode")
+    expect(agentRoleSystemPrompts.routeBrain).toContain(`- ${role} `)
   }
+  expect(agentRoleSystemPrompts.routeBrain).toContain("- routeBrain ")
+  expect(agentRoleSystemPrompts.routeBrain).toContain("- pet ")
+  expect(agentRoleSystemPrompts.routeBrain).not.toMatch(/\b(GPT|Claude|Gemini|modelId|provider)\b/i)
 })
 
 test("formatRoutedAgentRoleCatalog lists each routed role exactly once", () => {
@@ -88,6 +93,14 @@ test("formatRoutedAgentRoleCatalog lists each routed role exactly once", () => {
   expect(catalog).not.toMatch(/^- coding /m)
   expect(catalog).not.toMatch(/^- fastReply /m)
   expect(catalog).not.toMatch(/^- research /m)
+  expect(catalog).not.toContain("modelId")
+})
+
+test("formatAgentRoleCatalog can include internal non-routed roles for routeBrain context", () => {
+  const internalCatalog = formatAgentRoleCatalog({ includeInternal: true })
+  expect(internalCatalog).toContain("- routeBrain ")
+  expect(internalCatalog).toContain("- pet ")
+  expect(internalCatalog).toContain("Boundaries:")
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {
