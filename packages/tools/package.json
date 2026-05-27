@@ -7,5 +7,9 @@
   },
   "scripts": {
     "check": "bunx tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.75.5",
+    "typebox": "1.1.38"
   }
 }

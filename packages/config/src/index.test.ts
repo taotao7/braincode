@@ -84,16 +84,31 @@ test("readHookSources discovers user and project hook config", async () => {
   expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(false)
 })
 
-test("default tool configuration enables safe read tools only", async () => {
+test("default tool configuration enables local coding tools with approval for writes and execution", async () => {
   const home = await makeTempHome()
   const tools = await readTools(home)
 
-  expect(tools.tools.map((tool) => tool.name)).toEqual(["read_file", "search_files", "edit_file", "shell"])
+  expect(tools.tools.map((tool) => tool.name)).toEqual([
+    "list_files",
+    "read_file",
+    "search_files",
+    "edit_file",
+    "apply_patch",
+    "shell",
+    "git_diff",
+    "get_changed_files",
+    "run_script",
+  ])
+  expect(tools.tools.find((tool) => tool.name === "list_files")?.enabled).toBe(true)
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(true)
   expect(tools.tools.find((tool) => tool.name === "search_files")?.enabled).toBe(true)
-  expect(tools.tools.find((tool) => tool.name === "edit_file")?.enabled).toBe(false)
-  expect(tools.tools.find((tool) => tool.name === "edit_file")?.approvalPolicy).toBe("allow")
+  expect(tools.tools.find((tool) => tool.name === "edit_file")?.enabled).toBe(true)
+  expect(tools.tools.find((tool) => tool.name === "edit_file")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(tools.tools.find((tool) => tool.name === "apply_patch")?.approvalPolicy).toBe("confirm-dangerous")
   expect(tools.tools.find((tool) => tool.name === "shell")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(tools.tools.find((tool) => tool.name === "git_diff")?.approvalPolicy).toBe("allow")
+  expect(tools.tools.find((tool) => tool.name === "get_changed_files")?.approvalPolicy).toBe("allow")
+  expect(tools.tools.find((tool) => tool.name === "run_script")?.approvalPolicy).toBe("confirm-dangerous")
 })
 
 test("legacy tool approval fields migrate to approval policies", async () => {
@@ -165,7 +180,7 @@ test("non-secret config documents can be read and written from an explicit home"
   await expect(readModels(home)).resolves.toEqual({ models: [{ id: "fast" }] })
   const tools = await readTools(home)
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
-  expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(false)
+  expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(true)
 })
 
 test("readModels migrates legacy OpenAI chat completions API ids", async () => {
@@ -305,6 +320,15 @@ test("readSessionContext returns compact session records", async () => {
     summary: "found relevant prior work",
   }, home)
   await appendSessionRecord("context-session", {
+    type: "check_summary",
+    status: "failed",
+    results: [
+      { name: "check", status: "passed", exitCode: 0, durationMs: 12 },
+      { name: "test", status: "failed", exitCode: 1, durationMs: 34 },
+    ],
+    attempt: 1,
+  }, home)
+  await appendSessionRecord("context-session", {
     type: "run_end",
     summary: "implemented feature",
     attempt: 1,
@@ -315,7 +339,8 @@ test("readSessionContext returns compact session records", async () => {
   expect(context?.sessionId).toBe("context-session")
   expect(context?.prompt).toBe("implement feature")
   expect(context?.summary).toBe("implemented feature")
-  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "run"])
+  expect(context?.entries.map((entry) => entry.type)).toEqual(["worker", "todo", "check", "run"])
   expect(context?.entries.find((entry) => entry.type === "todo")?.status).toBe("completed")
+  expect(context?.entries.find((entry) => entry.type === "check")?.status).toBe("failed")
   expect(context?.entries.find((entry) => entry.type === "run")?.role).toBe("frontend")
 })

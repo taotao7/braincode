@@ -239,7 +239,7 @@ This package should stay dependency-light.
 
 ### `packages/tools`
 
-Owns tool definitions and permissions. Today this package defines built-in tool metadata, defaults, and approval configuration. First-party local tool execution is the next implementation target; MCP tools are already bridged through `packages/agent-runtime`.
+Owns tool definitions, permissions, and first-party local coding tool implementations. MCP tools are bridged through `packages/agent-runtime`.
 
 Responsibilities:
 
@@ -260,7 +260,7 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 
 The project is no longer in a "framework skeleton" phase. The first versions of runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, and approval UI are in place.
 
-The current product gap is turning that orchestration into a reliable coding patch engine:
+The current product gap is finishing the transition from orchestration to a reliable coding patch engine:
 
 ```text
 local tools
@@ -275,10 +275,11 @@ local tools
 
 Near-term work should prioritize:
 
-- First-party local coding tools that work without MCP setup.
-- Patch ledger records for tool calls, snapshots, changed files, diffs, checks, and review decisions.
-- Diff/check-based review input and a typed review decision.
+- Expanding the first-party local coding tools beyond the initial read/search/edit/patch/shell/git/script set as real usage demands.
+- Richer patch ledger records for tool calls, snapshots, and review decisions. Minimal changed-file/diff-stat `patch_summary` records and package-script `check_summary` records are in place.
+- A stronger diff/check-based review gate with typed review decisions.
 - Path-aware and command-aware permission policy.
+- Configurable check selection, timeouts, and command policy for project-specific verification.
 - Router-plan UX that clearly distinguishes heuristic dry-runs from routeBrain execution plans.
 - Benchmarks and demo cases that prove the orchestration improves real coding outcomes.
 
@@ -339,6 +340,8 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Done: review worker execution for risky tasks.
 - Done: user confirmation flows for risky tool calls in the TUI.
-- Active: read/search/edit/shell/apply-patch/git/check tools as first-party local implementations.
-- Active: patch ledger and diff/check artifact pipeline.
+- Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
+- Done: minimal patch ledger record with changed files and git diff stats.
+- Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
+- Active: richer tool-call/snapshot/review ledger records.
 - Active: granular permission rules for paths, commands, critical files, and review requirements.

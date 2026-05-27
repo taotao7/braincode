@@ -70,14 +70,16 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
 - Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
+- First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, git diffs, changed-file inspection, and package scripts.
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
+- Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
+- Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, append `check_summary`, and pass patch/check artifacts to review workers.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 
 ## In Progress
 
-- First-party local coding tools for zero-config file reads, search, edits, patch application, shell commands, git diff, and changed-file inspection.
-- Patch ledger records for tool calls, file snapshots, changed files, diff stats, check results, patch summaries, and review decisions.
-- Check runner integration for test, typecheck, lint, and project scripts.
+- Richer patch ledger records for tool calls, file snapshots, and review decisions.
+- Configurable check selection, timeouts, and command policy for project-specific verification.
 - Diff/check-based review gate that reviews patch artifacts instead of primary-agent prose.
 - Path-aware, command-aware, and risk-aware permission policy beyond tool-level approval.
 - Router-plan UX so `/plan` can show actual `routeBrain` decisions or clearly label heuristic previews.
@@ -85,7 +87,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Roadmap
 
-- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch records, and approval-aware write/execute flows.
+- **v0.3 Local Tools & Patch Ledger**: built-in coding tools, changed-file detection, git diff summaries, session patch/check records, and approval-aware write/execute flows. First local tool wiring, `patch_summary`, and `check_summary` records are in place; richer tool-call/snapshot/review ledger records remain.
 - **v0.4 Review Gate v2**: review input based on user task, plan, changed files, diff, checks, worker summaries, and risk files; review output as `approved`, `changes_requested`, or `blocked`.
 - **v0.5 Permission Policy v2**: project-root read policy, path rules, critical-file review requirements, dangerous-command deny rules, and configurable safe command allowlists.
 - **v0.6 Router Plan UX**: `/plan --router`, routing source labels, confidence/reason display, and clearer TUI intent views.

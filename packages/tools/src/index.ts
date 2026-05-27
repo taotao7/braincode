@@ -23,6 +23,14 @@ export type ToolConfigDocument = {
 
 export const builtInToolDefinitions: ToolDefinition[] = [
   {
+    name: "list_files",
+    description: "List project files inside the current project workspace.",
+    permissions: ["read"],
+    risk: "low",
+    defaultEnabled: true,
+    approvalPolicy: "allow",
+  },
+  {
     name: "read_file",
     description: "Read files inside the current project workspace.",
     permissions: ["read"],
@@ -43,15 +51,47 @@ export const builtInToolDefinitions: ToolDefinition[] = [
     description: "Modify files in the current project workspace.",
     permissions: ["write"],
     risk: "medium",
-    defaultEnabled: false,
-    approvalPolicy: "allow",
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
+  },
+  {
+    name: "apply_patch",
+    description: "Apply unified diffs to files in the current project workspace.",
+    permissions: ["write"],
+    risk: "medium",
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
   },
   {
     name: "shell",
     description: "Run shell commands in the current project workspace.",
     permissions: ["execute"],
     risk: "high",
-    defaultEnabled: false,
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
+  },
+  {
+    name: "git_diff",
+    description: "Inspect git diffs in the current project workspace.",
+    permissions: ["read"],
+    risk: "low",
+    defaultEnabled: true,
+    approvalPolicy: "allow",
+  },
+  {
+    name: "get_changed_files",
+    description: "Inspect changed files in the current project workspace.",
+    permissions: ["read"],
+    risk: "low",
+    defaultEnabled: true,
+    approvalPolicy: "allow",
+  },
+  {
+    name: "run_script",
+    description: "Run package scripts in the current project workspace.",
+    permissions: ["execute"],
+    risk: "high",
+    defaultEnabled: true,
     approvalPolicy: "confirm-dangerous",
   },
 ]
@@ -65,6 +105,8 @@ export function createDefaultToolConfiguration(): ToolConfigDocument {
     })),
   }
 }
+
+export { createLocalCodingTools, localCodingToolNames, type LocalCodingToolName, type LocalCodingToolOptions, type LocalToolMode } from "./local"
 
 export function normalizeToolConfiguration(document: ToolConfigDocument): ToolConfigDocument {
   const configuredByName = new Map(document.tools.map((tool) => [tool.name, tool]))

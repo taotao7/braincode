@@ -7,12 +7,13 @@ export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, normalizeAgentRoutingPlan, planAgentRouting, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog } from "@braincode/shared"
+import { createLocalCodingTools } from "@braincode/tools"
 
 export type AgentRunRequest = {
   prompt: string
@@ -58,6 +59,70 @@ export type AgentRunResult = {
   plan: RuntimePlan
   workerResults: ExecutedWorkerResult[]
   mcp?: McpHubConnectReport
+  patch?: PatchSummary
+  checks?: PatchCheckSummary
+}
+
+export type PatchFileChange = {
+  path: string
+  status: string
+}
+
+export type PatchBaseline = {
+  changedFiles: PatchFileChange[]
+}
+
+export type PatchSummary = {
+  changedFiles: PatchFileChange[]
+  preExistingChangedFiles: PatchFileChange[]
+  diffStats: {
+    filesChanged: number
+    insertions: number
+    deletions: number
+    untrackedFiles: number
+    raw: string
+    unstagedRaw: string
+    stagedRaw: string
+  }
+}
+
+export type PatchCheckStatus = "passed" | "failed" | "skipped"
+
+export type PatchCheckResult = {
+  name: string
+  command: string
+  args: string[]
+  status: Exclude<PatchCheckStatus, "skipped">
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  durationMs: number
+  stdout: string
+  stderr: string
+  timedOut: boolean
+}
+
+export type PatchCheckSummary = {
+  status: PatchCheckStatus
+  reason?: string
+  results: PatchCheckResult[]
+}
+
+export type PatchCheckOptions = {
+  scripts?: string[]
+  timeoutMs?: number
+  maxOutputBytes?: number
+}
+
+export type PatchDiffSnapshot = {
+  stat: string
+  diff: string
+  truncated: boolean
+}
+
+export type PatchReviewArtifacts = {
+  patch?: PatchSummary
+  checks?: PatchCheckSummary
+  diff?: PatchDiffSnapshot
 }
 
 export type RuntimeModelSelection = {
@@ -503,8 +568,8 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     },
     getApiKey: options.getApiKey,
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
-    beforeToolCall: options.onToolApproval
-      ? async (context, signal) => {
+    beforeToolCall: async (context, signal) => {
+      if (options.onToolApproval) {
         const decision = await options.onToolApproval?.({
           toolCallId: context.toolCall.id,
           toolName: context.toolCall.name,
@@ -515,7 +580,11 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
         }
         return undefined
       }
-      : undefined,
+      if (toolCallRequiresApproval(context.toolCall.name, context.args)) {
+        return { block: true, reason: `Tool approval callback is required for risky tool call: ${context.toolCall.name}` }
+      }
+      return undefined
+    },
   })
 
   if (options.onEvent) {
@@ -530,6 +599,303 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       piModel,
     },
   }
+}
+
+function toolCallRequiresApproval(toolName: string, args: unknown): boolean {
+  const name = toolName.toLowerCase()
+  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)) return true
+  if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return true
+  const serialized = safeStringify(args).toLowerCase()
+  return /\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from|truncate\s+table|npm\s+publish|bun\s+publish)\b/.test(serialized)
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? ""
+  } catch {
+    return String(value)
+  }
+}
+
+const DEFAULT_CHECK_TIMEOUT_MS = 180_000
+const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
+const MAX_REVIEW_DIFF_CHARS = 60_000
+const CHECK_SCRIPT_PRIORITY = ["check", "typecheck", "lint", "test"] as const
+
+export async function collectPatchBaseline(projectRoot: string): Promise<PatchBaseline | undefined> {
+  const status = await runGitCommand(projectRoot, ["status", "--short"])
+  if (status.exitCode !== 0) return undefined
+  return { changedFiles: parsePatchStatus(status.stdout) }
+}
+
+export async function collectPatchSummary(projectRoot: string, baseline?: PatchBaseline): Promise<PatchSummary | undefined> {
+  const status = await runGitCommand(projectRoot, ["status", "--short"])
+  if (status.exitCode !== 0) return undefined
+  const currentChangedFiles = parsePatchStatus(status.stdout)
+  const shortstat = await runGitCommand(projectRoot, ["diff", "--shortstat"])
+  const stagedShortstat = await runGitCommand(projectRoot, ["diff", "--cached", "--shortstat"])
+  const baselineKeys = new Set((baseline?.changedFiles ?? []).map(patchStatusKey))
+  const changedFiles = baseline
+    ? currentChangedFiles.filter((change) => !baselineKeys.has(patchStatusKey(change)))
+    : currentChangedFiles
+  const preExistingChangedFiles = baseline
+    ? currentChangedFiles.filter((change) => baselineKeys.has(patchStatusKey(change)))
+    : []
+  const unstagedRaw = shortstat.exitCode === 0 ? shortstat.stdout.trim() : ""
+  const stagedRaw = stagedShortstat.exitCode === 0 ? stagedShortstat.stdout.trim() : ""
+  const untrackedFiles = currentChangedFiles.filter((change) => change.status === "??").length
+  const diffStats = combineGitShortstats(unstagedRaw, stagedRaw, untrackedFiles)
+  return {
+    changedFiles,
+    preExistingChangedFiles,
+    diffStats,
+  }
+}
+
+function hasPatchActivity(summary: PatchSummary | undefined): summary is PatchSummary {
+  if (!summary) return false
+  if (summary.changedFiles.length > 0) return true
+  if (summary.preExistingChangedFiles.length > 0) return false
+  return summary.diffStats.filesChanged > 0 || summary.diffStats.insertions > 0 || summary.diffStats.deletions > 0 || summary.diffStats.untrackedFiles > 0
+}
+
+export async function runPatchChecks(projectRoot: string, options: PatchCheckOptions = {}): Promise<PatchCheckSummary> {
+  const packageScripts = await readPackageScripts(projectRoot)
+  if (!packageScripts) {
+    return { status: "skipped", reason: "package.json not found or has no scripts", results: [] }
+  }
+
+  const scripts = normalizeCheckScripts(options.scripts?.length ? options.scripts : selectDefaultCheckScripts(packageScripts))
+  if (scripts.length === 0) {
+    return { status: "skipped", reason: "no check, typecheck, lint, or test script found", results: [] }
+  }
+
+  const results: PatchCheckResult[] = []
+  for (const script of scripts) {
+    if (!Object.prototype.hasOwnProperty.call(packageScripts, script)) {
+      results.push({
+        name: script,
+        command: "bun",
+        args: ["run", script],
+        status: "failed",
+        exitCode: null,
+        signal: null,
+        durationMs: 0,
+        stdout: "",
+        stderr: `package.json script not found: ${script}`,
+        timedOut: false,
+      })
+      continue
+    }
+    results.push(await runBunScriptCheck(projectRoot, script, {
+      timeoutMs: options.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+      maxOutputBytes: options.maxOutputBytes ?? DEFAULT_CHECK_OUTPUT_BYTES,
+    }))
+  }
+
+  return {
+    status: results.every((result) => result.status === "passed") ? "passed" : "failed",
+    results,
+  }
+}
+
+async function collectPatchDiffSnapshot(projectRoot: string, maxChars = MAX_REVIEW_DIFF_CHARS): Promise<PatchDiffSnapshot | undefined> {
+  const unstagedStat = await runGitCommand(projectRoot, ["diff", "--stat"])
+  const stagedStat = await runGitCommand(projectRoot, ["diff", "--cached", "--stat"])
+  const unstagedDiff = await runGitCommand(projectRoot, ["diff", "--no-ext-diff"])
+  const stagedDiff = await runGitCommand(projectRoot, ["diff", "--cached", "--no-ext-diff"])
+  if ([unstagedStat, stagedStat, unstagedDiff, stagedDiff].some((result) => result.exitCode !== 0)) return undefined
+
+  const stat = [
+    unstagedStat.stdout.trim(),
+    stagedStat.stdout.trim() ? `staged:\n${stagedStat.stdout.trim()}` : "",
+  ].filter(Boolean).join("\n")
+  const rawDiff = [
+    unstagedDiff.stdout.trim(),
+    stagedDiff.stdout.trim() ? `# Staged diff\n${stagedDiff.stdout.trim()}` : "",
+  ].filter(Boolean).join("\n\n")
+  const clipped = clipText(rawDiff, maxChars)
+  return { stat, diff: clipped.text, truncated: clipped.truncated }
+}
+
+function clipText(text: string, limit: number): { text: string; truncated: boolean } {
+  if (text.length <= limit) return { text, truncated: false }
+  return { text: `${text.slice(0, limit)}\n...[truncated ${text.length - limit} chars]`, truncated: true }
+}
+
+async function readPackageScripts(projectRoot: string): Promise<Record<string, string> | undefined> {
+  const file = Bun.file(resolvePath(projectRoot, "package.json"))
+  if (!(await file.exists())) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await file.text())
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const scripts = (parsed as Record<string, unknown>).scripts
+  if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) return undefined
+  const output: Record<string, string> = {}
+  for (const [name, command] of Object.entries(scripts)) {
+    if (typeof command === "string") output[name] = command
+  }
+  return Object.keys(output).length > 0 ? output : undefined
+}
+
+function selectDefaultCheckScripts(scripts: Record<string, string>): string[] {
+  return CHECK_SCRIPT_PRIORITY.filter((script) => Object.prototype.hasOwnProperty.call(scripts, script))
+}
+
+function normalizeCheckScripts(scripts: readonly string[] | undefined): string[] {
+  const seen = new Set<string>()
+  const output: string[] = []
+  for (const script of scripts ?? []) {
+    const trimmed = script.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    output.push(trimmed)
+  }
+  return output
+}
+
+async function runBunScriptCheck(
+  cwd: string,
+  script: string,
+  options: { timeoutMs: number; maxOutputBytes: number },
+): Promise<PatchCheckResult> {
+  const startedAt = Date.now()
+  return await new Promise((resolve) => {
+    const command = "bun"
+    const args = ["run", script]
+    let settled = false
+    let child
+    try {
+      child = spawn(command, args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      resolve({
+        name: script,
+        command,
+        args,
+        status: "failed",
+        exitCode: null,
+        signal: null,
+        durationMs: Date.now() - startedAt,
+        stdout: "",
+        stderr: message,
+        timedOut: false,
+      })
+      return
+    }
+
+    let stdout = Buffer.alloc(0)
+    let stderr = Buffer.alloc(0)
+    let timedOut = false
+    const append = (current: Buffer, chunk: Buffer) => {
+      const next = Buffer.concat([current, chunk])
+      return next.byteLength > options.maxOutputBytes ? next.subarray(next.byteLength - options.maxOutputBytes) : next
+    }
+    const finish = (result: Omit<PatchCheckResult, "durationMs">) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ ...result, durationMs: Date.now() - startedAt })
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { child.kill("SIGTERM") } catch { /* ignore */ }
+    }, options.timeoutMs)
+
+    child.stdout?.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk) })
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk) })
+    child.on("error", (error) => {
+      finish({
+        name: script,
+        command,
+        args,
+        status: "failed",
+        exitCode: null,
+        signal: null,
+        stdout: stdout.toString("utf8"),
+        stderr: error.message,
+        timedOut,
+      })
+    })
+    child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      finish({
+        name: script,
+        command,
+        args,
+        status: exitCode === 0 && !timedOut ? "passed" : "failed",
+        exitCode,
+        signal,
+        stdout: stdout.toString("utf8"),
+        stderr: stderr.toString("utf8"),
+        timedOut,
+      })
+    })
+  })
+}
+
+async function runGitCommand(cwd: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  return await new Promise((resolve) => {
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk) })
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
+    child.on("error", (error) => resolve({ exitCode: 127, stdout, stderr: error.message }))
+    child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }))
+  })
+}
+
+function parsePatchStatus(stdout: string): PatchFileChange[] {
+  return stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const status = line.slice(0, 2).trim() || "?"
+      const rawPath = line.slice(3).trim()
+      const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1) ?? rawPath : rawPath
+      return { path, status }
+    })
+}
+
+function patchStatusKey(change: PatchFileChange): string {
+  return `${change.status}\0${change.path}`
+}
+
+function combineGitShortstats(unstagedRaw: string, stagedRaw: string, untrackedFiles: number): PatchSummary["diffStats"] {
+  const unstaged = parseGitShortstat(unstagedRaw)
+  const staged = parseGitShortstat(stagedRaw)
+  const raw = [
+    unstagedRaw,
+    stagedRaw ? `staged: ${stagedRaw}` : "",
+    untrackedFiles > 0 ? `${untrackedFiles} untracked file${untrackedFiles === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" | ")
+  return {
+    filesChanged: unstaged.filesChanged + staged.filesChanged + untrackedFiles,
+    insertions: unstaged.insertions + staged.insertions,
+    deletions: unstaged.deletions + staged.deletions,
+    untrackedFiles,
+    raw,
+    unstagedRaw,
+    stagedRaw,
+  }
+}
+
+function parseGitShortstat(raw: string): Pick<PatchSummary["diffStats"], "filesChanged" | "insertions" | "deletions"> {
+  const filesChanged = Number(raw.match(/(\d+)\s+files?\s+changed/)?.[1] ?? 0)
+  const insertions = Number(raw.match(/(\d+)\s+insertions?\(\+\)/)?.[1] ?? 0)
+  const deletions = Number(raw.match(/(\d+)\s+deletions?\(-\)/)?.[1] ?? 0)
+  return { filesChanged, insertions, deletions }
 }
 
 function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolicy): ModelPolicy["thinkingLevel"] {
@@ -925,8 +1291,16 @@ ${formatWorkerResults(workerResults)}
 Complete the request as the primary ${primaryRole} agent. Treat worker results as advisory context, resolve conflicts explicitly, and produce the final user-facing result.`
 }
 
-function buildReviewPrompt(originalPrompt: string, primarySummary: string, workerResults: ExecutedWorkerResult[], handoff: HandoffPacket, projectSupport?: ProjectSupport): string {
+function buildReviewPrompt(
+  originalPrompt: string,
+  primarySummary: string,
+  workerResults: ExecutedWorkerResult[],
+  handoff: HandoffPacket,
+  projectSupport?: ProjectSupport,
+  artifacts?: PatchReviewArtifacts,
+): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
+  const patchArtifacts = formatPatchReviewArtifacts(artifacts)
   return `Review this Braincode run as an isolated review agent.
 
 ${supportContext}
@@ -939,11 +1313,42 @@ ${primarySummary}
 Supporting worker results:
 ${workerResults.length > 0 ? formatWorkerResults(workerResults) : "No supporting worker results."}
 
+Patch artifacts:
+${patchArtifacts}
+
 Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
 Return only JSON in this shape:
 {"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+}
+
+function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
+  if (!artifacts?.patch && !artifacts?.checks && !artifacts?.diff) return "No patch artifacts were collected."
+  const sections: string[] = []
+  if (artifacts.patch) {
+    const changed = artifacts.patch.changedFiles.length > 0
+      ? artifacts.patch.changedFiles.map((change) => `- ${change.status} ${change.path}`).join("\n")
+      : "(no new changed files)"
+    const preExisting = artifacts.patch.preExistingChangedFiles.length > 0
+      ? `\nPre-existing changed files:\n${artifacts.patch.preExistingChangedFiles.map((change) => `- ${change.status} ${change.path}`).join("\n")}`
+      : ""
+    sections.push(`Changed files:\n${changed}${preExisting}\nDiff stats: ${artifacts.patch.diffStats.raw || "no textual diff stats"}`)
+  }
+  if (artifacts.checks) {
+    const lines = artifacts.checks.results.map((result) => {
+      const output = [
+        result.stdout.trim() ? `stdout: ${clipContextText(result.stdout.trim(), 1200)}` : "",
+        result.stderr.trim() ? `stderr: ${clipContextText(result.stderr.trim(), 1200)}` : "",
+      ].filter(Boolean).join("\n  ")
+      return `- ${result.name}: ${result.status} (exit ${result.exitCode ?? "n/a"}, ${result.durationMs}ms)${output ? `\n  ${output}` : ""}`
+    })
+    sections.push(`Checks: ${artifacts.checks.status}${artifacts.checks.reason ? ` (${artifacts.checks.reason})` : ""}\n${lines.length > 0 ? lines.join("\n") : "(no checks ran)"}`)
+  }
+  if (artifacts.diff) {
+    sections.push(`Git diff stat:\n${artifacts.diff.stat || "(no diff stat)"}\n\nGit diff${artifacts.diff.truncated ? " (truncated)" : ""}:\n${artifacts.diff.diff || "(no textual diff)"}`)
+  }
+  return sections.join("\n\n")
 }
 
 function formatWorkerResults(workerResults: ExecutedWorkerResult[]): string {
@@ -1315,6 +1720,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const reviewWorker = plan.workers.find((worker) => worker.role === "review")
   const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
     updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
+  const patchBaseline = await collectPatchBaseline(cwd)
   const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
   const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
@@ -1342,6 +1748,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
   await appendSessionRecord(sessionId, { type: "mcp_connect", report: mcpReport }, home)
   const mcpTools = mcpHub.getTools()
+  const toolConfig = await readTools(home)
+  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: request.onToolApproval ? "all" : "read-only" })
+  const runtimeTools = [...localTools, ...mcpTools]
 
   try {
     let lastError: unknown
@@ -1358,7 +1767,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         model: plan.model,
         policy: plan.policy,
         sessionId,
-        tools: mcpTools,
+        tools: runtimeTools,
         getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
         onEvent: request.onEvent,
         onToolApproval: request.onToolApproval,
@@ -1368,9 +1777,17 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
         const primarySummary = extractAssistantText(runtime.agent.state.messages)
         await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
+        const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
+        const checks = hasPatchActivity(patchAfterPrimary) ? await runPatchChecks(cwd) : undefined
+        if (checks) {
+          await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
+        }
+        const reviewArtifacts: PatchReviewArtifacts | undefined = hasPatchActivity(patchAfterPrimary)
+          ? { patch: patchAfterPrimary, checks, diff: await collectPatchDiffSnapshot(cwd) }
+          : undefined
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages)
             : undefined
         if (reviewResult) workerResults.push(reviewResult)
 
@@ -1386,8 +1803,12 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           "hook_stop",
         )
         const summary = `${mergeReviewResult(primarySummary, reviewResult)}${formatStopHookFeedback(stopHooks)}`
-        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, attempt: attempt + 1 }, home)
-        return { sessionId, summary, plan, workerResults, mcp: mcpReport }
+        const patch = await collectPatchSummary(cwd, patchBaseline)
+        if (hasPatchActivity(patch)) {
+          await appendSessionRecord(sessionId, { type: "patch_summary", ...patch, attempt: attempt + 1 }, home)
+        }
+        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, attempt: attempt + 1 }, home)
+        return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch, checks }
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
@@ -1532,6 +1953,13 @@ function formatSessionContext(context: SessionContext): string {
         const summary = entry.summary ? `\n  summary: ${clipContextText(entry.summary, 1200)}` : ""
         const error = entry.error ? `\n  error: ${clipContextText(entry.error, 1200)}` : ""
         lines.push(`${label}${title}${summary}${error}`)
+      } else if (entry.type === "check") {
+        const label = `- checks${entry.attempt ? ` attempt ${entry.attempt}` : ""} (${entry.status})`
+        const reason = entry.reason ? `\n  reason: ${clipContextText(entry.reason, 800)}` : ""
+        const checks = entry.checks.length > 0
+          ? `\n  scripts: ${entry.checks.map((check) => `${check.name}:${check.status}${check.exitCode === undefined ? "" : `:${check.exitCode ?? "n/a"}`}`).join(", ")}`
+          : ""
+        lines.push(`${label}${reason}${checks}`)
       } else if (entry.type === "handoff") {
         const label = `- handoff${entry.trigger ? ` (${entry.trigger})` : ""}`
         const focus = entry.focus ? `\n  focus: ${clipContextText(entry.focus, 400)}` : ""

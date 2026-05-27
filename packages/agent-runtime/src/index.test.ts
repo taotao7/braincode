@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, planRuntimeFromConfig, runConfiguredHooks, selectRuntimeModel } from "./index"
+import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, executePromptFromConfig, expandPromptReferences, planRuntimeFromConfig, runConfiguredHooks, runPatchChecks, selectRuntimeModel } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -59,6 +60,129 @@ test("createBraincodeAgentRuntime normalizes minimal thinking for OpenAI-compati
   })
 
   expect(runtime.agent.state.thinkingLevel).toBe("low")
+})
+
+test("createBraincodeAgentRuntime blocks risky tools when no approval callback exists", async () => {
+  const runtime = createBraincodeAgentRuntime({
+    mode: "auto",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+  })
+
+  const decision = await runtime.agent.beforeToolCall?.({
+    toolCall: { id: "tool-call-1", name: "shell" },
+    args: { command: "echo hi" },
+  } as never)
+
+  expect(decision?.block).toBe(true)
+  expect(decision?.reason).toContain("approval callback is required")
+})
+
+test("collectPatchSummary captures changed files and diff stats", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-patch-summary-test-"))
+  try {
+    expect(spawnSync("git", ["init"], { cwd: projectRoot }).status).toBe(0)
+    await Bun.write(join(projectRoot, "tracked.txt"), "before\n")
+    expect(spawnSync("git", ["add", "tracked.txt"], { cwd: projectRoot }).status).toBe(0)
+    expect(spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"], { cwd: projectRoot }).status).toBe(0)
+
+    await Bun.write(join(projectRoot, "tracked.txt"), "after\n")
+    await Bun.write(join(projectRoot, "new.txt"), "new\n")
+
+    const summary = await collectPatchSummary(projectRoot)
+
+    expect([...(summary?.changedFiles ?? [])].sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: "new.txt", status: "??" },
+      { path: "tracked.txt", status: "M" },
+    ])
+    expect(summary?.diffStats.filesChanged).toBe(2)
+    expect(summary?.diffStats.insertions).toBe(1)
+    expect(summary?.diffStats.deletions).toBe(1)
+    expect(summary?.diffStats.untrackedFiles).toBe(1)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("collectPatchSummary separates baseline changes and includes staged stats", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-patch-baseline-test-"))
+  try {
+    expect(spawnSync("git", ["init"], { cwd: projectRoot }).status).toBe(0)
+    await Bun.write(join(projectRoot, "preexisting.txt"), "clean\n")
+    await Bun.write(join(projectRoot, "after.txt"), "clean\n")
+    expect(spawnSync("git", ["add", "."], { cwd: projectRoot }).status).toBe(0)
+    expect(spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"], { cwd: projectRoot }).status).toBe(0)
+
+    await Bun.write(join(projectRoot, "preexisting.txt"), "dirty before run\n")
+    const baseline = await collectPatchBaseline(projectRoot)
+
+    await Bun.write(join(projectRoot, "after.txt"), "changed after baseline\n")
+    await Bun.write(join(projectRoot, "staged.txt"), "staged\n")
+    expect(spawnSync("git", ["add", "staged.txt"], { cwd: projectRoot }).status).toBe(0)
+    await Bun.write(join(projectRoot, "untracked.txt"), "untracked\n")
+
+    const summary = await collectPatchSummary(projectRoot, baseline)
+
+    expect([...(summary?.changedFiles ?? [])].sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: "after.txt", status: "M" },
+      { path: "staged.txt", status: "A" },
+      { path: "untracked.txt", status: "??" },
+    ])
+    expect(summary?.preExistingChangedFiles).toEqual([{ path: "preexisting.txt", status: "M" }])
+    expect(summary?.diffStats.stagedRaw).toContain("1 file changed")
+    expect(summary?.diffStats.untrackedFiles).toBe(1)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("runPatchChecks discovers package scripts and captures failures", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        check: "bun -e \"console.log('check ok')\"",
+        lint: "bun -e \"console.error('lint failed'); process.exit(2)\"",
+      },
+    }))
+
+    const summary = await runPatchChecks(projectRoot, { timeoutMs: 10_000, maxOutputBytes: 4_000 })
+
+    expect(summary.status).toBe("failed")
+    expect(summary.results.map((result) => [result.name, result.status])).toEqual([
+      ["check", "passed"],
+      ["lint", "failed"],
+    ])
+    expect(summary.results[0]?.stdout).toContain("check ok")
+    expect(summary.results[1]?.stderr).toContain("lint failed")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("runPatchChecks skips projects without recognized check scripts", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-skip-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({ scripts: { dev: "bun --version" } }))
+
+    const summary = await runPatchChecks(projectRoot)
+
+    expect(summary.status).toBe("skipped")
+    expect(summary.reason).toContain("no check")
+    expect(summary.results).toEqual([])
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
 })
 
 test("runConfiguredHooks executes trusted project command hooks", async () => {

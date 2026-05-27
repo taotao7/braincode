@@ -756,6 +756,19 @@ export type SessionContextEntry =
       error?: string;
     }
   | {
+      type: "check";
+      timestamp?: number;
+      status: "passed" | "failed" | "skipped";
+      checks: Array<{
+        name: string;
+        status: "passed" | "failed";
+        exitCode?: number | null;
+        durationMs?: number;
+      }>;
+      reason?: string;
+      attempt?: number;
+    }
+  | {
       type: "error";
       timestamp?: number;
       error: string;
@@ -1007,6 +1020,28 @@ export async function readSessionContext(
           });
         }
       }
+    } else if (record.type === "check_summary") {
+      const rawStatus = stringField(record, "status");
+      const status: Extract<SessionContextEntry, { type: "check" }>["status"] =
+        rawStatus === "passed" || rawStatus === "failed" || rawStatus === "skipped"
+          ? rawStatus
+          : "skipped";
+      const rawResults = Array.isArray(record.results)
+        ? record.results.filter((result): result is Record<string, unknown> => Boolean(result) && typeof result === "object" && !Array.isArray(result))
+        : [];
+      entries.push({
+        type: "check",
+        timestamp,
+        status,
+        reason: stringField(record, "reason"),
+        attempt,
+        checks: rawResults.map((result) => ({
+          name: stringField(result, "name") ?? "unknown",
+          status: stringField(result, "status") === "passed" ? "passed" : "failed",
+          exitCode: typeof result.exitCode === "number" || result.exitCode === null ? result.exitCode : undefined,
+          durationMs: numberField(result, "durationMs"),
+        })),
+      });
     } else if (record.type === "handoff") {
       const summary = stringField(record, "summary");
       if (summary) {
