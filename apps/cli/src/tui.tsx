@@ -1507,7 +1507,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     try {
-      const result = await executePromptFromConfig({ prompt: trimmed, sessionId, projectRoot, onPlan, onTodoEvent, onEvent, onToolApproval, onMcpReport, onWorkerEvent, forceRoles: options.forceRoles as never })
+      const result = await executePromptFromConfig({
+        prompt: trimmed,
+        sessionId,
+        projectRoot,
+        onPlan,
+        onTodoEvent,
+        onEvent,
+        onToolApproval,
+        onMcpReport,
+        onWorkerEvent,
+        forceRoles: options.forceRoles as never,
+        ignoreDisabledLocalTools: approvalMode === "radical",
+      })
       rememberIntentPlan(result.plan)
       finalizeStreamingBuffers()
       const tokenSummary = formatRunTokenSummary(runUsage.current)

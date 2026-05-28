@@ -27,6 +27,7 @@ export type AgentRunRequest = {
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
   localToolMode?: LocalToolMode
+  ignoreDisabledLocalTools?: boolean
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
 }
@@ -2605,8 +2606,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const toolConfig = await readTools(home)
   const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
-  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode })
-  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only" })
+  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools })
+  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools })
   const runtimeTools = [...localTools, ...mcpTools]
   const toolEvidenceCache = createToolEvidenceCache()
 

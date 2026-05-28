@@ -91,7 +91,7 @@ packages/
 模式是 Braincode 层的概念；它影响编排，不直接影响模型。
 
 - **`auto`** —— 默认。Agent 内部工具串行执行。路由偏聚焦；router 使用配置里的 worker / 并发上限，最多规划 6 个 todo。
-- **`radical`** —— 自治更强。Agent 内部工具并行执行。routeBrain 会被要求更主动拆分、更早使用专家 support，最多规划 8 个 todo，并在依赖允许时至少使用 4 个 routed worker / 4 路 support 并发。已暴露的工具调用会自动同意，TUI 不再弹 Ask User。
+- **`radical`** —— 自治更强。Agent 内部工具并行执行。routeBrain 会被要求更主动拆分、更早使用专家 support，最多规划 8 个 todo，并在依赖允许时至少使用 4 个 routed worker / 4 路 support 并发。在 TUI 中，即使用户级工具开关被关闭，默认本地工具也会暴露；工具调用会自动同意，不再弹 Ask User。
 
 权威实现：`packages/brain` 里的 `getModePolicy`。
 

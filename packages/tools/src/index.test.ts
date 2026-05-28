@@ -85,6 +85,35 @@ test("createLocalCodingTools respects disabled tools from tools.json", async () 
   }
 })
 
+test("createLocalCodingTools can ignore disabled config for explicit override modes", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-ignore-disabled-test-"))
+  try {
+    const disabled = createDefaultToolConfiguration().tools.map((tool) => ({ ...tool, enabled: false }))
+    const tools = createLocalCodingTools({
+      projectRoot,
+      tools: disabled,
+      mode: "all",
+      ignoreDisabled: true,
+    })
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "apply_patch",
+      "edit_file",
+      "exec_command",
+      "get_changed_files",
+      "git_diff",
+      "list_files",
+      "read_file",
+      "run_script",
+      "search_files",
+      "shell",
+      "write_stdin",
+    ])
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("createLocalCodingTools read-only mode excludes write and execute tools", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-readonly-test-"))
   try {

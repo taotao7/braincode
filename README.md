@@ -107,7 +107,7 @@ A **Brain Model** is a routing policy, not a single LLM. It decides which model,
 Braincode has two top-level modes:
 
 - `auto` - the main mode, automatically plans by intent and routes work to different agents/models.
-- `radical` - a more aggressive autonomous mode for users who want faster, broader execution.
+- `radical` - a more aggressive autonomous mode for users who want faster, broader execution. In the TUI it exposes the default local tools and auto-approves tool calls, even when user-level local tool toggles are disabled.
 
 The runtime exposes **14 roles**:
 

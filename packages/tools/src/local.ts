@@ -11,6 +11,7 @@ export type LocalCodingToolOptions = {
   projectRoot: string
   tools?: ToolConfiguration[]
   mode?: LocalToolMode
+  ignoreDisabled?: boolean
   maxReadBytes?: number
   maxOutputBytes?: number
   commandTimeoutMs?: number
@@ -78,7 +79,7 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
       if (mode === "read-write") return !tool.permissions.includes("execute")
       return !tool.permissions.some((permission) => permission === "write" || permission === "execute")
     })
-    .filter((tool) => (options.tools ? enabled.get(tool.name) === true : true))
+    .filter((tool) => (options.tools && !options.ignoreDisabled ? enabled.get(tool.name) === true : true))
     .map((tool) => tool.create(context))
 }
 
