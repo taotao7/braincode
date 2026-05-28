@@ -87,6 +87,7 @@ When changing architecture, structure, or planning, update the relevant `docs/` 
 
 - Keep root `package.json` focused on workspace scripts and metadata.
 - Each workspace package should declare its own dependencies.
+- Use Conventional Commits-style messages for commits and commit-like summaries, such as `feat: add routing policy` or `fix: restore config web theme`.
 - Add tests near behavior that has meaningful risk: routing, config migration, context isolation, tool permissions.
 - Prefer focused tests over broad end-to-end tests for early development.
 - Avoid adding one-off abstractions unless they remove real complexity or match an existing package boundary.

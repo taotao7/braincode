@@ -6,25 +6,23 @@ export const configWebHtml = `<!doctype html>
     <title>BRAIN/CODE · Local AI Control Panel</title>
     <link rel="icon" href="/resources/logo.png" type="image/png" />
     <style>
-      :root,
-      :root[data-theme="dark"] {
-        color-scheme: dark;
-        --bg: transparent;
-        --surface: #25292e;
-        --fg: #d4d4d4;
-        --muted: #8a8f96;
-        --border: #3a3f45;
-        --accent: #ffb86c;
-        --accent-alt: #8be9fd;
-        --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+      :root {
+        color-scheme: light;
+        --bg: #f5f0e8;
+        --surface: #faf8f4;
+        --fg: #2d2a27;
+        --muted: #6b6560;
+        --border: #c4b8a8;
+        --accent: #458588;
+        --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
         --fg-soft: color-mix(in srgb, var(--fg) 8%, transparent);
-        --bg-hover: #2d3238;
-        --danger-fg: #ff5555;
-        --danger-bg: color-mix(in srgb, var(--danger-fg) 15%, var(--surface));
-        --danger-border: color-mix(in srgb, var(--danger-fg) 40%, var(--border));
-        --pre-bg: #1f2327;
-        --pre-border: #3a3f45;
-        --pre-fg: #f8f8f2;
+        --bg-hover: #ede8e0;
+        --danger-fg: #9d0006;
+        --danger-bg: color-mix(in srgb, var(--danger-fg) 10%, var(--surface));
+        --danger-border: color-mix(in srgb, var(--danger-fg) 30%, var(--border));
+        --pre-bg: #ede8e0;
+        --pre-border: #d4c8b8;
+        --pre-fg: #1f1d1b;
         --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
         --font-body: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
         --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
@@ -45,24 +43,25 @@ export const configWebHtml = `<!doctype html>
         --radius-lg: 6px;
       }
 
-      :root[data-theme="light"] {
-        color-scheme: light;
-        --bg: transparent;
-        --surface: #faf8f4;
-        --fg: #2d2a27;
-        --muted: #6b6560;
-        --border: #c4b8a8;
-        --accent: #d65d0e;
-        --accent-alt: #458588;
-        --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
-        --fg-soft: color-mix(in srgb, var(--fg) 8%, transparent);
-        --bg-hover: #ede8e0;
-        --danger-fg: #9d0006;
-        --danger-bg: color-mix(in srgb, var(--danger-fg) 10%, var(--surface));
-        --danger-border: color-mix(in srgb, var(--danger-fg) 30%, var(--border));
-        --pre-bg: #ede8e0;
-        --pre-border: #d4c8b8;
-        --pre-fg: #1f1d1b;
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --bg: #1a1d21;
+          --surface: #25292e;
+          --fg: #d4d4d4;
+          --muted: #8a8f96;
+          --border: #3a3f45;
+          --accent: #8be9fd;
+          --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+          --fg-soft: color-mix(in srgb, var(--fg) 8%, transparent);
+          --bg-hover: #2d3238;
+          --danger-fg: #ff5555;
+          --danger-bg: color-mix(in srgb, var(--danger-fg) 15%, var(--surface));
+          --danger-border: color-mix(in srgb, var(--danger-fg) 40%, var(--border));
+          --pre-bg: #1f2327;
+          --pre-border: #3a3f45;
+          --pre-fg: #f8f8f2;
+        }
       }
 
       * { box-sizing: border-box; }
