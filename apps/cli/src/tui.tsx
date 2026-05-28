@@ -1372,7 +1372,39 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       updateItem(statusId, { text: next })
       updateRunStatus(next)
     }
+    // Coalesce high-frequency text_delta updates to avoid Ink re-rendering the
+    // entire transcript on every token (the main source of visible flicker).
+    // The window is small enough to still feel real-time but large enough to
+    // batch the bursts that come from fast models.
+    const STREAM_FLUSH_MS = Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 32
+    let streamFlushHandle: ReturnType<typeof setTimeout> | null = null
+    let streamPendingId: string | null = null
+    const flushStream = () => {
+      if (streamFlushHandle) {
+        clearTimeout(streamFlushHandle)
+        streamFlushHandle = null
+      }
+      if (streamPendingId) {
+        const id = streamPendingId
+        const text = currentAssistant.text
+        streamPendingId = null
+        updateItem(id, { text })
+      }
+    }
+    const scheduleStreamFlush = (id: string) => {
+      streamPendingId = id
+      if (streamFlushHandle) return
+      streamFlushHandle = setTimeout(() => {
+        streamFlushHandle = null
+        if (!streamPendingId) return
+        const pendingId = streamPendingId
+        const text = currentAssistant.text
+        streamPendingId = null
+        updateItem(pendingId, { text })
+      }, STREAM_FLUSH_MS)
+    }
     const finalizeStreamingBuffers = () => {
+      flushStream()
       if (currentAssistant.id && currentAssistant.text.length === 0) {
         const id = currentAssistant.id
         setItems((previous) => previous.filter((item) => item.id !== id))
@@ -1422,7 +1454,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             if (activeStreamPhase !== "primary") return
             const id = ensureAssistantItem()
             currentAssistant.text += update.delta
-            updateItem(id, { text: currentAssistant.text })
+            scheduleStreamFlush(id)
           } else if (update.type === "thinking_delta") {
             showThinkingStatus()
           } else if (update.type === "toolcall_start") {
