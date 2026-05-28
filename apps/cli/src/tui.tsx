@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react"
 import { Box, render, Text, useApp, useInput, useStdout } from "ink"
+import { execFileSync } from "node:child_process"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
@@ -78,7 +79,7 @@ const COMMANDS: CommandDefinition[] = [
   { name: "handoff", label: "/handoff", hint: "Fork a new session (or pass <session-id> to summarize another)", insert: "/handoff " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
   { name: "mode", label: "/mode", hint: "View or switch execution mode: auto/radical", insert: "/mode " },
-  { name: "theme", label: "/theme", hint: "View or switch theme: dark/light", insert: "/theme " },
+  { name: "theme", label: "/theme", hint: "Show the system-resolved theme" },
   { name: "auto", label: "/auto", hint: "Switch execution mode to auto" },
   { name: "radical", label: "/radical", hint: "Switch execution mode to radical" },
   { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
@@ -268,6 +269,38 @@ function tone(theme: TuiTheme, color: UiColor): string {
   return theme.colors[color]
 }
 
+function readThemeOverride(): BraincodeTheme | undefined {
+  const envTheme = process.env.BRAINCODE_THEME?.trim().toLowerCase()
+  return isBraincodeTheme(envTheme ?? "") ? envTheme as BraincodeTheme : undefined
+}
+
+function detectSystemAppearanceTheme(): BraincodeTheme {
+  const colorFgBg = process.env.COLORFGBG
+  const background = colorFgBg?.split(";").at(-1)
+  const backgroundCode = background ? Number(background) : Number.NaN
+  if (Number.isFinite(backgroundCode)) {
+    return backgroundCode >= 7 && backgroundCode !== 8 ? "light" : "dark"
+  }
+
+  if (process.platform === "darwin") {
+    try {
+      const output = execFileSync("defaults", ["read", "-g", "AppleInterfaceStyle"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim().toLowerCase()
+      return output.includes("dark") ? "dark" : "light"
+    } catch {
+      return "light"
+    }
+  }
+
+  return "dark"
+}
+
+function detectSystemTheme(): BraincodeTheme {
+  return readThemeOverride() ?? detectSystemAppearanceTheme()
+}
+
 const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
   "   ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║",
@@ -315,7 +348,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [running, setRunning] = useState(false)
   const [items, setItems] = useState<TranscriptItem[]>([])
   const [mode, setMode] = useState<BraincodeMode>("auto")
-  const [themeName, setThemeName] = useState<BraincodeTheme>("dark")
+  const [themeName, setThemeName] = useState<BraincodeTheme>(() => detectSystemTheme())
   const [projectSupport, setProjectSupport] = useState<ProjectSupport | null>(null)
   const [userSupport, setUserSupport] = useState<UserSupport | null>(null)
   const [projectFiles, setProjectFiles] = useState<string[]>([])
@@ -393,7 +426,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       try {
         const settings = await readSettings()
         setMode(settings.mode)
-        setThemeName(settings.theme)
       } catch (error) {
         appendItem({ kind: "error", text: `Failed to read settings: ${formatError(error)}` })
       }
@@ -422,6 +454,22 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }
     })()
   }, [projectRoot])
+
+  useEffect(() => {
+    const syncThemeSoon = () => {
+      setThemeName(detectSystemTheme())
+    }
+
+    syncThemeSoon()
+    const timer = setInterval(syncThemeSoon, 30_000)
+    process.on("SIGCONT", syncThemeSoon)
+    process.on("SIGWINCH", syncThemeSoon)
+    return () => {
+      clearInterval(timer)
+      process.off("SIGCONT", syncThemeSoon)
+      process.off("SIGWINCH", syncThemeSoon)
+    }
+  }, [])
 
   useEffect(() => {
     if (initialRan.current) return
@@ -569,7 +617,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         void switchMode(argument)
         return true
       case "theme":
-        void switchTheme(argument)
+        showTheme(argument)
         return true
       case "auto":
         void switchMode("auto")
@@ -1064,31 +1112,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
-  async function switchTheme(argument: string) {
-    const next = argument.trim().toLowerCase()
-    if (!next) {
-      appendItem({ kind: "panel", text: `Theme: ${themeName}\nUse /theme dark or /theme light to switch. The terminal background stays transparent.` })
+  function showTheme(argument: string) {
+    if (argument.trim()) {
+      appendItem({ kind: "error", text: "Theme follows system appearance automatically; Braincode only resolves dark or light palettes." })
       return
     }
-    if (!isBraincodeTheme(next)) {
-      appendItem({ kind: "error", text: "Usage: /theme dark|light" })
-      return
-    }
-    try {
-      const current = await readSettings()
-      if (current.theme === next) {
-        setThemeName(next)
-        flash(`Theme already ${next}`)
-        appendItem({ kind: "status", text: `Theme remains ${next}.` })
-        return
-      }
-      await writeSettings({ ...current, theme: next })
-      setThemeName(next)
-      appendItem({ kind: "status", text: `Theme → ${next}. Background remains transparent.` })
-      flash(`Theme → ${next}`)
-    } catch (error) {
-      appendItem({ kind: "error", text: `Theme switch failed: ${formatError(error)}` })
-    }
+    const override = readThemeOverride()
+    const detected = override ?? detectSystemAppearanceTheme()
+    const source = override ? "BRAINCODE_THEME" : "system appearance"
+    setThemeName(detected)
+    appendItem({ kind: "panel", text: `Theme: ${detected}\nSource: ${source}\nPalettes: dark, light\nBackground: transparent` })
   }
 
   function viewBrainDetail(target: BrainModel) {
@@ -2359,7 +2392,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         {draftWindow.hiddenBelow > 0 ? <Text color={colors.gray}>↓ {draftWindow.hiddenBelow} more line{draftWindow.hiddenBelow === 1 ? "" : "s"}</Text> : null}
       </Box>
       <Text color={colors.gray}>
-        Enter submits · / commands · /mode auto|radical · /theme dark|light · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · /mode auto|radical · /theme · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color={colors.yellow}>
@@ -3146,7 +3179,7 @@ function formatHelp(): string {
     "  • Start typing / to open the command palette.",
     "  • Use /plan <prompt> to preview the configured routeBrain decision.",
     "  • Use /plan --heuristic <prompt> only for no-provider routing diagnostics.",
-    "  • Use /theme dark or /theme light to switch the foreground palette; terminal background stays transparent.",
+    "  • Theme follows system appearance and resolves to dark or light; terminal background stays transparent.",
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",

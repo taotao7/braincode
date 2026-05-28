@@ -95,6 +95,8 @@ Implementation fallback stack should prefer system-available fonts first, but ke
 - Use hard rectangular panels, not rounded SaaS cards.
 - Use thick black borders and offset shadows.
 - Use dark red for primary actions, warnings, signal markers, and active mode emphasis.
+- Theme rendering follows the terminal/browser/system appearance and resolves to exactly two palettes: `light` and `dark`.
+- App-level backgrounds should remain transparent; apply theme color to text, borders, panels, controls, and status surfaces instead.
 - Use aged paper surfaces for forms and code blocks.
 - Keep code/config editing areas monospaced and print-like.
 - Prefer visible structure over subtle affordances.

@@ -134,7 +134,7 @@ export const en = {
   docs_home_files_title: "Files and folders",
   docs_home_settings_title: "settings.json",
   docs_home_settings_body:
-    "Top-level user preferences: selected Brain Model id, default execution mode (auto or radical), TUI theme, telemetry flag.",
+    "Top-level user preferences: selected Brain Model id, default execution mode (auto or radical), system-resolved UI appearance, telemetry flag.",
   docs_home_auth_title: "auth.json",
   docs_home_auth_body:
     "Provider API keys and OAuth tokens. Written with restrictive permissions (0600). Never commit, never log, never paste into a prompt. Braincode masks these in the TUI.",

@@ -274,7 +274,6 @@ test("settings can be read and written from an explicit home", async () => {
   const nextSettings = {
     ...settings,
     mode: "radical" as const,
-    theme: "light" as const,
     configServer: {
       ...settings.configServer,
       port: 18080,
@@ -287,14 +286,6 @@ test("settings can be read and written from an explicit home", async () => {
   await expect(readSettings(home)).resolves.toEqual(nextSettings)
 })
 
-test("settings theme only supports dark and light", async () => {
-  const home = await makeTempHome()
-  const settings = await readSettings(home)
-
-  expect(settings.theme).toBe("dark")
-  await expect(writeSettings({ ...settings, theme: "system" as never }, home)).rejects.toThrow("settings.theme must be either dark or light")
-})
-
 test("readSettings migrates legacy default brain id", async () => {
   const home = await makeTempHome()
   const paths = await ensureBraincodeHome(home)
@@ -305,6 +296,19 @@ test("readSettings migrates legacy default brain id", async () => {
 
   expect(migrated.defaultBrainId).toBe("brain")
   expect(JSON.parse(await Bun.file(paths.settings).text()).defaultBrainId).toBe("brain")
+})
+
+test("readSettings removes legacy manual theme preference", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+  const settings = await readSettings(home)
+  await Bun.write(paths.settings, JSON.stringify({ ...settings, theme: "light" }))
+
+  const migrated = await readSettings(home)
+  const stored = JSON.parse(await Bun.file(paths.settings).text())
+
+  expect("theme" in migrated).toBe(false)
+  expect("theme" in stored).toBe(false)
 })
 
 test("non-secret config documents can be read and written from an explicit home", async () => {

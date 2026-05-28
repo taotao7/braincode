@@ -20,7 +20,6 @@ export type BraincodeTheme = "dark" | "light";
 export type BraincodeSettings = {
   version: 1;
   mode: BraincodeMode;
-  theme: BraincodeTheme;
   configServer: {
     host: string;
     port: number;
@@ -188,7 +187,6 @@ export type BraincodePaths = {
 export const defaultSettings: BraincodeSettings = {
   version: 1,
   mode: "auto",
-  theme: "dark",
   configServer: {
     host: DEFAULT_CONFIG_HOST,
     port: DEFAULT_CONFIG_PORT,
@@ -1186,9 +1184,6 @@ function assertSettings(value: BraincodeSettings) {
   if (value.mode !== "auto" && value.mode !== "radical") {
     throw new Error("settings.mode must be either auto or radical");
   }
-  if (value.theme !== "dark" && value.theme !== "light") {
-    throw new Error("settings.theme must be either dark or light");
-  }
   if (!value.configServer || typeof value.configServer.host !== "string") {
     throw new Error("settings.configServer.host must be a string");
   }
@@ -1231,17 +1226,19 @@ function assertDocumentArray(
 function normalizeSettings(
   value: Partial<BraincodeSettings>,
 ): BraincodeSettings {
+  const { theme: _legacyTheme, ...settings } = value as Partial<
+    BraincodeSettings
+  > & { theme?: unknown };
   return {
     ...defaultSettings,
-    ...value,
-    theme: normalizeBraincodeTheme(value.theme),
+    ...settings,
     configServer: {
       ...defaultSettings.configServer,
-      ...value.configServer,
+      ...settings.configServer,
     },
     features: {
       ...defaultSettings.features,
-      ...value.features,
+      ...settings.features,
     },
   };
 }
@@ -1288,9 +1285,14 @@ export async function readSettings(
     paths.settings,
     defaultSettings,
   );
+  const hadLegacyTheme = "theme" in (settings as Record<string, unknown>);
   const normalized = normalizeSettings(settings);
+  let changed = hadLegacyTheme;
   if (normalized.defaultBrainId === "default") {
     normalized.defaultBrainId = "brain";
+    changed = true;
+  }
+  if (changed) {
     await writeJsonFile(paths.settings, normalized);
   }
   return normalized;
