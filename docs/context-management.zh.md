@@ -126,7 +126,7 @@ export type ContextRef = {
 
 编排器在 run 顶部支持两种引用标记：
 
-- `@<path>` —— 在根 prompt 上附加一个文件或图片。小于 64 KB 的文本文件会内联进 fenced block，图片用相对路径引用。文件缺失或超大不会报错，而是变成带原因的 `missing` 引用，让模型知道附件曾被打算附上但没送到。
+- `@<path>` —— 在根 prompt 上附加一个文件或图片。小于 64 KB 的文本文件会内联进 fenced block；支持的图片会作为 image input 发送，并强制 runtime 模型选择只使用有视觉能力的候选。文件缺失或超大不会报错，而是变成带原因的 `missing` 引用，让模型知道附件曾被打算附上但没送到。
 - `@@<session-id>` —— 附加先前某个 session 的 **紧凑** 快照。由 `packages/config` 的 `readSessionContext` 从 session JSONL 构建：初始 prompt、最终摘要、worker 摘要、错误。整体硬上限 24 KB，每字段还会做单独裁剪。**绝对不会** 内联完整 transcript 或 worker 私有上下文。
 
 Worker 不会单独拿到这些引用的副本。它们只看到展开后的根请求 + 自己的 handoff packet —— 同一条隔离规则。

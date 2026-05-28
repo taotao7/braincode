@@ -123,7 +123,7 @@ Ces contraintes sont la manière dont l'invariant d'isolation survit à un modè
 
 L'orchestrateur supporte deux marqueurs de référence en tête de l'exécution :
 
-- `@<path>` — attache un fichier ou une image au prompt racine. Les fichiers texte de moins de 64 Ko sont inlinés dans un bloc clôturé. Les images sont référencées par chemin relatif. Les fichiers manquants ou trop gros deviennent une référence `missing` avec une raison au lieu d'une erreur, pour que le modèle sache que l'attachement était voulu mais non livré.
+- `@<path>` — attache un fichier ou une image au prompt racine. Les fichiers texte de moins de 64 Ko sont inlinés dans un bloc clôturé. Les images prises en charge sont envoyées comme entrées image et forcent la sélection runtime à n'utiliser que des candidats capables de vision. Les fichiers manquants ou trop gros deviennent une référence `missing` avec une raison au lieu d'une erreur, pour que le modèle sache que l'attachement était voulu mais non livré.
 - `@@<session-id>` — attache un **instantané compact** d'une session précédente. Construit par `readSessionContext` dans `packages/config` depuis le JSONL de la session : prompt initial, résumé final, résumés workers, erreurs. Plafonné dur à 24 Ko au total, avec écrêtage par champ. **Il ne doit pas inliner une conversation complète ou un contexte privé de worker.**
 
 Les workers n'obtiennent pas une copie séparée de ces références. Ils ne voient que la requête racine étendue plus leur propre handoff packet — même règle d'isolation.

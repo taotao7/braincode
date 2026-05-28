@@ -216,6 +216,8 @@ Open questions:
 1. policy 的 `modelId`，然后是 `fallbackModelIds`（按序）。
 2. **目录级跨 provider 兜底** —— 任何配置好的其它模型，只要它的 provider 有 API key 且没试过。
 
+如果 prompt 展开后带有图片输入，这条候选链路会带上 `requiresVision: true`。这是 runtime 的硬约束，routeBrain、support worker、主 agent、review worker 都一样：无视觉能力的纯文本模型会在调用 provider 之前被跳过，即使它排在 role policy 第一位，或本来会作为跨 provider 兜底候选。
+
 跨 provider 兜底是故意做的：某个 provider 出现区域性 / 上游故障（比如代理报 OpenAI 400），应该自动切换到另一个你有 key 的 provider。每次尝试都会记录（`run_error` / `worker_error`）并标注 `willFallback: true|false`。
 
 加 policy 字段或新模型字段时，请确保显式列表和目录扫描都能尊重它。

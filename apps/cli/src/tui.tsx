@@ -340,8 +340,11 @@ const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const;
 const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
 const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400;
+const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
+const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
+const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE === "true";
 
 type UiColor =
   | "blue"
@@ -562,6 +565,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     viewportRows: 0,
     scrollTop: 0,
     maxScrollTop: 0,
+    scrollAnchors: [0],
   });
   const mouseInputBuffer = useRef("");
   const [queueVersion, setQueueVersion] = useState(0);
@@ -689,9 +693,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }, []);
 
   useEffect(() => {
-    if (!stdout || !process.stdin.isTTY) return;
     const enableMouse = "\x1b[?1000h\x1b[?1006h";
     const disableMouse = "\x1b[?1000l\x1b[?1006l";
+    if (!stdout || !process.stdin.isTTY) return;
+    if (!TUI_MOUSE_ENABLED) {
+      stdout.write(disableMouse);
+      return;
+    }
     stdout.write(enableMouse);
     const onData = (chunk: Buffer | string) => {
       mouseInputBuffer.current = `${mouseInputBuffer.current}${String(chunk)}`;
@@ -754,7 +762,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         current === null
           ? maxScrollTop
           : transcriptViewportState.current.scrollTop;
-      const next = clamp(Math.round(currentTop + deltaRows), 0, maxScrollTop);
+      const next = nextTranscriptScrollTop(
+        currentTop,
+        deltaRows,
+        transcriptViewportState.current.scrollAnchors,
+        maxScrollTop,
+      );
       return next >= maxScrollTop ? null : next;
     });
   }
@@ -1350,12 +1363,21 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   async function applyResume(target: SessionSummary) {
+    closeTransientSurfaces();
+    applyDraftChange("");
+    clearTerminalFrame();
     const context = await readSessionContext(target.sessionId, undefined, 1000);
     const restoredItems = restoreSessionTranscriptItems(context, target);
     clearTerminalFrame();
     setSessionId(target.sessionId);
     setItems(restoredItems);
     scrollTranscriptTo("bottom");
+    closeTransientSurfaces();
+    applyDraftChange("");
+    flash(`Now writing to session ${target.sessionId.slice(0, 8)}`);
+  }
+
+  function closeTransientSurfaces() {
     setSessionPanel(null);
     setOverlay(null);
     setMcpPanel(null);
@@ -1364,7 +1386,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setIntentPanel(null);
     setRuntimeErrorPanel(null);
     setDecisionPanel(null);
-    flash(`Now writing to session ${target.sessionId.slice(0, 8)}`);
   }
 
   function clearTerminalFrame() {
@@ -3255,8 +3276,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     Math.max(12, contentWidth - 12),
   );
   const footerTextWidth = Math.max(8, contentWidth - petPanelWidth - 1);
-  const helpText =
-    "Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · PageUp/PageDown/wheel/Ctrl+↑↓ scroll · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
+  const scrollHelp = TUI_MOUSE_ENABLED
+    ? "PageUp/PageDown/wheel/Ctrl+↑↓ scroll"
+    : "PageUp/PageDown/Ctrl+↑↓ scroll";
+  const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · ${scrollHelp} · select content to copy · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
   const nonTranscriptRows = estimateNonTranscriptRows({
     hasTranscript: items.length > 0,
     emptyLogoRows: BRAIN_LOGO.length + 2,
@@ -3301,6 +3324,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     viewportRows: transcriptViewport.viewportRows,
     scrollTop: transcriptViewport.scrollTop,
     maxScrollTop: transcriptViewport.maxScrollTop,
+    scrollAnchors: transcriptScrollAnchors(
+      transcriptLayout,
+      transcriptViewport.maxScrollTop,
+    ),
   };
   transcriptClickViewportOffset.current = 0;
   transcriptClickBounds.current = transcriptViewport.bounds;
@@ -3954,11 +3981,11 @@ function restoreSessionTranscriptItems(
       });
     }
     if (entry.summary) {
-      restored.push({
-        id: crypto.randomUUID(),
-        kind: entry.status === "failed" ? "error" : "assistant",
-        text: entry.summary,
-      });
+      appendRestoredTextItems(
+        restored,
+        entry.status === "failed" ? "error" : "assistant",
+        entry.summary,
+      );
     } else if (entry.status !== "completed") {
       restored.push({
         id: crypto.randomUUID(),
@@ -3976,11 +4003,11 @@ function restoreSessionTranscriptItems(
         text: target.prompt,
       });
     if (target.summary) {
-      restored.push({
-        id: crypto.randomUUID(),
-        kind: target.status === "failed" ? "error" : "assistant",
-        text: target.summary,
-      });
+      appendRestoredTextItems(
+        restored,
+        target.status === "failed" ? "error" : "assistant",
+        target.summary,
+      );
     }
   }
 
@@ -3999,6 +4026,64 @@ function restoreSessionTranscriptItems(
   };
 
   return [statusItem, ...restored].map(normalizeTranscriptItem);
+}
+
+function appendRestoredTextItems(
+  items: TranscriptItem[],
+  kind: "assistant" | "error",
+  text: string,
+) {
+  for (const chunk of chunkRestoredText(text)) {
+    items.push({
+      id: crypto.randomUUID(),
+      kind,
+      text: chunk,
+    });
+  }
+}
+
+function chunkRestoredText(text: string): string[] {
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentChars = 0;
+
+  const flush = () => {
+    if (current.length === 0) return;
+    chunks.push(current.join("\n"));
+    current = [];
+    currentChars = 0;
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const lineParts =
+      rawLine.length > RESTORED_TEXT_CHUNK_CHAR_LIMIT
+        ? splitLongRestoredLine(rawLine)
+        : [rawLine];
+    for (const line of lineParts) {
+      if (
+        current.length >= RESTORED_TEXT_CHUNK_LINE_LIMIT ||
+        currentChars + line.length > RESTORED_TEXT_CHUNK_CHAR_LIMIT
+      ) {
+        flush();
+      }
+      current.push(line);
+      currentChars += line.length + 1;
+    }
+  }
+  flush();
+  return chunks.length > 0 ? chunks : [text];
+}
+
+function splitLongRestoredLine(line: string): string[] {
+  const chunks: string[] = [];
+  for (
+    let index = 0;
+    index < line.length;
+    index += RESTORED_TEXT_CHUNK_CHAR_LIMIT
+  ) {
+    chunks.push(line.slice(index, index + RESTORED_TEXT_CHUNK_CHAR_LIMIT));
+  }
+  return chunks;
 }
 
 function normalizeTranscriptItem(item: TranscriptItem): TranscriptItem {
@@ -4164,6 +4249,48 @@ function viewportTranscriptLayout(
     );
 
   return { entries, bounds, scrollTop, maxScrollTop, viewportRows: height };
+}
+
+function transcriptScrollAnchors(
+  layout: { entries: TranscriptRenderEntry[]; totalRows: number },
+  maxScrollTop: number,
+): number[] {
+  const anchors = new Set<number>([0, maxScrollTop]);
+  for (const entry of layout.entries) {
+    anchors.add(clamp(entry.rowStart, 0, maxScrollTop));
+  }
+  return Array.from(anchors).sort((left, right) => left - right);
+}
+
+function nextTranscriptScrollTop(
+  currentTop: number,
+  deltaRows: number,
+  anchors: number[],
+  maxScrollTop: number,
+): number {
+  const current = clamp(Math.round(currentTop), 0, maxScrollTop);
+  const target = clamp(Math.round(current + deltaRows), 0, maxScrollTop);
+  if (target === current) return current;
+  const orderedAnchors =
+    anchors.length > 0
+      ? anchors
+      : [0, maxScrollTop];
+
+  if (deltaRows > 0) {
+    const targetAnchor = orderedAnchors
+      .filter((anchor) => anchor > current && anchor <= target)
+      .at(-1);
+    if (targetAnchor !== undefined) return targetAnchor;
+    return orderedAnchors.find((anchor) => anchor > current) ?? maxScrollTop;
+  }
+
+  const targetAnchor = orderedAnchors.find(
+    (anchor) => anchor >= target && anchor < current,
+  );
+  if (targetAnchor !== undefined) return targetAnchor;
+  return orderedAnchors
+    .filter((anchor) => anchor < current)
+    .at(-1) ?? 0;
 }
 
 function estimateNonTranscriptRows({
@@ -5648,10 +5775,14 @@ function formatHelp(): string {
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
-    "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown, wheel, or Ctrl+↑/Ctrl+↓ also scroll it.",
+    TUI_MOUSE_ENABLED
+      ? "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown, wheel, or Ctrl+↑/Ctrl+↓ also scroll it."
+      : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is off by default so terminal selection/copy works.",
     "  • Press Ctrl+P/Ctrl+N for prompt history; ↑/↓ still moves within multi-line input.",
     "  • Press Ctrl+Y to edit the most recent queued prompt.",
-    "  • Click ▸/▾ on long transcript items to expand or collapse that item.",
+    TUI_MOUSE_ENABLED
+      ? "  • Click ▸/▾ on long transcript items to expand or collapse that item."
+      : "  • Set BRAINCODE_TUI_MOUSE=true to enable mouse wheel and click folding; terminal text selection works best with it off.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n");

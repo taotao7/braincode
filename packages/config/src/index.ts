@@ -171,6 +171,84 @@ export type SessionRecord = {
   [key: string]: unknown;
 };
 
+export type TokenUsageSnapshot = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+};
+
+export type TokenUsageTotals = TokenUsageSnapshot & {
+  calls: number;
+};
+
+export type TokenUsagePhase =
+  | "router"
+  | "support"
+  | "primary"
+  | "review"
+  | "pet"
+  | "unknown";
+
+export type TokenUsageSessionRecord = {
+  type: "token_usage";
+  role?: string;
+  phase?: TokenUsagePhase | string;
+  brainId?: string;
+  modelId?: string;
+  provider?: string;
+  agentSessionId?: string;
+  taskId?: string;
+  parentId?: string;
+  turnId?: string;
+  attempt?: number;
+  usage: TokenUsageSnapshot;
+};
+
+export type UsageStatsDetail = {
+  sessionId: string;
+  path: string;
+  timestamp?: number;
+  prompt?: string;
+  brainId?: string;
+  primaryRole?: string;
+  role?: string;
+  phase?: string;
+  modelId?: string;
+  provider?: string;
+  agentSessionId?: string;
+  taskId?: string;
+  parentId?: string;
+  turnId?: string;
+  attempt?: number;
+  usage: TokenUsageSnapshot;
+};
+
+export type UsageStatsBucket = TokenUsageTotals & {
+  id: string;
+  label: string;
+  lastUsedAt?: number;
+  provider?: string;
+  modelId?: string;
+  role?: string;
+  phase?: string;
+};
+
+export type UsageStats = {
+  generatedAt: number;
+  sessions: number;
+  totals: TokenUsageTotals;
+  byModel: UsageStatsBucket[];
+  byRole: UsageStatsBucket[];
+  byPhase: UsageStatsBucket[];
+  recent: UsageStatsDetail[];
+};
+
+export type UsageStatsOptions = {
+  detailLimit?: number;
+};
+
 export type BraincodePaths = {
   home: string;
   settings: string;
@@ -902,6 +980,175 @@ export async function listSessions(
   return records.slice(0, limit).map(({ sortKey: _drop, ...rest }) => rest);
 }
 
+export async function appendTokenUsageRecord(
+  sessionId: string,
+  record: Omit<TokenUsageSessionRecord, "type" | "usage"> & { usage: unknown },
+  home = getBraincodeHome(),
+): Promise<void> {
+  const usage = normalizeTokenUsage(record.usage);
+  if (!usage) return;
+  const normalized: TokenUsageSessionRecord = {
+    type: "token_usage",
+    ...record,
+    usage,
+  };
+  await appendSessionRecord(sessionId, normalized, home);
+}
+
+export async function readUsageStats(
+  home = getBraincodeHome(),
+  options: UsageStatsOptions = {},
+): Promise<UsageStats> {
+  const paths = await ensureBraincodeHome(home);
+  let entries;
+  try {
+    entries = await readdir(paths.sessions, { withFileTypes: true });
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") {
+      return createEmptyUsageStats();
+    }
+    throw error;
+  }
+
+  const stats = createEmptyUsageStats();
+  const modelBuckets = new Map<string, UsageStatsBucket>();
+  const roleBuckets = new Map<string, UsageStatsBucket>();
+  const phaseBuckets = new Map<string, UsageStatsBucket>();
+  const detailLimit = Math.max(1, Math.floor(options.detailLimit ?? 500));
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const path = join(paths.sessions, entry.name);
+    const sessionId = entry.name.replace(/\.jsonl$/, "");
+    const file = Bun.file(path);
+    let parsedRecords: Record<string, unknown>[] = [];
+    try {
+      const text = await file.text();
+      parsedRecords = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .flatMap((line) => {
+          try {
+            const parsed = JSON.parse(line);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+              ? [parsed as Record<string, unknown>]
+              : [];
+          } catch {
+            return [];
+          }
+        });
+    } catch {
+      continue;
+    }
+
+    let prompt: string | undefined;
+    let brainId: string | undefined;
+    let primaryRole: string | undefined;
+    let sessionHasUsage = false;
+    for (const record of parsedRecords) {
+      if (record.type !== "run_start") continue;
+      prompt = prompt ?? stringField(record, "prompt");
+      const plan = planFields(record.plan);
+      brainId = brainId ?? plan.brainId;
+      primaryRole = primaryRole ?? plan.role;
+    }
+
+    for (const record of parsedRecords) {
+      if (record.type !== "token_usage") continue;
+      const usage = normalizeTokenUsage(record.usage);
+      if (!usage) continue;
+      sessionHasUsage = true;
+      const timestamp = numberField(record, "timestamp");
+      const modelId = stringField(record, "modelId") ?? stringField(record, "model");
+      const provider = stringField(record, "provider");
+      const role = stringField(record, "role") ?? "unknown";
+      const phase = stringField(record, "phase") ?? "unknown";
+      const detail: UsageStatsDetail = {
+        sessionId,
+        path,
+        timestamp,
+        prompt,
+        brainId: brainId ?? stringField(record, "brainId"),
+        primaryRole,
+        role,
+        phase,
+        modelId,
+        provider,
+        agentSessionId: stringField(record, "agentSessionId"),
+        taskId: stringField(record, "taskId"),
+        parentId: stringField(record, "parentId"),
+        turnId: stringField(record, "turnId"),
+        attempt: numberField(record, "attempt"),
+        usage,
+      };
+      stats.recent.push(detail);
+      addTokenUsage(stats.totals, usage);
+      if (modelId) {
+        addUsageBucket(modelBuckets, {
+          id: modelId,
+          label: modelId,
+          provider,
+          modelId,
+        }, usage, timestamp);
+      }
+      addUsageBucket(roleBuckets, {
+        id: role,
+        label: role,
+        role,
+      }, usage, timestamp);
+      addUsageBucket(phaseBuckets, {
+        id: phase,
+        label: phase,
+        phase,
+      }, usage, timestamp);
+    }
+    if (sessionHasUsage) stats.sessions += 1;
+  }
+
+  stats.byModel = sortedUsageBuckets(modelBuckets);
+  stats.byRole = sortedUsageBuckets(roleBuckets);
+  stats.byPhase = sortedUsageBuckets(phaseBuckets);
+  stats.recent.sort((left, right) => (right.timestamp ?? 0) - (left.timestamp ?? 0));
+  stats.recent = stats.recent.slice(0, detailLimit);
+  return stats;
+}
+
+function createEmptyUsageStats(): UsageStats {
+  return {
+    generatedAt: Date.now(),
+    sessions: 0,
+    totals: emptyTokenUsageTotals(),
+    byModel: [],
+    byRole: [],
+    byPhase: [],
+    recent: [],
+  };
+}
+
+function addUsageBucket(
+  buckets: Map<string, UsageStatsBucket>,
+  identity: Pick<UsageStatsBucket, "id" | "label" | "provider" | "modelId" | "role" | "phase">,
+  usage: TokenUsageSnapshot,
+  timestamp?: number,
+): void {
+  const bucket = buckets.get(identity.id) ?? {
+    ...identity,
+    ...emptyTokenUsageTotals(),
+  };
+  addTokenUsage(bucket, usage);
+  if (timestamp !== undefined) {
+    bucket.lastUsedAt = Math.max(bucket.lastUsedAt ?? 0, timestamp);
+  }
+  buckets.set(identity.id, bucket);
+}
+
+function sortedUsageBuckets(buckets: Map<string, UsageStatsBucket>): UsageStatsBucket[] {
+  return Array.from(buckets.values()).sort((left, right) =>
+    right.total - left.total || right.calls - left.calls || left.label.localeCompare(right.label),
+  );
+}
+
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -910,6 +1157,72 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 function numberField(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function positiveNumberField(record: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function emptyTokenUsage(): TokenUsageSnapshot {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+}
+
+function emptyTokenUsageTotals(): TokenUsageTotals {
+  return { ...emptyTokenUsage(), calls: 0 };
+}
+
+export function normalizeTokenUsage(value: unknown): TokenUsageSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const input = positiveNumberField(record, [
+    "input",
+    "inputTokens",
+    "input_tokens",
+    "promptTokens",
+    "prompt_tokens",
+  ]);
+  const output = positiveNumberField(record, [
+    "output",
+    "outputTokens",
+    "output_tokens",
+    "completionTokens",
+    "completion_tokens",
+  ]);
+  const cacheRead = positiveNumberField(record, [
+    "cacheRead",
+    "cache_read",
+    "cacheReadTokens",
+    "cache_read_tokens",
+  ]);
+  const cacheWrite = positiveNumberField(record, [
+    "cacheWrite",
+    "cache_write",
+    "cacheWriteTokens",
+    "cache_write_tokens",
+  ]);
+  const explicitTotal = positiveNumberField(record, [
+    "total",
+    "totalTokens",
+    "total_tokens",
+  ]);
+  const total = explicitTotal || input + output + cacheRead + cacheWrite;
+  if (total <= 0) return undefined;
+  return { input, output, cacheRead, cacheWrite, total };
+}
+
+function addTokenUsage(total: TokenUsageTotals, usage: TokenUsageSnapshot): void {
+  total.input += usage.input;
+  total.output += usage.output;
+  total.cacheRead += usage.cacheRead;
+  total.cacheWrite += usage.cacheWrite;
+  total.total += usage.total;
+  total.calls += 1;
 }
 
 function objectField(record: Record<string, unknown>, key: string): Record<string, unknown> | undefined {

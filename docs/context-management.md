@@ -126,7 +126,7 @@ These constraints are how the isolation invariant survives a model that "wants" 
 
 The orchestrator supports two reference markers at the top of the run:
 
-- `@<path>` — attach a file or image to the root prompt. Text files under 64 KB are inlined in a fenced block. Images are referenced by relative path. Missing or oversize files become a `missing` reference with a reason instead of an error, so the model knows the attachment was intended but not delivered.
+- `@<path>` — attach a file or image to the root prompt. Text files under 64 KB are inlined in a fenced block. Supported images are sent as image inputs and force runtime model selection to use vision-capable candidates only. Missing or oversize files become a `missing` reference with a reason instead of an error, so the model knows the attachment was intended but not delivered.
 - `@@<session-id>` — attach a **compact** snapshot of a prior session. Built by `readSessionContext` in `packages/config` from the session's JSONL: initial prompt, final summary, worker summaries, errors. Hard-capped at 24 KB total, with per-field clipping. **It must not inline a full transcript or worker-private context.**
 
 Workers do not get a separate copy of these references. They see only the expanded root request plus their own handoff packet — same isolation rule.

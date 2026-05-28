@@ -222,6 +222,8 @@ Each worker (and the primary) pulls an ordered list of candidates from `selectRu
 1. The policy's `modelId`, then `fallbackModelIds`, in order.
 2. **Catalog-wide cross-provider fallback** — any other configured model whose provider has an API key and was not already tried.
 
+If prompt expansion attached image inputs, the same candidate path is called with `requiresVision: true`. This is a hard runtime constraint for the router brain, support workers, primary agent, and review worker: text-only models are skipped before provider execution, even when they are first in the role policy or would otherwise qualify as cross-provider fallbacks.
+
 The cross-provider safety net is deliberate: a regional or upstream failure on one provider (e.g. an OpenAI 400 from a proxy) should automatically roll over to a different provider that you have keys for. Each attempt is logged (`run_error` / `worker_error`) with `willFallback: true|false`.
 
 When extending policy or adding a model field, make sure both the explicit list and the catalog scan respect it.

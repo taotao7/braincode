@@ -9,7 +9,7 @@ export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTask
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
+import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, normalizeTokenUsage, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
@@ -181,6 +181,10 @@ export type RuntimeModelSelection = {
   piModel: Model<any>
 }
 
+export type RuntimeModelRequirements = {
+  requiresVision?: boolean
+}
+
 type ToolEvidenceCacheEntry = {
   result: AgentToolResult<any>
   createdAt: number
@@ -204,6 +208,19 @@ export type BraincodeAgentRuntimeOptions = {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
+  usage?: TokenUsageScope
+}
+
+export type TokenUsageScope = {
+  sessionId: string
+  home?: string
+  role: AgentRole
+  phase: TokenUsagePhase
+  agentSessionId?: string
+  taskId?: string
+  parentId?: string
+  attempt?: number
+  brainId?: string
 }
 
 export type BraincodeAgentRuntime = {
@@ -265,6 +282,11 @@ export type PlanRuntimeOptions = {
    * Set false only for heuristic-only diagnostics that must not call a provider.
    */
   useRouterBrain?: boolean
+  /**
+   * Base directory for @file/image references during plan previews.
+   * Defaults to the current process working directory.
+   */
+  projectRoot?: string
 }
 
 type RouterPlanDecision = AgentRoutingPlan & {
@@ -534,10 +556,27 @@ async function runAndRecordHooks(
   return result
 }
 
-export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]): RuntimeModelSelection {
+function runtimeModelSupportsVision(selection: RuntimeModelSelection): boolean {
+  if (selection.configured.supportsVision === false) return false
+  if (selection.piModel.input?.includes("image")) return true
+  return selection.configured.supportsVision === true
+}
+
+function runtimeModelRequirementError(selection: RuntimeModelSelection, requirements?: RuntimeModelRequirements): string | undefined {
+  if (requirements?.requiresVision && !runtimeModelSupportsVision(selection)) {
+    return "image input requires a vision-capable model"
+  }
+  return undefined
+}
+
+function runtimeModelRequirementsForImages(images: ImageContent[]): RuntimeModelRequirements | undefined {
+  return images.length > 0 ? { requiresVision: true } : undefined
+}
+
+export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeModelSelection {
   const modelIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
-  debugLog("runtime", "selecting runtime model", { modelIds, configuredModelCount: models.length })
+  debugLog("runtime", "selecting runtime model", { modelIds, configuredModelCount: models.length, requirements })
 
   for (const modelId of modelIds) {
     const configured = models.find((model) => model.id === modelId)
@@ -548,11 +587,17 @@ export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]
 
     try {
       const { piModel } = resolveBuiltInPiModel(configured)
-      return {
+      const selection = {
         requested: policy,
         configured,
         piModel,
       }
+      const requirementError = runtimeModelRequirementError(selection, requirements)
+      if (requirementError) {
+        errors.push(`${modelId}: ${requirementError}`)
+        continue
+      }
+      return selection
     } catch (error) {
       errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -570,9 +615,9 @@ function toPiModelSummary(selection: RuntimeModelSelection): RuntimePiModelSumma
   }
 }
 
-function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[]): RuntimeWorkerPlan {
+function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeWorkerPlan {
   const policy = selectModelPolicy(brain, worker.role)
-  const selection = selectRuntimeModel(policy, models)
+  const selection = selectRuntimeModel(policy, models, requirements)
   return {
     ...worker,
     contextId: crypto.randomUUID(),
@@ -582,13 +627,13 @@ function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, mod
   }
 }
 
-async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<{ selection: RuntimeModelSelection; apiKey: string }> {
-  const candidates = await selectRuntimeModelCandidatesWithApiKey(policy, models, home)
+async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements): Promise<{ selection: RuntimeModelSelection; apiKey: string }> {
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(policy, models, home, requirements)
   if (candidates[0]) return candidates[0]
   throw new Error("No usable model with API key for policy")
 }
 
-async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string): Promise<Array<{ selection: RuntimeModelSelection; apiKey: string }>> {
+async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements): Promise<Array<{ selection: RuntimeModelSelection; apiKey: string }>> {
   const explicitIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
   const candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }> = []
@@ -597,7 +642,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
 
   for (const modelId of explicitIds) {
     try {
-      const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models)
+      const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models, requirements)
       const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
       if (!apiKey) {
         errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
@@ -618,7 +663,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
     if (seenIds.has(model.id)) continue
     if (seenProviders.has(model.provider)) continue
     try {
-      const selection = selectRuntimeModel({ ...policy, modelId: model.id, fallbackModelIds: [] }, models)
+      const selection = selectRuntimeModel({ ...policy, modelId: model.id, fallbackModelIds: [] }, models, requirements)
       const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
       if (!apiKey) continue
       seenIds.add(model.id)
@@ -637,6 +682,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
       modelId: selection.piModel.id,
       api: selection.configured.api,
     })),
+    requirements,
     errors,
   })
 
@@ -877,6 +923,38 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       configured: options.model,
       piModel,
     },
+  }
+}
+
+async function recordAgentTokenUsage(
+  messages: unknown[],
+  scope: TokenUsageScope | undefined,
+  model: BraincodeModel,
+): Promise<void> {
+  if (!scope) return
+  let usageIndex = 0
+  for (const [messageIndex, message] of messages.entries()) {
+    if (!message || typeof message !== "object") continue
+    const usage = normalizeTokenUsage((message as { usage?: unknown }).usage)
+    if (!usage) continue
+    usageIndex += 1
+    await appendTokenUsageRecord(
+      scope.sessionId,
+      {
+        role: scope.role,
+        phase: scope.phase,
+        brainId: scope.brainId,
+        modelId: model.id,
+        provider: model.provider,
+        agentSessionId: scope.agentSessionId,
+        taskId: scope.taskId,
+        parentId: scope.parentId,
+        turnId: `${scope.agentSessionId ?? scope.sessionId}:${messageIndex}:${usageIndex}`,
+        attempt: scope.attempt,
+        usage,
+      },
+      scope.home,
+    )
   }
 }
 
@@ -1513,12 +1591,13 @@ function formatModeRoutingDirective(mode: BraincodeMode, policy: ModePolicy, lim
   ].join("\n")
 }
 
-async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, modePolicy: ModePolicy, routingLimits: ModeRoutingLimits, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string): Promise<RouterPlanDecision | undefined> {
+async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, modePolicy: ModePolicy, routingLimits: ModeRoutingLimits, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string, usageSessionId?: string): Promise<RouterPlanDecision | undefined> {
   const routerPolicy = brain.planner ?? brain.roles.routeBrain
   if (!routerPolicy?.modelId) return undefined
+  const requirements = runtimeModelRequirementsForImages(images)
 
   try {
-    const { selection: routerSelection, apiKey } = await selectRuntimeModelWithApiKey(routerPolicy, models, home)
+    const { selection: routerSelection, apiKey } = await selectRuntimeModelWithApiKey(routerPolicy, models, home, requirements)
 
     const runtime = createBraincodeAgentRuntime({
       mode,
@@ -1530,7 +1609,8 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
 
     const roleEnum = routedAgentRoles.map((role) => `"${role}"`).join("|")
 
-    await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
+    try {
+      await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
 
 ${formatModeRoutingDirective(mode, modePolicy, routingLimits)}
 
@@ -1565,6 +1645,24 @@ Output constraints:
 
 User prompt:
 ${prompt}`, images.length > 0 ? images : undefined)
+    } finally {
+      await recordAgentTokenUsage(
+        runtime.agent.state.messages,
+        usageSessionId
+          ? {
+              sessionId: usageSessionId,
+              home,
+              role: "routeBrain",
+              phase: "router",
+              agentSessionId: `${usageSessionId}:router`,
+              taskId: `${usageSessionId}:router`,
+              parentId: usageSessionId,
+              brainId: brain.id,
+            }
+          : undefined,
+        routerSelection.configured,
+      )
+    }
 
     const text = requireAssistantText(runtime.agent.state.messages, {
       stage: "router",
@@ -1584,16 +1682,17 @@ ${prompt}`, images.length > 0 ? images : undefined)
   }
 }
 
-async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId: string = crypto.randomUUID()): Promise<RuntimePlan> {
+async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId: string = crypto.randomUUID(), usageSessionId?: string): Promise<RuntimePlan> {
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
+  const requirements = runtimeModelRequirementsForImages(images)
   const brain = selectBrain(brains as BrainPreset[], settings.defaultBrainId)
   const modePolicy = getModePolicy(settings.mode)
   const routingLimits = getModeRoutingLimits(settings.mode, brain.routing?.maxParallelAgents)
   const heuristicPlan = planAgentRouting(prompt, brain)
   const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
-    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, modePolicy, routingLimits, heuristicPlan, images, home)
+    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, modePolicy, routingLimits, heuristicPlan, images, home, usageSessionId)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
   const agentPlan = normalizeAgentRoutingPlan(forceRoles && forceRoles.length > 0
@@ -1612,7 +1711,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     : baseAgentPlan)
   const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
-  const selection = selectRuntimeModel(policy, models as BraincodeModel[])
+  const selection = selectRuntimeModel(policy, models as BraincodeModel[], requirements)
   const runtimeWorkerInputs = [...agentPlan.workers]
   if (agentPlan.requiresReview && role !== "review" && !runtimeWorkerInputs.some((worker) => worker.role === "review")) {
     runtimeWorkerInputs.push({
@@ -1622,7 +1721,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     })
   }
   const runtimeTodoPlan = normalizeAgentRoutingPlan({ ...agentPlan, workers: runtimeWorkerInputs, todos: agentPlan.todos, dependencies: agentPlan.dependencies })
-  const workers = runtimeTodoPlan.workers.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[]))
+  const workers = runtimeTodoPlan.workers.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[], requirements))
   const context = createBrainTaskContext({
     id: brainContextId,
     goal: prompt,
@@ -1666,7 +1765,10 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
 }
 
 export async function planRuntimeFromConfig(prompt: string, home?: string, options: PlanRuntimeOptions = {}): Promise<RuntimePlan> {
-  return buildRuntimePlan(prompt, home, options.useRouterBrain ?? true)
+  const projectRoot = options.projectRoot ?? process.cwd()
+  const useRouterBrain = options.useRouterBrain ?? true
+  const expanded = await expandPromptReferences(prompt, projectRoot, home, { generateSessionHandoffs: useRouterBrain })
+  return buildRuntimePlan(expanded.prompt, home, useRouterBrain, undefined, expanded.images)
 }
 
 export type ResolvedPetRuntime = {
@@ -2262,9 +2364,10 @@ async function runWorkerFromPlan(
   const handoff = createWorkerHandoff(worker, sessionId, phase, projectSupport)
   await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createHandoffAgentMessage(handoff) }, home)
   let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
+  const requirements = runtimeModelRequirementsForImages(promptImages)
 
   try {
-    candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home)
+    candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home, requirements)
   } catch (error) {
     const result = failedWorkerResult(worker, handoff, error)
     await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
@@ -2327,7 +2430,24 @@ async function runWorkerFromPlan(
           ...(subagentStartHooks.blockedReason ? [subagentStartHooks.blockedReason] : []),
         ],
       )
-      await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
+      try {
+        await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
+      } finally {
+        await recordAgentTokenUsage(
+          runtime.agent.state.messages,
+          {
+            sessionId,
+            home,
+            role: worker.role,
+            phase,
+            agentSessionId,
+            taskId: handoff.task.id,
+            parentId: handoff.task.parentId,
+            attempt: attempt + 1,
+          },
+          selection.configured,
+        )
+      }
       const text = requireAssistantText(runtime.agent.state.messages, {
         stage: "worker",
         phase,
@@ -2561,7 +2681,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   const promptImages = expanded.images
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
-  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId)
+  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId, sessionId)
   await appendSessionRecord(sessionId, { type: "context_plan", context: plan.context }, home)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
   if (request.onPlan) {
@@ -2573,7 +2693,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
-  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home)
+  const requirements = runtimeModelRequirementsForImages(promptImages)
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
 
   const projectSupport = await readProjectSupport(cwd)
   const userSupport = await readUserSupport(home)
@@ -2674,7 +2795,25 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       })
 
       try {
-        await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
+        try {
+          await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
+        } finally {
+          await recordAgentTokenUsage(
+            runtime.agent.state.messages,
+            {
+              sessionId,
+              home,
+              role: plan.role,
+              phase: "primary",
+              agentSessionId: sessionId,
+              taskId: primaryTaskId,
+              parentId: plan.context.id,
+              attempt: attempt + 1,
+              brainId: plan.brain.id,
+            },
+            selection.configured,
+          )
+        }
         const primarySummary = requireAssistantText(runtime.agent.state.messages, {
           stage: "primary",
           role: plan.role,
@@ -2849,6 +2988,10 @@ export type ExpandedPromptResult = {
   images: ImageContent[]
 }
 
+export type ExpandPromptReferencesOptions = {
+  generateSessionHandoffs?: boolean
+}
+
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"])
 const SUPPORTED_IMAGE_MIME_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -2927,12 +3070,13 @@ function formatSessionContext(context: SessionContext): string {
   return clipContextText(lines.join("\n"), MAX_INLINE_SESSION_CHARS)
 }
 
-export async function expandPromptReferences(prompt: string, projectRoot: string, home?: string): Promise<ExpandedPromptResult> {
+export async function expandPromptReferences(prompt: string, projectRoot: string, home?: string, options: ExpandPromptReferencesOptions = {}): Promise<ExpandedPromptResult> {
   const references: PromptReference[] = []
   const images: ImageContent[] = []
   const tokens = new Map<string, PromptReference>()
   const sessionContexts = new Map<string, SessionContext>()
   const sessionBriefs = new Map<string, string>()
+  const generateSessionHandoffs = options.generateSessionHandoffs ?? true
   const pattern = /(^|\s)(@@?)([^\s@]+)/g
   let match: RegExpExecArray | null
   while ((match = pattern.exec(prompt)) !== null) {
@@ -2953,12 +3097,14 @@ export async function expandPromptReferences(prompt: string, projectRoot: string
       tokens.set(token, ref)
       sessionContexts.set(token, context)
       references.push(ref)
-      try {
-        const handoff = await ensureSessionHandoff(context.sessionId, { trigger: "auto" }, home)
-        sessionBriefs.set(token, handoff.summary)
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        debugLog("expandPromptReferences", `handoff for @@${context.sessionId} failed, falling back to mechanical context`, { error: detail })
+      if (generateSessionHandoffs) {
+        try {
+          const handoff = await ensureSessionHandoff(context.sessionId, { trigger: "auto" }, home)
+          sessionBriefs.set(token, handoff.summary)
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          debugLog("expandPromptReferences", `handoff for @@${context.sessionId} failed, falling back to mechanical context`, { error: detail })
+        }
       }
       continue
     }

@@ -7,6 +7,30 @@ import { Type } from "typebox"
 import { appendSessionRecord, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
 import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
+const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
+
+function createTestBrainDocument(modelId: string, fallbackModelIds: string[] = []) {
+  const policy = { modelId, fallbackModelIds, thinkingLevel: "medium" }
+  return {
+    brains: [
+      {
+        id: "brain",
+        name: "Brain",
+        description: "Test brain",
+        planner: policy,
+        roles: Object.fromEntries(TEST_ROLE_NAMES.map((role) => [role, policy])),
+        routing: {
+          maxParallelAgents: 2,
+          preferCheapModelForSimpleTasks: true,
+          escalateOnUncertainty: true,
+          requireReviewForFileEdits: true,
+        },
+        context: { maxInputTokens: 1000, compaction: "auto", isolation: "strict" },
+      },
+    ],
+  }
+}
+
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
     selectRuntimeModel(
@@ -41,6 +65,61 @@ test("selectRuntimeModel falls back when the primary model is unavailable", () =
   )
 
   expect(selection.configured.id).toBe("known")
+})
+
+test("selectRuntimeModel skips text-only models when image input is required", () => {
+  const selection = selectRuntimeModel(
+    { modelId: "custom/text", fallbackModelIds: ["custom/vision"], thinkingLevel: "low" },
+    [
+      {
+        id: "custom/text",
+        provider: "custom-text",
+        modelId: "text",
+        name: "Text",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: false,
+      },
+      {
+        id: "custom/vision",
+        provider: "custom-vision",
+        modelId: "vision",
+        name: "Vision",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: true,
+      },
+    ],
+    { requiresVision: true },
+  )
+
+  expect(selection.configured.id).toBe("custom/vision")
+})
+
+test("selectRuntimeModel rejects text-only policies when image input has no vision fallback", () => {
+  expect(() =>
+    selectRuntimeModel(
+      { modelId: "custom/text", thinkingLevel: "low" },
+      [
+        {
+          id: "custom/text",
+          provider: "custom-text",
+          modelId: "text",
+          name: "Text",
+          api: "openai-completions",
+          baseUrl: "http://localhost:9999/v1",
+          contextWindow: 128000,
+          supportsTools: true,
+          supportsVision: false,
+        },
+      ],
+      { requiresVision: true },
+    ),
+  ).toThrow("image input requires a vision-capable model")
 })
 
 test("createBraincodeAgentRuntime normalizes minimal thinking for OpenAI-compatible models", () => {
@@ -635,6 +714,40 @@ test("expandPromptReferences reuses a cached handoff brief without re-summarizin
   }
 })
 
+test("expandPromptReferences can skip session handoff briefs for heuristic previews", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-skip-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-skip-project-test-"))
+  try {
+    await appendSessionRecord("handoff-skip-test", {
+      type: "run_start",
+      prompt: "earlier task",
+      plan: { brain: { id: "brain" }, role: "rush" },
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("handoff-skip-test", {
+      type: "run_end",
+      summary: "earlier summary",
+      attempt: 1,
+    }, home)
+    await appendSessionRecord("handoff-skip-test", {
+      type: "handoff",
+      timestamp: Date.now(),
+      summary: "BRIEF_MARKER cached handoff bullets",
+      trigger: "manual",
+    }, home)
+
+    const result = await expandPromptReferences("continue from @@handoff-skip-test", projectRoot, home, { generateSessionHandoffs: false })
+
+    expect(result.references[0]?.kind).toBe("session")
+    expect(result.prompt).toContain("compact session context only")
+    expect(result.prompt).toContain("earlier summary")
+    expect(result.prompt).not.toContain("handoff brief")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("expandPromptReferences regenerates a handoff if newer activity supersedes the cached brief", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-stale-home-test-"))
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-handoff-stale-project-test-"))
@@ -703,6 +816,63 @@ test("expandPromptReferences keeps unsupported image formats as text-only refere
     expect(result.images).toHaveLength(0)
     expect(result.prompt).toContain("format not inlineable as image")
   } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("planRuntimeFromConfig chooses a vision-capable model when prompt references an image", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-plan-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-plan-project-test-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom-text",
+            modelId: "text",
+            name: "Text",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: false,
+          },
+          {
+            id: "custom/vision",
+            provider: "custom-vision",
+            modelId: "vision",
+            name: "Vision",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(createTestBrainDocument("custom/text", ["custom/vision"]), home)
+    const pngPath = join(projectRoot, "snap.png")
+    await Bun.write(pngPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+
+    const plan = await planRuntimeFromConfig(`describe @${pngPath}`, home, { useRouterBrain: false, projectRoot })
+
+    expect(plan.model.id).toBe("custom/vision")
+    expect(plan.workers.every((worker) => worker.model.id === "custom/vision")).toBe(true)
+    expect(plan.routing.source).toBe("heuristic")
+  } finally {
+    await rm(home, { recursive: true, force: true })
     await rm(projectRoot, { recursive: true, force: true })
   }
 })

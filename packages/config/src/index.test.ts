@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, appendTokenUsageRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -485,6 +485,63 @@ test("appendSessionRecord writes jsonl session records", async () => {
   const text = await Bun.file(join(paths.sessions, "test-session.jsonl")).text()
   expect(text.trim()).toContain('"type":"run_start"')
   await expect(appendSessionRecord("../escape", { type: "run_start", prompt: "bad" }, home)).rejects.toThrow("sessionId may only contain")
+})
+
+test("token usage records aggregate by model, role, and phase", async () => {
+  const home = await makeTempHome()
+
+  expect(normalizeTokenUsage({ prompt_tokens: 100, completion_tokens: 25 })).toEqual({
+    input: 100,
+    output: 25,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 125,
+  })
+
+  await appendTokenUsageRecord("usage-session", {
+    role: "routeBrain",
+    phase: "router",
+    brainId: "brain",
+    modelId: "provider/router",
+    provider: "provider",
+    agentSessionId: "usage-session:router",
+    usage: { input: 10, output: 5, totalTokens: 15 },
+  }, home)
+  await appendSessionRecord("usage-session", {
+    type: "run_start",
+    prompt: "implement stats",
+    plan: { brain: { id: "brain" }, role: "backend" },
+  }, home)
+  await appendTokenUsageRecord("usage-session", {
+    role: "backend",
+    phase: "primary",
+    modelId: "provider/main",
+    provider: "provider",
+    agentSessionId: "usage-session",
+    usage: { prompt_tokens: 40, completion_tokens: 20, cache_read_tokens: 3 },
+  }, home)
+  await appendTokenUsageRecord("usage-session", {
+    role: "backend",
+    phase: "primary",
+    modelId: "provider/main",
+    provider: "provider",
+    usage: { total: 0 },
+  }, home)
+
+  const stats = await readUsageStats(home)
+
+  expect(stats.sessions).toBe(1)
+  expect(stats.totals).toMatchObject({ calls: 2, input: 50, output: 25, cacheRead: 3, total: 78 })
+  expect(stats.byModel.map((bucket) => [bucket.id, bucket.total])).toEqual([
+    ["provider/main", 63],
+    ["provider/router", 15],
+  ])
+  expect(stats.byRole.find((bucket) => bucket.id === "backend")?.calls).toBe(1)
+  expect(stats.byPhase.find((bucket) => bucket.id === "router")?.total).toBe(15)
+  expect(stats.recent).toHaveLength(2)
+  expect(stats.recent[0]?.prompt).toBe("implement stats")
+  expect(stats.recent[0]?.brainId).toBe("brain")
+  expect(stats.recent[0]?.primaryRole).toBe("backend")
 })
 
 test("readSessionContext returns compact session records", async () => {

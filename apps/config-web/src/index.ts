@@ -203,6 +203,7 @@ export const configWebHtml = `<!doctype html>
       .item-header { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
       .item-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
       .model-summary { min-width: 0; overflow-wrap: anywhere; }
+      .usage-chip { display: inline-flex; align-items: center; width: fit-content; margin-top: 8px; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font: 11px var(--font-mono); }
       .model-edit-form {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -219,6 +220,17 @@ export const configWebHtml = `<!doctype html>
       .test-result { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-hover); }
       .test-result.ok { color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
       .test-result.fail { color: var(--danger-fg); box-shadow: inset 4px 0 0 var(--danger-fg); }
+      .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap-md); }
+      .metric { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+      .metric-label { color: var(--muted); font: 11px var(--font-mono); text-transform: uppercase; }
+      .metric-value { margin-top: 4px; color: var(--fg); font: 600 22px var(--font-mono); line-height: 1.15; overflow-wrap: anywhere; }
+      .stats-board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: var(--gap-lg); align-items: start; }
+      .stats-row { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: var(--gap-sm); align-items: center; justify-content: stretch; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font: 12px var(--font-mono); text-align: left; }
+      .stats-row-main { min-width: 0; overflow-wrap: anywhere; }
+      .stats-row-meta { color: var(--muted); }
+      .stats-lists { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-md); }
+      .detail-list { display: grid; gap: 8px; max-height: 560px; overflow: auto; }
+      .detail-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font: 12px/1.45 var(--font-mono); white-space: pre-line; overflow-wrap: anywhere; }
       .routing-toolbar { margin-bottom: var(--gap-md); padding: var(--gap-md); border-radius: var(--radius-lg); background: var(--bg-hover); }
       #role-models { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap-md); }
       .role-row { display: grid; gap: var(--gap-sm); margin-bottom: 10px; }
@@ -235,7 +247,7 @@ export const configWebHtml = `<!doctype html>
       .combo-option { padding: 6px 10px; border-radius: 3px; cursor: pointer; font: 13px/1.3 var(--font-mono); }
       .combo-option:hover, .combo-option.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
       .combo-empty { padding: 6px 10px; color: var(--muted); font: 12px var(--font-mono); }
-      @media (max-width: 900px) { .panel-grid, #role-models { grid-template-columns: 1fr; } .hero-split { align-items: flex-start; flex-direction: column; } .logo-card::before { display: none; } }
+      @media (max-width: 900px) { .panel-grid, .stats-board, .stats-lists, #role-models { grid-template-columns: 1fr; } .hero-split { align-items: flex-start; flex-direction: column; } .logo-card::before { display: none; } }
     </style>
   </head>
   <body>
@@ -327,6 +339,32 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
+        <section id="usage-section">
+          <div class="container stack">
+          <h2 data-i18n="usageStatsTitle">Usage statistics</h2>
+          <p class="muted" data-i18n="usageStatsHint">Token usage collected from local session records, grouped by model, agent role, and runtime phase.</p>
+          <div id="usage-summary" class="metric-grid"></div>
+          <div class="stats-board">
+            <div class="stack">
+              <div class="row-between">
+                <h3 data-i18n="usageByModel">By model</h3>
+                <button id="usage-show-all" type="button" data-i18n="usageShowAll">Show all details</button>
+              </div>
+              <div id="usage-models" class="list"></div>
+            </div>
+            <div class="stack">
+              <h3 id="usage-detail-title" data-i18n="usageRecent">Recent details</h3>
+              <div id="usage-details" class="detail-list"></div>
+            </div>
+          </div>
+          <div class="stats-lists">
+            <div class="stack"><h3 data-i18n="usageByRole">By role</h3><div id="usage-roles" class="list"></div></div>
+            <div class="stack"><h3 data-i18n="usageByPhase">By phase</h3><div id="usage-phases" class="list"></div></div>
+            <div class="stack"><h3 data-i18n="usageDetails">Details</h3><div id="usage-filter-note" class="item"></div></div>
+          </div>
+          </div>
+        </section>
+
         <section>
           <div class="container stack">
           <h2 data-i18n="brainRoutingTitle">Brain routing</h2>
@@ -373,6 +411,7 @@ export const configWebHtml = `<!doctype html>
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
+          usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
@@ -398,6 +437,7 @@ export const configWebHtml = `<!doctype html>
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
+          usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
@@ -458,6 +498,14 @@ export const configWebHtml = `<!doctype html>
       const testManualModelButton = document.querySelector("#test-manual-model")
       const manualTestResult = document.querySelector("#manual-test-result")
       const configuredModels = document.querySelector("#configured-models")
+      const usageSummary = document.querySelector("#usage-summary")
+      const usageModels = document.querySelector("#usage-models")
+      const usageRoles = document.querySelector("#usage-roles")
+      const usagePhases = document.querySelector("#usage-phases")
+      const usageDetails = document.querySelector("#usage-details")
+      const usageDetailTitle = document.querySelector("#usage-detail-title")
+      const usageFilterNote = document.querySelector("#usage-filter-note")
+      const usageShowAll = document.querySelector("#usage-show-all")
       const brainSelect = document.querySelector("#brain-select")
       const applyAllModel = document.querySelector("#apply-all-model")
       const applyAllRoles = document.querySelector("#apply-all-roles")
@@ -475,6 +523,8 @@ export const configWebHtml = `<!doctype html>
       let currentBrains = { brains: [] }
       let currentModels = { models: [] }
       let currentTools = { tools: [] }
+      let currentUsageStats = { generatedAt: Date.now(), sessions: 0, totals: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byModel: [], byRole: [], byPhase: [], recent: [] }
+      let currentUsageFilter = null
       let catalog = { providers: [] }
       let oauthProviders = []
       let oauthLoginSession = null
@@ -749,6 +799,131 @@ export const configWebHtml = `<!doctype html>
         status.textContent = message
       }
 
+      function numberFormatter() {
+        return new Intl.NumberFormat(currentLang === "zh" ? "zh-CN" : "en-US")
+      }
+
+      function formatCompactTokens(value) {
+        const number = Number(value) || 0
+        if (number >= 1000000) return trimZero((number / 1000000).toFixed(1)) + "m"
+        if (number >= 1000) return trimZero((number / 1000).toFixed(1)) + "k"
+        return numberFormatter().format(Math.round(number))
+      }
+
+      function trimZero(value) {
+        return value.endsWith(".0") ? value.slice(0, -2) : value
+      }
+
+      function formatUsageBreakdown(usage) {
+        const parts = [t("usageTokens") + " " + formatCompactTokens(usage?.total)]
+        if ((usage?.input || 0) > 0) parts.push(t("usageInput") + " " + formatCompactTokens(usage.input))
+        if ((usage?.output || 0) > 0) parts.push(t("usageOutput") + " " + formatCompactTokens(usage.output))
+        const cache = (usage?.cacheRead || 0) + (usage?.cacheWrite || 0)
+        if (cache > 0) parts.push(t("usageCache") + " " + formatCompactTokens(cache))
+        return parts.join(" · ")
+      }
+
+      function usageBucketForModel(modelId) {
+        return (currentUsageStats.byModel || []).find((bucket) => bucket.id === modelId)
+      }
+
+      function modelUsageLabel(modelId) {
+        const bucket = usageBucketForModel(modelId)
+        if (!bucket) return t("usageNoData")
+        return formatUsageBreakdown(bucket) + " · " + t("usageCalls") + " " + numberFormatter().format(bucket.calls || 0)
+      }
+
+      function selectUsageFilter(type, id, label) {
+        currentUsageFilter = type && id ? { type, id, label: label || id } : null
+        renderUsageStats()
+        document.querySelector("#usage-section")?.scrollIntoView({ block: "start" })
+      }
+
+      function createMetric(label, value) {
+        const metric = document.createElement("div")
+        metric.className = "metric"
+        const labelElement = document.createElement("div")
+        labelElement.className = "metric-label"
+        labelElement.textContent = label
+        const valueElement = document.createElement("div")
+        valueElement.className = "metric-value"
+        valueElement.textContent = value
+        metric.append(labelElement, valueElement)
+        return metric
+      }
+
+      function renderUsageStats() {
+        const totals = currentUsageStats.totals || { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+        usageSummary.replaceChildren(
+          createMetric(t("usageTokens"), formatCompactTokens(totals.total)),
+          createMetric(t("usageCalls"), numberFormatter().format(totals.calls || 0)),
+          createMetric(t("usageInput"), formatCompactTokens(totals.input)),
+          createMetric(t("usageOutput"), formatCompactTokens(totals.output)),
+          createMetric(t("usageSessions"), numberFormatter().format(currentUsageStats.sessions || 0)),
+        )
+        renderUsageBucketList(usageModels, currentUsageStats.byModel || [], "model")
+        renderUsageBucketList(usageRoles, currentUsageStats.byRole || [], "role")
+        renderUsageBucketList(usagePhases, currentUsageStats.byPhase || [], "phase")
+        renderUsageDetails()
+      }
+
+      function renderUsageBucketList(container, buckets, type) {
+        if (!buckets.length) {
+          container.innerHTML = '<div class="item">' + t("usageNoData") + '</div>'
+          return
+        }
+        container.replaceChildren(...buckets.map((bucket) => {
+          const row = document.createElement("button")
+          row.type = "button"
+          row.className = "stats-row"
+          const main = document.createElement("div")
+          main.className = "stats-row-main"
+          main.textContent = bucket.label || bucket.id
+          const meta = document.createElement("div")
+          meta.className = "stats-row-meta"
+          meta.textContent = formatCompactTokens(bucket.total) + " · " + numberFormatter().format(bucket.calls || 0)
+          row.append(main, meta)
+          row.addEventListener("click", () => selectUsageFilter(type, bucket.id, bucket.label || bucket.id))
+          return row
+        }))
+      }
+
+      function filteredUsageDetails() {
+        const details = currentUsageStats.recent || []
+        if (!currentUsageFilter) return details
+        return details.filter((detail) => {
+          if (currentUsageFilter.type === "model") return detail.modelId === currentUsageFilter.id
+          if (currentUsageFilter.type === "role") return detail.role === currentUsageFilter.id
+          if (currentUsageFilter.type === "phase") return detail.phase === currentUsageFilter.id
+          return true
+        })
+      }
+
+      function renderUsageDetails() {
+        const details = filteredUsageDetails()
+        const filterTitle = currentUsageFilter
+          ? (currentUsageFilter.type === "model" ? t("usageForModel") : currentUsageFilter.type === "role" ? t("usageForRole") : t("usageForPhase")) + ": " + currentUsageFilter.label
+          : t("usageRecent")
+        usageDetailTitle.textContent = filterTitle
+        usageFilterNote.textContent = currentUsageFilter ? filterTitle + "\\n" + t("usageClickHint") : t("usageClickHint")
+        if (!details.length) {
+          usageDetails.innerHTML = '<div class="detail-item">' + t("usageNoData") + '</div>'
+          return
+        }
+        usageDetails.replaceChildren(...details.slice(0, 80).map((detail) => {
+          const item = document.createElement("div")
+          item.className = "detail-item"
+          const time = detail.timestamp ? new Date(detail.timestamp).toLocaleString(currentLang === "zh" ? "zh-CN" : "en-US") : "-"
+          const prompt = detail.prompt ? "\\n" + t("usageDetails") + ": " + detail.prompt.slice(0, 180) : ""
+          item.textContent = [
+            time + " · " + (detail.role || "unknown") + " · " + (detail.phase || "unknown"),
+            (detail.modelId || "unknown") + " · " + formatUsageBreakdown(detail.usage),
+            "session " + String(detail.sessionId || "").slice(0, 8) + (detail.agentSessionId ? " · agent " + detail.agentSessionId : ""),
+          ].join("\\n") + prompt
+          return item
+        }))
+      }
+
       function createModelEditForm(model, index) {
         const prefix = "edit-model-" + index + "-"
         const form = document.createElement("form")
@@ -857,12 +1032,21 @@ export const configWebHtml = `<!doctype html>
           const text = document.createElement("div")
           text.className = "model-summary"
           const visionTag = model.supportsVision === false ? "" : " · " + t("visionBadge")
-          text.textContent = model.name + visionTag + "\\n" + model.id + "\\n" + model.provider
+          const summaryText = document.createElement("div")
+          summaryText.textContent = model.name + visionTag + "\\n" + model.id + "\\n" + model.provider
+          const usageChip = document.createElement("span")
+          usageChip.className = "usage-chip"
+          usageChip.textContent = modelUsageLabel(model.id)
+          text.append(summaryText, usageChip)
           const button = document.createElement("button")
           button.type = "button"
           button.className = "danger"
           button.textContent = t("remove")
           button.addEventListener("click", () => removeModel(model.id))
+          const usageButton = document.createElement("button")
+          usageButton.type = "button"
+          usageButton.textContent = t("usageDetails")
+          usageButton.addEventListener("click", () => selectUsageFilter("model", model.id, model.name || model.id))
           const editButton = document.createElement("button")
           editButton.type = "button"
           editButton.textContent = t("edit")
@@ -876,7 +1060,7 @@ export const configWebHtml = `<!doctype html>
           testButton.addEventListener("click", () => testModel(model.id, testButton, result))
           const actions = document.createElement("div")
           actions.className = "item-actions"
-          actions.append(editButton, testButton, button)
+          actions.append(usageButton, editButton, testButton, button)
           header.append(text, actions)
           item.append(header, result)
           if (editingModelId === model.id) item.append(createModelEditForm(model, index))
@@ -1121,16 +1305,17 @@ export const configWebHtml = `<!doctype html>
 
       async function loadAll() {
         status.textContent = t("loading")
-        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData] = await Promise.all([
-          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers")
+        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData, usageStatsData] = await Promise.all([
+          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers"), getJson("/api/usage-stats")
         ])
         currentSettings = settingsData
         currentBrains = brainsData
         currentModels = modelsData
         currentTools = toolsData
+        currentUsageStats = usageStatsData
         oauthProviders = oauthProvidersData.providers || []
         authStatus.textContent = JSON.stringify(authStatusData, null, 2)
-        renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderBrainRouting(); renderTools(); renderOAuthProviders()
+        renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders()
         status.textContent = t("loaded")
         loadCatalog().catch(showCatalogError)
         loadSavedProviderModels().catch(showCatalogError)
@@ -1285,7 +1470,8 @@ export const configWebHtml = `<!doctype html>
       }
 
       refresh.addEventListener("click", () => loadAll().catch(showError))
-      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderBrainRouting(); renderTools(); renderOAuthProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
+      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
+      usageShowAll.addEventListener("click", () => selectUsageFilter(null, null, null))
       savedProviderSelect.addEventListener("change", applySavedProvider)
       loadProviderModelsButton.addEventListener("click", () => loadProviderModels().catch(showError))
       testManualModelButton.addEventListener("click", () => testManualModel().catch(showError))
