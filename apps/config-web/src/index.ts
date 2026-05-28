@@ -350,6 +350,16 @@ export const configWebHtml = `<!doctype html>
           <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
           <div class="panel-grid">
             <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.</p><div id="configured-tools" class="list"></div></div>
+            <div class="stack">
+              <h3 data-i18n="subscriptionAuth">Subscription OAuth</h3>
+              <p class="muted" data-i18n="subscriptionAuthHint">Connect subscription-backed providers through Pi OAuth. Tokens are saved in ~/.braincode/auth.json.</p>
+              <div class="field"><label for="oauth-provider-select" data-i18n="oauthProvider">OAuth provider</label><select id="oauth-provider-select"></select></div>
+              <div class="field"><label for="oauth-enterprise-domain" data-i18n="githubEnterpriseDomain">GitHub Enterprise domain</label><input id="oauth-enterprise-domain" autocomplete="off" placeholder="company.ghe.com" /></div>
+              <div class="row"><button id="start-oauth-login" type="button" data-i18n="startOAuthLogin">Start login</button><button id="cancel-oauth-login" type="button" data-i18n="cancelOAuthLogin">Cancel</button></div>
+              <div id="oauth-login-state" class="test-result" hidden></div>
+              <div class="field"><label for="oauth-manual-code" data-i18n="authorizationCode">Authorization code or redirect URL</label><input id="oauth-manual-code" autocomplete="off" /></div>
+              <button id="submit-oauth-code" type="button" data-i18n="submitOAuthCode">Submit code</button>
+            </div>
             <div class="stack"><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
           </div>
           </div>
@@ -364,7 +374,7 @@ export const configWebHtml = `<!doctype html>
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
-          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.",
+          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
@@ -389,7 +399,7 @@ export const configWebHtml = `<!doctype html>
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
-          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。",
+          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
@@ -453,12 +463,24 @@ export const configWebHtml = `<!doctype html>
       const applyAllRoles = document.querySelector("#apply-all-roles")
       const roleModels = document.querySelector("#role-models")
       const configuredTools = document.querySelector("#configured-tools")
+      const oauthProviderSelect = document.querySelector("#oauth-provider-select")
+      const oauthEnterpriseDomainInput = document.querySelector("#oauth-enterprise-domain")
+      const startOAuthLoginButton = document.querySelector("#start-oauth-login")
+      const cancelOAuthLoginButton = document.querySelector("#cancel-oauth-login")
+      const oauthLoginState = document.querySelector("#oauth-login-state")
+      const oauthManualCodeInput = document.querySelector("#oauth-manual-code")
+      const submitOAuthCodeButton = document.querySelector("#submit-oauth-code")
 
       let currentSettings = null
       let currentBrains = { brains: [] }
       let currentModels = { models: [] }
       let currentTools = { tools: [] }
       let catalog = { providers: [] }
+      let oauthProviders = []
+      let oauthLoginSession = null
+      let oauthPollTimer = null
+      let oauthPopup = null
+      let oauthPopupTarget = ""
       let editingModelId = null
       let currentLang = localStorage.getItem("braincode-config-lang") || "en"
       language.value = currentLang
@@ -952,17 +974,151 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("saved") + " tools"
       }
 
+      function renderOAuthProviders() {
+        oauthProviderSelect.replaceChildren(...oauthProviders.map((provider) => option(provider.id, provider.name)))
+        enhanceSelect(oauthProviderSelect)
+      }
+
+      function renderOAuthLoginSession(session) {
+        oauthLoginSession = session
+        oauthLoginState.hidden = false
+        oauthLoginState.className = "test-result" + (session.status === "completed" ? " ok" : session.status === "failed" ? " fail" : "")
+        oauthLoginState.replaceChildren()
+        const lines = [
+          t("oauthState") + ": " + session.status,
+          session.provider + " / " + session.oauthProviderId,
+          ...(session.deviceCode ? ["Code: " + session.deviceCode.userCode, session.deviceCode.verificationUri] : []),
+          ...(session.progress || []),
+          ...(session.error ? [session.error] : []),
+        ].filter(Boolean)
+        const text = document.createElement("div")
+        text.textContent = lines.join("\\n") || t("oauthPending")
+        oauthLoginState.append(text)
+        if (session.auth?.url) {
+          const link = document.createElement("a")
+          link.href = session.auth.url
+          link.target = "_blank"
+          link.rel = "noreferrer"
+          link.textContent = t("openAuthPage")
+          oauthLoginState.append(document.createElement("br"), link)
+        }
+        navigateOAuthPopup(session)
+        if (session.status === "completed") { closeOAuthPopup(); status.textContent = t("oauthCompleted") }
+        if (session.status === "failed" || session.status === "cancelled") { closeOAuthPopup(); status.textContent = t("oauthFailed") }
+      }
+
+      function prepareOAuthPopup() {
+        try {
+          oauthPopup = window.open("about:blank", "braincode-oauth")
+          if (oauthPopup) {
+            oauthPopup.opener = null
+            oauthPopup.document.title = "Braincode OAuth"
+            oauthPopup.document.body.textContent = t("oauthPending")
+          }
+        } catch {
+          oauthPopup = null
+        }
+        oauthPopupTarget = ""
+      }
+
+      function navigateOAuthPopup(session) {
+        const target = session.auth?.url || session.deviceCode?.verificationUri || ""
+        if (!target || target === oauthPopupTarget) return
+        oauthPopupTarget = target
+        try {
+          if (!oauthPopup || oauthPopup.closed) oauthPopup = window.open("about:blank", "braincode-oauth")
+          if (oauthPopup) {
+            oauthPopup.location.href = target
+            oauthPopup.focus()
+          }
+        } catch {
+          oauthPopup = null
+        }
+      }
+
+      function closeOAuthPopup() {
+        try {
+          if (oauthPopup && !oauthPopup.closed) oauthPopup.close()
+        } catch {}
+        oauthPopup = null
+        oauthPopupTarget = ""
+      }
+
+      function stopOAuthPolling() {
+        if (oauthPollTimer) clearInterval(oauthPollTimer)
+        oauthPollTimer = null
+      }
+
+      function pollOAuthLogin(sessionId) {
+        stopOAuthPolling()
+        oauthPollTimer = setInterval(async () => {
+          try {
+            const session = await getJson("/api/oauth/login/" + encodeURIComponent(sessionId))
+            renderOAuthLoginSession(session)
+            if (session.status === "completed" || session.status === "failed" || session.status === "cancelled") {
+              stopOAuthPolling()
+              authStatus.textContent = JSON.stringify(await getJson("/api/auth/status"), null, 2)
+            }
+          } catch (error) {
+            stopOAuthPolling()
+            showError(error)
+          }
+        }, 1500)
+      }
+
+      async function startOAuthLogin() {
+        status.textContent = t("loading")
+        prepareOAuthPopup()
+        try {
+          const providerId = oauthProviderSelect.value
+          const session = await postJson("/api/oauth/login", {
+            oauthProviderId: providerId,
+            provider: providerId,
+            enterpriseDomain: oauthEnterpriseDomainInput.value.trim(),
+          })
+          renderOAuthLoginSession(session)
+          if (session.status === "pending" || session.status === "starting") {
+            pollOAuthLogin(session.id)
+            status.textContent = t("oauthPending")
+          }
+          if (session.status === "completed") {
+            authStatus.textContent = JSON.stringify(await getJson("/api/auth/status"), null, 2)
+          }
+        } catch (error) {
+          closeOAuthPopup()
+          throw error
+        }
+      }
+
+      async function submitOAuthCode() {
+        if (!oauthLoginSession?.id) return
+        const code = oauthManualCodeInput.value.trim()
+        if (!code) return
+        const session = await postJson("/api/oauth/login/" + encodeURIComponent(oauthLoginSession.id) + "/manual-code", { code })
+        oauthManualCodeInput.value = ""
+        renderOAuthLoginSession(session)
+        pollOAuthLogin(session.id)
+      }
+
+      async function cancelOAuthLogin() {
+        if (!oauthLoginSession?.id) return
+        const session = await postJson("/api/oauth/login/" + encodeURIComponent(oauthLoginSession.id) + "/cancel", {})
+        renderOAuthLoginSession(session)
+        stopOAuthPolling()
+      }
+
       async function loadAll() {
         status.textContent = t("loading")
-        const [settingsData, brainsData, modelsData, toolsData, authStatusData] = await Promise.all([
-          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status")
+        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData] = await Promise.all([
+          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers")
         ])
         currentSettings = settingsData
         currentBrains = brainsData
         currentModels = modelsData
         currentTools = toolsData
+        oauthProviders = oauthProvidersData.providers || []
         authStatus.textContent = JSON.stringify(authStatusData, null, 2)
-        renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderBrainRouting(); renderTools()
+        renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderBrainRouting(); renderTools(); renderOAuthProviders()
         status.textContent = t("loaded")
         loadCatalog().catch(showCatalogError)
         loadSavedProviderModels().catch(showCatalogError)
@@ -1117,10 +1273,13 @@ export const configWebHtml = `<!doctype html>
       }
 
       refresh.addEventListener("click", () => loadAll().catch(showError))
-      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderBrainRouting(); renderTools() })
+      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderBrainRouting(); renderTools(); renderOAuthProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
       savedProviderSelect.addEventListener("change", applySavedProvider)
       loadProviderModelsButton.addEventListener("click", () => loadProviderModels().catch(showError))
       testManualModelButton.addEventListener("click", () => testManualModel().catch(showError))
+      startOAuthLoginButton.addEventListener("click", () => startOAuthLogin().catch(showError))
+      submitOAuthCodeButton.addEventListener("click", () => submitOAuthCode().catch(showError))
+      cancelOAuthLoginButton.addEventListener("click", () => cancelOAuthLogin().catch(showError))
       providerSelect.addEventListener("change", renderCatalogModels)
       catalogModelSelect.addEventListener("change", syncCatalogVision)
       brainSelect.addEventListener("change", renderBrainRouting)

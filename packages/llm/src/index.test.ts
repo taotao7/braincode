@@ -1,4 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { afterEach, expect, mock, test } from "bun:test"
+import { writeProviderApiKey, writeProviderOAuthCredentials } from "@braincode/config"
 import type { BraincodeModel } from "./index"
 
 const fakePiModels = {
@@ -57,6 +61,14 @@ const fakePiModels = {
 let completeSimpleCalls: unknown[][] = []
 let completeSimpleResult: unknown = "OK"
 let completeSimpleError: unknown
+let oauthRefreshCalls = 0
+const tempHomes: string[] = []
+
+async function makeTempHome() {
+  const home = await mkdtemp(join(tmpdir(), "braincode-llm-test-"))
+  tempHomes.push(home)
+  return home
+}
 
 function assistantMessage(content: unknown, stopReason = "stop", errorMessage?: string): unknown {
   return {
@@ -96,11 +108,36 @@ mock.module("@earendil-works/pi-ai", () => ({
   validateToolArguments: (_tool: unknown, toolCall: { arguments?: unknown }) => toolCall.arguments,
 }))
 
+mock.module("@earendil-works/pi-ai/oauth", () => ({
+  getOAuthProviders: () => [
+    { id: "anthropic", name: "Anthropic (Claude Pro/Max)", usesCallbackServer: true },
+    { id: "openai-codex", name: "ChatGPT Plus/Pro (Codex Subscription)", usesCallbackServer: true },
+    { id: "github-copilot", name: "GitHub Copilot" },
+  ],
+  getOAuthProvider: (id: string) => {
+    if (!["anthropic", "openai-codex", "github-copilot"].includes(id)) return undefined
+    return {
+      id,
+      name: id,
+      usesCallbackServer: id !== "github-copilot",
+      login: async () => ({ access: "login", refresh: "refresh", expires: Date.now() + 60000 }),
+      refreshToken: async (credentials: { refresh: string }) => {
+        oauthRefreshCalls += 1
+        return { access: "refreshed", refresh: credentials.refresh, expires: Date.now() + 60000 }
+      },
+      getApiKey: (credentials: { access: string }) => `oauth-${credentials.access}`,
+    }
+  },
+}))
+
 const {
   callPetCompletion,
+  getBraincodeOAuthProvider,
   listBuiltInModelCatalog,
   listBuiltInProviders,
+  listOAuthProviderSummaries,
   listOpenAICompatibleModels,
+  readProviderRuntimeApiKey,
   resolvePiModel,
   testModelConnection,
   toBraincodeModel,
@@ -109,11 +146,13 @@ const {
 
 const originalFetch = globalThis.fetch
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch
   completeSimpleCalls = []
   completeSimpleResult = "OK"
   completeSimpleError = undefined
+  oauthRefreshCalls = 0
+  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
 })
 
 test("listBuiltInProviders exposes Pi providers", () => {
@@ -125,6 +164,25 @@ test("listBuiltInModelCatalog exposes selectable provider models", () => {
   const anthropic = catalog.find((entry) => entry.provider === "anthropic")
 
   expect(anthropic?.models.some((model) => model.modelId === "claude-sonnet-4-5-20250929")).toBe(true)
+})
+
+test("listOAuthProviderSummaries exposes Pi OAuth subscriptions", () => {
+  expect(listOAuthProviderSummaries().map((provider) => provider.id)).toEqual(["anthropic", "openai-codex", "github-copilot"])
+  expect(getBraincodeOAuthProvider("openai-codex")?.name).toBe("openai-codex")
+})
+
+test("readProviderRuntimeApiKey prefers API keys and refreshes expired OAuth credentials", async () => {
+  const home = await makeTempHome()
+
+  await writeProviderApiKey("anthropic", "api-key", home)
+  await expect(readProviderRuntimeApiKey("anthropic", home)).resolves.toBe("api-key")
+
+  await writeProviderOAuthCredentials("openai-codex", "openai-codex", { access: "old", refresh: "refresh", expires: Date.now() - 1 }, home)
+  await expect(readProviderRuntimeApiKey("openai-codex", home)).resolves.toBe("oauth-refreshed")
+  expect(oauthRefreshCalls).toBe(1)
+
+  await expect(readProviderRuntimeApiKey("openai-codex", home)).resolves.toBe("oauth-refreshed")
+  expect(oauthRefreshCalls).toBe(1)
 })
 
 test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
@@ -148,6 +206,7 @@ test("toBraincodeModel maps a Pi model into Braincode metadata", () => {
     name: "Example Model",
     api: "example-api",
     baseUrl: "https://example.test",
+    builtIn: true,
     contextWindow: 1000,
     supportsTools: true,
     supportsVision: false,
@@ -195,6 +254,9 @@ test("resolvePiModel resolves built-ins and reports missing catalog models", () 
   }
 
   expect(resolvePiModel(builtIn).piModel.id).toBe("claude-sonnet-4-5-20250929")
+  const builtInWithBaseUrl = resolvePiModel({ ...builtIn, baseUrl: "https://example.test", builtIn: true }).piModel
+  expect(builtInWithBaseUrl.id).toBe("claude-sonnet-4-5-20250929")
+  expect((builtInWithBaseUrl as { baseUrl?: string }).baseUrl).toBeUndefined()
   expect(() => resolvePiModel({ ...builtIn, modelId: "missing", id: "anthropic/missing" })).toThrow("Unable to resolve model anthropic/missing")
 })
 

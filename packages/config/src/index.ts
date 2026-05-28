@@ -33,6 +33,23 @@ export type BraincodeAuth = {
   providers: Record<string, unknown>;
 };
 
+export type BraincodeOAuthCredentials = {
+  refresh: string;
+  access: string;
+  expires: number;
+  [key: string]: unknown;
+};
+
+export type BraincodeProviderOAuth = {
+  providerId: string;
+  credentials: BraincodeOAuthCredentials;
+};
+
+export type BraincodeProviderAuthRecord = {
+  apiKey?: string;
+  oauth?: BraincodeProviderOAuth;
+};
+
 export type BraincodeBrains = {
   brains: unknown[];
 };
@@ -46,6 +63,12 @@ export type BraincodeTools = ToolConfigDocument;
 
 export type AuthStatus = {
   configuredProviders: string[];
+  providerAuth: Array<{
+    provider: string;
+    kind: "api-key" | "oauth" | "unknown";
+    oauthProviderId?: string;
+    expires?: number;
+  }>;
 };
 
 export type ProjectSupportPaths = {
@@ -1294,6 +1317,30 @@ export async function writeProviderApiKey(
   await chmod(paths.auth, 0o600);
 }
 
+export async function writeProviderOAuthCredentials(
+  provider: string,
+  oauthProviderId: string,
+  credentials: BraincodeOAuthCredentials,
+  home = getBraincodeHome(),
+): Promise<void> {
+  const normalizedProvider = provider.trim();
+  const normalizedOAuthProviderId = oauthProviderId.trim();
+  if (!normalizedProvider) throw new Error("provider is required");
+  if (!normalizedOAuthProviderId) throw new Error("oauthProviderId is required");
+  assertOAuthCredentials(credentials);
+
+  const paths = await ensureBraincodeHome(home);
+  const auth = await readAuth(home);
+  auth.providers[normalizedProvider] = {
+    oauth: {
+      providerId: normalizedOAuthProviderId,
+      credentials,
+    },
+  };
+  await writeJsonFile(paths.auth, auth);
+  await chmod(paths.auth, 0o600);
+}
+
 export function getProviderApiKey(
   auth: BraincodeAuth,
   provider: string,
@@ -1308,6 +1355,28 @@ export function getProviderApiKey(
   return undefined;
 }
 
+export function getProviderOAuthCredentials(
+  auth: BraincodeAuth,
+  provider: string,
+): BraincodeProviderOAuth | undefined {
+  const value = auth.providers[provider];
+  if (!value || typeof value !== "object") return undefined;
+
+  const record = value as Record<string, unknown>;
+  const oauth = record.oauth;
+  if (!oauth || typeof oauth !== "object") return undefined;
+
+  const oauthRecord = oauth as Record<string, unknown>;
+  const providerId = oauthRecord.providerId;
+  const credentials = oauthRecord.credentials;
+  if (typeof providerId !== "string" || !providerId.trim()) return undefined;
+  if (!isOAuthCredentials(credentials)) return undefined;
+  return {
+    providerId,
+    credentials,
+  };
+}
+
 export async function readProviderApiKey(
   provider: string,
   home = getBraincodeHome(),
@@ -1320,9 +1389,44 @@ export async function readAuthStatus(
   home = getBraincodeHome(),
 ): Promise<AuthStatus> {
   const auth = await readAuth(home);
+  const providerAuth = Object.entries(auth.providers).map(([provider, value]) => {
+    if (getProviderApiKey(auth, provider)) {
+      return { provider, kind: "api-key" as const };
+    }
+    const oauth = getProviderOAuthCredentials(auth, provider);
+    if (oauth) {
+      return {
+        provider,
+        kind: "oauth" as const,
+        oauthProviderId: oauth.providerId,
+        expires: oauth.credentials.expires,
+      };
+    }
+    return { provider, kind: "unknown" as const };
+  });
   return {
     configuredProviders: Object.keys(auth.providers),
+    providerAuth,
   };
+}
+
+function isOAuthCredentials(value: unknown): value is BraincodeOAuthCredentials {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.refresh === "string" &&
+    record.refresh.trim().length > 0 &&
+    typeof record.access === "string" &&
+    record.access.trim().length > 0 &&
+    typeof record.expires === "number" &&
+    Number.isFinite(record.expires)
+  );
+}
+
+function assertOAuthCredentials(credentials: BraincodeOAuthCredentials): void {
+  if (!isOAuthCredentials(credentials)) {
+    throw new Error("oauth credentials must include refresh, access, and expires");
+  }
 }
 
 export async function readBrains(

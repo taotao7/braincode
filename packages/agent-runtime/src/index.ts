@@ -9,10 +9,10 @@ export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTask
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
-import { resolveBuiltInPiModel } from "@braincode/llm"
+import { readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
 import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration } from "@braincode/tools"
@@ -570,7 +570,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
   for (const modelId of explicitIds) {
     try {
       const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models)
-      const apiKey = await readProviderApiKey(selection.piModel.provider, home)
+      const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
       if (!apiKey) {
         errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
         continue
@@ -591,7 +591,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
     if (seenProviders.has(model.provider)) continue
     try {
       const selection = selectRuntimeModel({ ...policy, modelId: model.id, fallbackModelIds: [] }, models)
-      const apiKey = await readProviderApiKey(selection.piModel.provider, home)
+      const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
       if (!apiKey) continue
       seenIds.add(model.id)
       seenProviders.add(selection.piModel.provider)

@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeSettings, writeTools } from "./index"
+import { appendSessionRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -409,7 +409,10 @@ test("auth status lists configured provider names without returning secrets", as
 
   await Bun.write(paths.auth, JSON.stringify({ providers: { anthropic: { apiKey: "secret" } } }))
 
-  await expect(readAuthStatus(home)).resolves.toEqual({ configuredProviders: ["anthropic"] })
+  await expect(readAuthStatus(home)).resolves.toEqual({
+    configuredProviders: ["anthropic"],
+    providerAuth: [{ provider: "anthropic", kind: "api-key" }],
+  })
 })
 
 test("writeProviderApiKey trims provider and key and ignores empty keys", async () => {
@@ -427,6 +430,25 @@ test("getProviderApiKey supports string and object auth entries", () => {
   expect(getProviderApiKey({ providers: { anthropic: "sk-ant" } }, "anthropic")).toBe("sk-ant")
   expect(getProviderApiKey({ providers: { anthropic: { apiKey: "sk-ant-object" } } }, "anthropic")).toBe("sk-ant-object")
   expect(getProviderApiKey({ providers: { anthropic: { token: "not-supported" } } }, "anthropic")).toBeUndefined()
+})
+
+test("provider OAuth credentials are stored without returning secrets in status", async () => {
+  const home = await makeTempHome()
+  const expires = Date.now() + 60000
+
+  await writeProviderOAuthCredentials(" openai-codex ", " openai-codex ", { access: "access", refresh: "refresh", expires, accountId: "acct" }, home)
+
+  const auth = JSON.parse(await Bun.file(getBraincodePaths(home).auth).text())
+  expect(auth.providers["openai-codex"].oauth.credentials.access).toBe("access")
+  expect(getProviderOAuthCredentials(auth, "openai-codex")).toEqual({
+    providerId: "openai-codex",
+    credentials: { access: "access", refresh: "refresh", expires, accountId: "acct" },
+  })
+  await expect(readAuthStatus(home)).resolves.toEqual({
+    configuredProviders: ["openai-codex"],
+    providerAuth: [{ provider: "openai-codex", kind: "oauth", oauthProviderId: "openai-codex", expires }],
+  })
+  await expect(writeProviderOAuthCredentials(" ", "openai-codex", { access: "access", refresh: "refresh", expires }, home)).rejects.toThrow("provider is required")
 })
 
 test("non-secret config documents must keep their top-level arrays", async () => {

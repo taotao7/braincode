@@ -2,7 +2,6 @@ import {
   defaultBrains,
   defaultModels,
   ensureBraincodeHome,
-  readProviderApiKey,
   readAuthStatus,
   readBrains,
   readModels,
@@ -10,16 +9,18 @@ import {
   readTools,
   writeBrains,
   writeModels,
+  writeProviderOAuthCredentials,
   writeProviderApiKey,
   writeSettings,
   writeTools,
+  type BraincodeOAuthCredentials,
   type BraincodeBrains,
   type BraincodeModels,
   type BraincodeSettings,
   type BraincodeTools,
 } from "@braincode/config"
 import { configWebHtml } from "@braincode/config-web"
-import { listBuiltInModelCatalog, listOpenAICompatibleModels, testModelConnection, type BraincodeModel } from "@braincode/llm"
+import { getBraincodeOAuthProvider, listBuiltInModelCatalog, listOAuthProviderSummaries, listOpenAICompatibleModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
 import { debugLog, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
 import logoPath from "../../../resources/logo.png" with { type: "file" }
@@ -34,6 +35,30 @@ export type ConfigServerHandle = {
   url: string
 }
 
+type OAuthLoginStatus = "starting" | "pending" | "completed" | "failed" | "cancelled"
+
+type OAuthLoginSession = {
+  id: string
+  provider: string
+  oauthProviderId: string
+  status: OAuthLoginStatus
+  auth?: { url: string; instructions?: string }
+  deviceCode?: { userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number }
+  progress: string[]
+  error?: string
+  expires?: number
+  createdAt: number
+  updatedAt: number
+  manualInput?: string
+  manualWaiters: Array<(value: string) => void>
+  abortController: AbortController
+  promise?: Promise<void>
+}
+
+type PublicOAuthLoginSession = Omit<OAuthLoginSession, "abortController" | "manualInput" | "manualWaiters" | "promise">
+
+const oauthLoginSessions = new Map<string, OAuthLoginSession>()
+
 function json<T>(value: T, status = 200): Response {
   return Response.json(value, { status })
 }
@@ -45,6 +70,139 @@ function ok<T>(data: T): ApiResult<T> {
 function fail(error: unknown, status = 500): Response {
   const message = error instanceof Error ? error.message : String(error)
   return json<ApiResult<never>>({ ok: false, error: message }, status)
+}
+
+function publicOAuthLoginSession(session: OAuthLoginSession): PublicOAuthLoginSession {
+  const { abortController: _abortController, manualInput: _manualInput, manualWaiters: _manualWaiters, promise: _promise, ...publicSession } = session
+  return publicSession
+}
+
+function markOAuthLoginSession(session: OAuthLoginSession, status: OAuthLoginStatus): void {
+  if (session.status !== "completed" && session.status !== "failed" && session.status !== "cancelled") {
+    session.status = status
+  }
+  session.updatedAt = Date.now()
+}
+
+function addOAuthProgress(session: OAuthLoginSession, message: string): void {
+  if (message.trim()) {
+    session.progress = [...session.progress.slice(-9), message.trim()]
+  }
+  markOAuthLoginSession(session, session.status === "starting" ? "pending" : session.status)
+}
+
+function waitForManualOAuthInput(session: OAuthLoginSession): Promise<string> {
+  if (session.manualInput !== undefined) {
+    const value = session.manualInput
+    session.manualInput = undefined
+    return Promise.resolve(value)
+  }
+  return new Promise((resolve) => {
+    session.manualWaiters.push(resolve)
+  })
+}
+
+function submitManualOAuthInput(session: OAuthLoginSession, value: string): void {
+  const waiter = session.manualWaiters.shift()
+  if (waiter) {
+    waiter(value)
+    return
+  }
+  session.manualInput = value
+}
+
+function cancelOAuthLoginSession(session: OAuthLoginSession): void {
+  session.abortController.abort()
+  markOAuthLoginSession(session, "cancelled")
+  for (const waiter of session.manualWaiters.splice(0)) waiter("")
+}
+
+function toBraincodeOAuthCredentials(credentials: { refresh: string; access: string; expires: number; [key: string]: unknown }): BraincodeOAuthCredentials {
+  return {
+    ...credentials,
+    refresh: credentials.refresh,
+    access: credentials.access,
+    expires: credentials.expires,
+  }
+}
+
+async function startOAuthLoginSession(input: { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }): Promise<OAuthLoginSession> {
+  const oauthProviderId = input.oauthProviderId?.trim() ?? ""
+  if (!oauthProviderId) throw new Error("oauthProviderId is required")
+  const oauthProvider = getBraincodeOAuthProvider(oauthProviderId)
+  if (!oauthProvider) throw new Error(`Unknown OAuth provider: ${oauthProviderId}`)
+
+  const provider = input.provider?.trim() || oauthProviderId
+  const session: OAuthLoginSession = {
+    id: crypto.randomUUID(),
+    provider,
+    oauthProviderId,
+    status: "starting",
+    progress: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    manualWaiters: [],
+    abortController: new AbortController(),
+  }
+  oauthLoginSessions.set(session.id, session)
+
+  session.promise = (async () => {
+    try {
+      const credentials = await oauthProvider.login({
+        onAuth: (info) => {
+          session.auth = info
+          markOAuthLoginSession(session, "pending")
+        },
+        onDeviceCode: (info) => {
+          session.deviceCode = info
+          markOAuthLoginSession(session, "pending")
+        },
+        onPrompt: async (prompt) => {
+          addOAuthProgress(session, prompt.message)
+          if (oauthProviderId === "github-copilot" && prompt.allowEmpty) return input.enterpriseDomain?.trim() ?? ""
+          return waitForManualOAuthInput(session)
+        },
+        onProgress: (message) => addOAuthProgress(session, message),
+        onManualCodeInput: oauthProvider.usesCallbackServer ? () => waitForManualOAuthInput(session) : undefined,
+        onSelect: async (prompt) => prompt.options[0]?.id,
+        signal: session.abortController.signal,
+      })
+      await writeProviderOAuthCredentials(provider, oauthProviderId, toBraincodeOAuthCredentials(credentials))
+      session.expires = credentials.expires
+      markOAuthLoginSession(session, "completed")
+    } catch (error) {
+      if (session.status !== "cancelled") {
+        session.error = error instanceof Error ? error.message : String(error)
+        markOAuthLoginSession(session, "failed")
+      }
+    } finally {
+      for (const waiter of session.manualWaiters.splice(0)) waiter("")
+    }
+  })()
+
+  await waitForOAuthLoginInitialState(session)
+  return session
+}
+
+async function waitForOAuthLoginInitialState(session: OAuthLoginSession): Promise<void> {
+  if (session.status !== "starting" || session.auth || session.deviceCode || session.error) return
+  await new Promise<void>((resolve) => {
+    const startedAt = Date.now()
+    const interval = setInterval(() => {
+      if (session.status !== "starting" || session.auth || session.deviceCode || session.error || Date.now() - startedAt > 5000) {
+        clearInterval(interval)
+        resolve()
+      }
+    }, 50)
+  })
+}
+
+function getOAuthLoginSessionFromPath(pathname: string, suffix = ""): OAuthLoginSession | undefined {
+  const prefix = "/api/oauth/login/"
+  if (!pathname.startsWith(prefix) || (suffix && !pathname.endsWith(suffix))) return undefined
+  const id = pathname.slice(prefix.length, suffix ? -suffix.length : undefined)
+  if (!id || id.includes("/")) return undefined
+  return oauthLoginSessions.get(id)
 }
 
 async function handleRequest(request: Request): Promise<Response> {
@@ -109,10 +267,43 @@ async function handleRequest(request: Request): Promise<Response> {
       return json(ok({ providers: listBuiltInModelCatalog() }))
     }
 
+    if (request.method === "GET" && url.pathname === "/api/oauth/providers") {
+      return json(ok({ providers: listOAuthProviderSummaries() }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/oauth/login") {
+      const body = (await request.json()) as { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }
+      const session = await startOAuthLoginSession(body)
+      return json(ok(publicOAuthLoginSession(session)))
+    }
+
+    if (request.method === "GET") {
+      const session = getOAuthLoginSessionFromPath(url.pathname)
+      if (session) return json(ok(publicOAuthLoginSession(session)))
+    }
+
+    if (request.method === "POST") {
+      const session = getOAuthLoginSessionFromPath(url.pathname, "/manual-code")
+      if (session) {
+        const body = (await request.json()) as { code?: string }
+        submitManualOAuthInput(session, body.code?.trim() ?? "")
+        markOAuthLoginSession(session, "pending")
+        return json(ok(publicOAuthLoginSession(session)))
+      }
+    }
+
+    if (request.method === "POST") {
+      const session = getOAuthLoginSessionFromPath(url.pathname, "/cancel")
+      if (session) {
+        cancelOAuthLoginSession(session)
+        return json(ok(publicOAuthLoginSession(session)))
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/api/provider-models") {
       const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string }
       const provider = body.provider?.trim() ?? ""
-      const apiKey = body.apiKey?.trim() || (provider ? await readProviderApiKey(provider) : undefined)
+      const apiKey = body.apiKey?.trim() || (provider ? await readProviderRuntimeApiKey(provider) : undefined)
       debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, hasApiKey: Boolean(apiKey) })
       const models = await listOpenAICompatibleModels({ provider, baseUrl: body.baseUrl ?? "", apiKey })
       const savedModels = await readModels()
@@ -141,7 +332,7 @@ async function handleRequest(request: Request): Promise<Response> {
       const savedModels = await readModels()
       const model = (savedModels.models as BraincodeModel[]).find((candidate) => candidate.id === modelId)
       if (!model) throw new Error(`Unknown configured model id: ${modelId}`)
-      const apiKey = await readProviderApiKey(model.provider)
+      const apiKey = await readProviderRuntimeApiKey(model.provider)
       const thinkingLevel = body.thinkingLevel?.trim() || undefined
       debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
       return json(ok(await testModelConnection(model, apiKey, thinkingLevel as never)))
@@ -150,7 +341,7 @@ async function handleRequest(request: Request): Promise<Response> {
     if (request.method === "POST" && url.pathname === "/api/models/test-config") {
       const body = (await request.json()) as { model?: BraincodeModel; apiKey?: string; thinkingLevel?: string }
       if (!body.model) throw new Error("model is required")
-      const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderApiKey(body.model.provider) : undefined)
+      const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderRuntimeApiKey(body.model.provider) : undefined)
       const thinkingLevel = body.thinkingLevel?.trim() || undefined
       debugLog("server", "testing model config", { modelId: body.model.id, provider: body.model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
       return json(ok(await testModelConnection(body.model, apiKey, thinkingLevel as never)))

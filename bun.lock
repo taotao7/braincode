@@ -82,6 +82,7 @@
     "packages/llm": {
       "name": "@braincode/llm",
       "dependencies": {
+        "@braincode/config": "workspace:*",
         "@braincode/shared": "workspace:*",
         "@earendil-works/pi-ai": "^0.75.5",
       },

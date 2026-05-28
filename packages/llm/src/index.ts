@@ -1,4 +1,6 @@
 import { completeSimple, getModel, getModels, getProviders, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai"
+import { getOAuthProvider, getOAuthProviders, type OAuthCredentials, type OAuthProviderInterface } from "@earendil-works/pi-ai/oauth"
+import { getProviderApiKey, getProviderOAuthCredentials, readAuth, writeProviderOAuthCredentials, type BraincodeOAuthCredentials } from "@braincode/config"
 import { debugLog, normalizeModelApi } from "@braincode/shared"
 
 export type BraincodeModel = {
@@ -8,6 +10,7 @@ export type BraincodeModel = {
   name: string
   api?: Api
   baseUrl?: string
+  builtIn?: boolean
   contextWindow: number
   supportsTools: boolean
   supportsVision?: boolean
@@ -41,8 +44,48 @@ export type ModelCatalogProvider = {
   models: BraincodeModel[]
 }
 
+export type OAuthProviderSummary = {
+  id: string
+  name: string
+  usesCallbackServer: boolean
+}
+
 export function listBuiltInProviders(): string[] {
   return getProviders()
+}
+
+export function listOAuthProviderSummaries(): OAuthProviderSummary[] {
+  return getOAuthProviders().map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    usesCallbackServer: provider.usesCallbackServer === true,
+  }))
+}
+
+export function getBraincodeOAuthProvider(providerId: string): OAuthProviderInterface | undefined {
+  return getOAuthProvider(providerId)
+}
+
+export async function readProviderRuntimeApiKey(provider: string, home?: string): Promise<string | undefined> {
+  const auth = await readAuth(home)
+  const apiKey = getProviderApiKey(auth, provider)
+  if (apiKey) return apiKey
+
+  const oauth = getProviderOAuthCredentials(auth, provider)
+  if (!oauth) return undefined
+
+  const oauthProvider = getOAuthProvider(oauth.providerId)
+  if (!oauthProvider) {
+    throw new Error(`Unknown OAuth provider: ${oauth.providerId}`)
+  }
+
+  let credentials = oauth.credentials as OAuthCredentials
+  if (Date.now() >= credentials.expires) {
+    credentials = await oauthProvider.refreshToken(credentials)
+    await writeProviderOAuthCredentials(provider, oauth.providerId, toBraincodeOAuthCredentials(credentials), home)
+  }
+
+  return oauthProvider.getApiKey(credentials)
 }
 
 export function listBuiltInModelCatalog(): ModelCatalogProvider[] {
@@ -53,7 +96,7 @@ export function listBuiltInModelCatalog(): ModelCatalogProvider[] {
 }
 
 export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
-  if (model.baseUrl) {
+  if (model.baseUrl && model.builtIn !== true) {
     const api = normalizeModelApi(model.api)
     debugLog("llm", "resolving OpenAI-compatible model", {
       provider: model.provider,
@@ -251,6 +294,15 @@ function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
   } as Model<Api>
 }
 
+function toBraincodeOAuthCredentials(credentials: OAuthCredentials): BraincodeOAuthCredentials {
+  return {
+    ...credentials,
+    refresh: credentials.refresh,
+    access: credentials.access,
+    expires: credentials.expires,
+  }
+}
+
 export type PetCompletionInput = {
   model: BraincodeModel
   apiKey: string
@@ -405,6 +457,7 @@ export function toBraincodeModel(model: Model<Api>): BraincodeModel {
     name: model.name,
     api: normalizeModelApi(model.api) as Api,
     baseUrl: model.baseUrl || undefined,
+    builtIn: true,
     contextWindow: model.contextWindow,
     supportsTools: true,
     supportsVision: model.input?.includes("image") ?? false,
