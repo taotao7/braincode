@@ -1,5 +1,8 @@
+import { useRef } from "react";
+import { useGSAP } from "@gsap/react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useI18n, type Lang } from "../i18n";
+import { gsap, prefersReducedMotion } from "../animations";
 import logoUrl from "../assets/logo.png";
 
 function ScrollLink({ to, section, children }: { to: string; section: string; children: React.ReactNode }) {
@@ -25,10 +28,42 @@ function ScrollLink({ to, section, children }: { to: string; section: string; ch
 
 export function Header() {
   const { t, lang, setLang } = useI18n();
+  const headerRef = useRef<HTMLElement>(null);
   const switchLang = (l: Lang) => { setLang(l); };
 
+  useGSAP(() => {
+    if (!headerRef.current || prefersReducedMotion()) return;
+
+    const logo = gsap.utils.toArray<HTMLElement>(".logo", headerRef.current);
+    const links = gsap.utils.toArray<HTMLElement>("nav a", headerRef.current);
+    const langBtns = gsap.utils.toArray<HTMLElement>(".lang-switch button", headerRef.current);
+
+    gsap.from(logo, {
+      y: -20,
+      autoAlpha: 0,
+      duration: 0.6,
+      ease: "power3.out",
+    });
+    gsap.from(links, {
+      y: -12,
+      autoAlpha: 0,
+      duration: 0.5,
+      stagger: 0.04,
+      ease: "power3.out",
+      delay: 0.1,
+    });
+    gsap.from(langBtns, {
+      scale: 0.9,
+      autoAlpha: 0,
+      duration: 0.4,
+      stagger: 0.05,
+      ease: "back.out(1.5)",
+      delay: 0.3,
+    });
+  }, { scope: headerRef });
+
   return (
-    <header className="topnav">
+    <header className="topnav" ref={headerRef}>
       <div className="container topnav-inner">
         <a href="#/" className="logo">
           <img src={logoUrl} alt="Braincode" />

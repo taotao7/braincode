@@ -47,7 +47,7 @@ Cross-layer rules:
 ```
 apps/
   cli/             Bun CLI + Ink TUI (BrainPet, /plan, /team, ...)
-  config-web/      Browser config UI served by packages/server
+  config-web/      Tabbed browser config UI served by packages/server
 
 packages/
   shared/          Tiny utilities (debugLog, primitives). Do not dump code here.
@@ -84,7 +84,7 @@ A non-interactive `braincode run "<prompt>"` produces this trace through the cod
 7. If `requiresReview` is true and the primary is not itself the review role, a review worker runs with the primary's summary and worker results.
 8. `Stop` hook runs. The final summary plus review notes is returned to the caller, and `run_end` is appended to the session JSONL under `~/.braincode/sessions/<id>.jsonl`.
 
-The interactive TUI variant follows the same path. The TUI also subscribes to `AgentEvent` from `pi-agent-core` and to `WorkerLifecycleEvent` from `agent-runtime` to drive the BrainPet status panel.
+The interactive TUI variant follows the same path. The TUI also subscribes to `AgentEvent` from `pi-agent-core` and to `WorkerLifecycleEvent` from `agent-runtime` to drive the BrainPet status panel, live elapsed/token status, and collapsible transcript rows.
 
 ## Execution modes
 
@@ -125,6 +125,8 @@ Everything user-specific lives under `~/.braincode/`:
   sessions/          per-session JSONL transcripts of orchestration events
   logs/, cache/      runtime byproducts
 ```
+
+`braincode config` serves a tabbed Web UI on localhost. Models are the first tab; usage statistics have a dedicated tab with Recharts summaries and click-through details by model, role, and runtime phase. OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot appear as model-catalog providers once authenticated, so models can be added without duplicating API keys.
 
 Project-local support files live next to code:
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
 import { appendSessionRecord, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
@@ -300,11 +300,18 @@ test("createBraincodeAgentRuntime invalidates evidence cache after shell calls",
   expect(readCalls).toBe(2)
   expect(shellCalls).toBe(1)
   expect(secondRead.content[0]?.type === "text" ? secondRead.content[0].text : "").toContain("read call 2")
+  expect(secondRead.content[0]?.type === "text" ? secondRead.content[0].text : "").not.toContain("Duplicate")
+  expect((secondRead.details as { evidenceCache?: { callCount?: number; consecutiveCount?: number } }).evidenceCache).toMatchObject({
+    callCount: 1,
+    consecutiveCount: 1,
+  })
 })
 
 test("humanizeAgentRuntimeError gives actionable provider configuration guidance", () => {
   expect(humanizeAgentRuntimeError(new Error("403 Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc."))).toContain("only accepts supported coding-agent clients")
   expect(humanizeAgentRuntimeError(new Error("Provider returned an empty assistant response from cliproxyapi/gpt-5.3-codex-spark via openai-responses."))).toContain("switching this model between `openai-responses` and `openai-completions`")
+  expect(humanizeAgentRuntimeError(new ContextHandoffRequiredError({ estimatedBytes: 5_209_202, limitBytes: 2_097_152, sessionId: "session-1" }))).toContain("Context handoff required")
+  expect(humanizeAgentRuntimeError(new Error('400 {"error":{"message":"total message size 5209202 exceeds limit 2097152"}}'))).toContain("Run `/handoff`")
 })
 
 test("collectPatchSummary captures changed files and diff stats", async () => {

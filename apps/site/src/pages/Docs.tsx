@@ -1,4 +1,7 @@
+import { useRef } from "react";
+import { useGSAP } from "@gsap/react";
 import { useI18n, type I18nKey } from "../i18n";
+import { createReveal, createDocsReveal } from "../animations";
 
 const TOC_IDS = [
   "docs_setup",
@@ -44,9 +47,32 @@ function FileEntry({ title, body }: { title: I18nKey; body: I18nKey }) {
 
 export function Docs() {
   const { t } = useI18n();
+  const mainRef = useRef<HTMLElement>(null);
+
+  useGSAP(() => {
+    if (!mainRef.current) return;
+
+    // Docs page entrance
+    createReveal(mainRef.current, ".docs-back", { y: 16 });
+    createReveal(mainRef.current, ".docs-toc", {
+      x: -20,
+      autoAlpha: 0,
+      duration: 0.5,
+    });
+
+    // Body sections — staggered by element type
+    createDocsReveal(mainRef.current, ".docs-body > h2");
+    createDocsReveal(mainRef.current, ".docs-body > h3");
+    createDocsReveal(mainRef.current, ".docs-body > p");
+    createDocsReveal(mainRef.current, ".docs-body > pre");
+    createDocsReveal(mainRef.current, ".docs-body > .code-block");
+    createDocsReveal(mainRef.current, ".docs-body > .file-entry");
+    createDocsReveal(mainRef.current, ".docs-body > .grid-2");
+    createDocsReveal(mainRef.current, ".docs-body > .role-grid");
+  }, { scope: mainRef });
 
   return (
-    <main id="content">
+    <main id="content" ref={mainRef}>
       <section className="section">
         <div className="container">
           <a href="#/" className="docs-back">{t("docs_back_home")}</a>

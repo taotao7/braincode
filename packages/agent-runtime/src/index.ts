@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
-import { Agent, type AgentEvent, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core"
+import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
@@ -70,6 +70,27 @@ export type AgentRunResult = {
 
 export function humanizeAgentRuntimeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
+  if (isHandoffRequiredError(error)) {
+    const sessionId = error instanceof ContextHandoffRequiredError ? error.sessionId : undefined
+    const size = error instanceof ContextHandoffRequiredError ? ` (${formatBytes(error.estimatedBytes)} prepared for a ${formatBytes(error.limitBytes)} provider limit)` : ""
+    return [
+      `Context handoff required${size}.`,
+      "",
+      "The active agent context is too large to send safely. Braincode should continue from a handoff boundary instead of silently compressing the current transcript.",
+      sessionId
+        ? `In the TUI, run \`/handoff\` for the current session, or continue a new prompt with \`@@${sessionId} <next task>\`.`
+        : "In the TUI, run `/handoff`, then continue from the generated `@@<session-id>` draft.",
+      "The handoff is a compact session packet; full tool transcripts and private worker context are not copied forward.",
+    ].join("\n")
+  }
+  if (isProviderMessageSizeLimitError(error)) {
+    return [
+      "Context handoff required.",
+      "",
+      `The provider rejected this request because the message payload is too large: ${message}`,
+      "Run `/handoff` in the TUI, then continue from the generated `@@<session-id>` draft.",
+    ].join("\n")
+  }
   if (/Kimi For Coding is currently only available for Coding Agents/i.test(message)) {
     return [
       message,
@@ -88,6 +109,39 @@ export function humanizeAgentRuntimeError(error: unknown): string {
     return `${message}\n\nHint: The provider returned HTTP success but no assistant content. Check the model API type in ~/.braincode/models.json; for OpenAI-compatible proxies, try switching this model between \`openai-responses\` and \`openai-completions\` in \`braincode config\`.`
   }
   return message
+}
+
+const PROVIDER_MESSAGE_SIZE_LIMIT_BYTES = 2 * 1024 * 1024
+const PROVIDER_MESSAGE_SIZE_GUARD_BYTES = Math.floor(PROVIDER_MESSAGE_SIZE_LIMIT_BYTES * 0.88)
+const AUTO_HANDOFF_SUMMARY_CHARS = 24 * 1024
+const AUTO_HANDOFF_MESSAGE_CHARS = 1600
+
+export class ContextHandoffRequiredError extends Error {
+  readonly estimatedBytes: number
+  readonly limitBytes: number
+  readonly sessionId?: string
+  readonly handoffSummary?: string
+
+  constructor(input: { estimatedBytes: number; limitBytes: number; sessionId?: string; handoffSummary?: string }) {
+    super(`Braincode handoff required: active message context is ${input.estimatedBytes} bytes, exceeding the ${input.limitBytes} byte safety budget.`)
+    this.name = "ContextHandoffRequiredError"
+    this.estimatedBytes = input.estimatedBytes
+    this.limitBytes = input.limitBytes
+    this.sessionId = input.sessionId
+    this.handoffSummary = input.handoffSummary
+  }
+}
+
+export function isHandoffRequiredError(error: unknown): boolean {
+  if (error instanceof ContextHandoffRequiredError) return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /Braincode handoff required|Context handoff required/i.test(message)
+}
+
+export function isProviderMessageSizeLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /total message size\s+\d+\s+exceeds limit\s+\d+/i.test(message)
+    || /message payload is too large/i.test(message)
 }
 
 export type PatchFileChange = {
@@ -722,7 +776,7 @@ function wrapToolsWithEvidenceCache(tools: AgentTool[], cache: ToolEvidenceCache
 
         const result = await tool.execute(toolCallId, params as never, signal, onUpdate as never)
         if (toolInvalidatesEvidenceCache(tool.name, params)) {
-          cache.entries.clear()
+          resetToolEvidenceCache(cache)
         } else if (cacheable) {
           cache.entries.set(key, { result, createdAt: Date.now() })
         }
@@ -745,6 +799,13 @@ function recordToolEvidenceCall(cache: ToolEvidenceCache, key: string): number {
   cache.consecutiveCount = cache.lastKey === key ? cache.consecutiveCount + 1 : 1
   cache.lastKey = key
   return count
+}
+
+function resetToolEvidenceCache(cache: ToolEvidenceCache): void {
+  cache.entries.clear()
+  cache.counts.clear()
+  cache.lastKey = undefined
+  cache.consecutiveCount = 0
 }
 
 function toolEvidenceKey(toolName: string, args: unknown): string {
@@ -865,6 +926,10 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       tools,
       messages: [],
     },
+    transformContext: async (messages) => enforceHandoffContextBudget(messages, {
+      systemPrompt: options.systemPrompt,
+      sessionId: options.sessionId,
+    }),
     getApiKey: options.getApiKey,
     onPayload: (payload, model) => {
       if (!isDebugEnabled()) return undefined
@@ -956,6 +1021,150 @@ async function recordAgentTokenUsage(
       scope.home,
     )
   }
+}
+
+function enforceHandoffContextBudget(
+  messages: AgentMessage[],
+  options: { systemPrompt: string; sessionId?: string },
+): AgentMessage[] {
+  const estimatedBytes = estimateProviderContextBytes(messages, options.systemPrompt)
+  if (estimatedBytes <= PROVIDER_MESSAGE_SIZE_GUARD_BYTES) return messages
+  const handoffSummary = buildAutomaticHandoffSummary(messages, {
+    estimatedBytes,
+    limitBytes: PROVIDER_MESSAGE_SIZE_GUARD_BYTES,
+    sessionId: options.sessionId,
+  })
+  throw new ContextHandoffRequiredError({
+    estimatedBytes,
+    limitBytes: PROVIDER_MESSAGE_SIZE_GUARD_BYTES,
+    sessionId: options.sessionId,
+    handoffSummary,
+  })
+}
+
+function estimateProviderContextBytes(messages: AgentMessage[], systemPrompt: string): number {
+  return utf8ByteLength(safeStringify({ systemPrompt, messages }))
+}
+
+function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).byteLength
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes)) return "unknown size"
+  if (bytes >= 1024 * 1024) return `${trimTrailingZero((bytes / 1024 / 1024).toFixed(1))} MB`
+  if (bytes >= 1024) return `${trimTrailingZero((bytes / 1024).toFixed(1))} KB`
+  return `${Math.max(0, Math.round(bytes))} bytes`
+}
+
+function trimTrailingZero(value: string): string {
+  return value.endsWith(".0") ? value.slice(0, -2) : value
+}
+
+function buildAutomaticHandoffSummary(
+  messages: AgentMessage[],
+  input: { estimatedBytes: number; limitBytes: number; sessionId?: string },
+): string {
+  const lines = [
+    "Auto handoff generated by Braincode because the active agent context reached the provider message-size boundary.",
+    input.sessionId ? `Session: ${input.sessionId}` : "",
+    `Estimated active context: ${formatBytes(input.estimatedBytes)}; safety budget: ${formatBytes(input.limitBytes)}.`,
+    "Continue from this packet instead of copying the full transcript or raw tool output forward.",
+    "",
+    "Recent visible context:",
+  ].filter(Boolean)
+  const selected = selectMessagesForAutomaticHandoff(messages)
+  for (const message of selected) {
+    const entry = formatMessageForAutomaticHandoff(message)
+    if (!entry) continue
+    const next = [...lines, entry].join("\n")
+    if (next.length > AUTO_HANDOFF_SUMMARY_CHARS) {
+      lines.push(`- Additional context omitted from this automatic handoff after ${selected.length} selected messages.`)
+      break
+    }
+    lines.push(entry)
+  }
+  return clipTextForHandoff(lines.join("\n"), AUTO_HANDOFF_SUMMARY_CHARS)
+}
+
+function selectMessagesForAutomaticHandoff(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length <= 40) return messages
+  const firstUser = messages.find((message) => message.role === "user")
+  const recent = messages.slice(-39)
+  return firstUser && !recent.includes(firstUser) ? [firstUser, ...recent] : recent
+}
+
+function formatMessageForAutomaticHandoff(message: AgentMessage): string | undefined {
+  if (message.role === "user") {
+    return `- user: ${clipTextForHandoff(messageContentText(message.content), AUTO_HANDOFF_MESSAGE_CHARS)}`
+  }
+  if (message.role === "assistant") {
+    const text = assistantTextForHandoff(message)
+    const toolCalls = assistantToolCallsForHandoff(message)
+    const parts = [
+      text ? `text: ${clipTextForHandoff(text, AUTO_HANDOFF_MESSAGE_CHARS)}` : "",
+      toolCalls.length > 0 ? `tool calls: ${toolCalls.join("; ")}` : "",
+      message.errorMessage ? `error: ${clipTextForHandoff(message.errorMessage, 800)}` : "",
+      message.stopReason ? `stop: ${message.stopReason}` : "",
+    ].filter(Boolean)
+    return parts.length > 0 ? `- assistant: ${parts.join(" | ")}` : undefined
+  }
+  if (message.role === "toolResult") {
+    return `- tool result ${message.toolName}: ${clipTextForHandoff(messageContentText(message.content), AUTO_HANDOFF_MESSAGE_CHARS)}`
+  }
+  return undefined
+}
+
+function assistantTextForHandoff(message: Extract<AgentMessage, { role: "assistant" }>): string {
+  return message.content
+    .map((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "")
+    .filter(Boolean)
+    .join("\n")
+    .trim()
+}
+
+function assistantToolCallsForHandoff(message: Extract<AgentMessage, { role: "assistant" }>): string[] {
+  return message.content
+    .filter((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "toolCall")
+    .map((block) => {
+      const record = block as unknown as Record<string, unknown>
+      const name = typeof record.name === "string" ? record.name : "tool"
+      const args = "arguments" in record ? ` ${clipTextForHandoff(safeStringify(record.arguments), 600)}` : ""
+      return `${name}${args}`
+    })
+}
+
+function messageContentText(content: unknown): string {
+  if (typeof content === "string") return content.trim()
+  if (!Array.isArray(content)) return safeStringify(content)
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") return ""
+      const record = block as Record<string, unknown>
+      if (typeof record.text === "string") return record.text
+      if (record.type === "image") return "[image input]"
+      return ""
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim()
+}
+
+function clipTextForHandoff(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  return `${text.slice(0, Math.max(0, limit - 32))}\n...[truncated ${text.length - limit} chars]`
+}
+
+async function recordAutomaticHandoffIfNeeded(error: unknown, sessionId: string, home: string | undefined): Promise<void> {
+  if (!(error instanceof ContextHandoffRequiredError) || !error.handoffSummary) return
+  await appendSessionRecord(sessionId, {
+    type: "handoff",
+    summary: error.handoffSummary,
+    focus: "automatic context-size guard",
+    trigger: "auto",
+    estimatedBytes: error.estimatedBytes,
+    limitBytes: error.limitBytes,
+  }, home)
 }
 
 function summarizeProviderPayload(payload: unknown): Record<string, unknown> {
@@ -2493,6 +2702,10 @@ async function runWorkerFromPlan(
         willFallback: attempt < candidates.length - 1,
       })
       await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+      if (isHandoffRequiredError(error)) {
+        await recordAutomaticHandoffIfNeeded(error, sessionId, home)
+        break
+      }
     }
   }
 
@@ -2900,6 +3113,10 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           todoIds: primaryTodoIds,
         })
         await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+        if (isHandoffRequiredError(error) || isProviderMessageSizeLimitError(error)) {
+          await recordAutomaticHandoffIfNeeded(error, sessionId, home)
+          break
+        }
       }
     }
 
@@ -2939,8 +3156,8 @@ export async function ensureSessionHandoff(
   home?: string,
 ): Promise<EnsureSessionHandoffResult> {
   const trigger = options.trigger ?? "auto"
+  const context = await readSessionContext(sessionId, home)
   if (!options.force) {
-    const context = await readSessionContext(sessionId, home)
     if (context?.latestHandoff?.fresh) {
       return {
         summary: context.latestHandoff.summary,
@@ -2950,9 +3167,10 @@ export async function ensureSessionHandoff(
       }
     }
   }
-  const prompt = options.focus
-    ? `${HANDOFF_SUMMARY_PROMPT}\n\nExtra focus requested by the user: ${options.focus}`
-    : HANDOFF_SUMMARY_PROMPT
+  if (!context) {
+    throw new Error(`No session context found for handoff: ${sessionId}`)
+  }
+  const prompt = buildSessionHandoffPrompt(context, options.focus)
   const result = await executePromptFromConfig({ prompt, sessionId }, home)
   const summary = (result.summary ?? "").trim()
   if (!summary) {
@@ -2971,6 +3189,15 @@ export async function ensureSessionHandoff(
     home,
   )
   return { summary, reused: false, trigger, timestamp }
+}
+
+function buildSessionHandoffPrompt(context: SessionContext, focus?: string): string {
+  return [
+    HANDOFF_SUMMARY_PROMPT,
+    focus ? `Extra focus requested by the user: ${focus}` : "",
+    "Compact session context to summarize:",
+    formatSessionContext(context),
+  ].filter(Boolean).join("\n\n")
 }
 
 export type PromptReference = {

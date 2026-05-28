@@ -65,6 +65,7 @@ export const configWebHtml = `<!doctype html>
       }
 
       * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
       body {
         margin: 0;
         min-height: 100vh;
@@ -733,7 +734,7 @@ export const configWebHtml = `<!doctype html>
         if (!provider) return
         providerSelect.value = provider
         catalogApiKeyInput.value = ""
-        renderCatalogModels()
+        providerSelect.dispatchEvent(new Event("change", { bubbles: true }))
         status.textContent = t("subscriptionProviderApplied") + ": " + provider
       }
 
@@ -1617,7 +1618,7 @@ export const configWebHtml = `<!doctype html>
         renderSavedProviders()
         renderCatalogProviders()
         providerSelect.value = provider
-        renderCatalogModels()
+        providerSelect.dispatchEvent(new Event("change", { bubbles: true }))
         status.textContent = t("loaded")
       }
 

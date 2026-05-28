@@ -149,7 +149,7 @@ Worker 不会单独拿到这些引用的副本。它们只看到展开后的根�
 | `worker_start` | `runWorkerFromPlan` | 阶段、角色、目标、handoff、模型、尝试次数 |
 | `worker_end` | 同上 | 已执行的 `WorkerResult` |
 | `worker_error` | 同上 | 错误、是否兜底 |
-| `token_usage` | routeBrain / worker / primary runtime 调用 | 按模型、角色、阶段、task id、agent session id 标注的 provider token 用量 |
+| `token_usage` | routeBrain / worker / primary runtime 调用 | 按模型、角色、阶段、task id、agent session id 标注的 provider token 用量；供 `braincode config` 的统计图表和明细使用 |
 | `mcp_connect` | MCP hub | connected / failed / skipped server、工具数 |
 | `hook_*` | `runAndRecordHooks` | hook 记录、追加上下文、阻断原因 |
 

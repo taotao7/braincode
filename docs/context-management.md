@@ -149,7 +149,7 @@ If you add a new reference kind, follow the same compaction discipline: a snapsh
 | `worker_start` | `runWorkerFromPlan` | phase, role, goal, handoff, model, attempt |
 | `worker_end` | same | the executed `WorkerResult` |
 | `worker_error` | same | error, fallback intent |
-| `token_usage` | routeBrain / worker / primary runtime calls | provider usage totals tagged by model, role, phase, task id, and agent session id |
+| `token_usage` | routeBrain / worker / primary runtime calls | provider usage totals tagged by model, role, phase, task id, and agent session id; used by `braincode config` usage charts/details |
 | `mcp_connect` | MCP hub | connected/failed/skipped servers, tool count |
 | `hook_*` | `runAndRecordHooks` | hook records, additional context, blocked reasons |
 

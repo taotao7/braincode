@@ -72,6 +72,16 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Release Notes
 
+### Unreleased
+
+- Config Web UI is organized into tabs with the Models tab first. The usage tab shows token statistics by model, role, and runtime phase, including Recharts charts and click-through detail filters.
+- Authenticated subscription providers from Pi OAuth, including Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot, can be selected from the model catalog without re-entering an API key.
+- TUI running status has its own one-second clock, so elapsed time keeps moving even when no token or tool event arrives.
+- TUI running status now has a lightweight text animation: the activity prefix cycles and the active status label highlights one character at a time.
+- TUI transcript folding uses mouse capture by default; click any visible row of an item with a `▸` or `▾` marker to expand or collapse it. Set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture.
+- Provider message-size failures are surfaced as a Braincode handoff boundary. The TUI prompts `/handoff` so the user can continue from a compact `@@session` packet instead of silently compressing the active transcript.
+- The read-only evidence cache now resets cached entries and duplicate counters after write/execute tools, reducing stale duplicate-read warnings after files or command output change.
+
 ### v0.2.2
 
 - TUI transcript folding now only toggles when the `▸` / `▾` marker is clicked, and hit testing accounts for the visible viewport and wrapped detail rows.
@@ -83,8 +93,8 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 - Bun monorepo with `apps/*` and `packages/*` workspaces.
 - CLI entrypoints for `braincode`, `braincode run`, `braincode run --dry-run`, and `braincode config`.
-- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, precise transcript folding, footer BrainPet progress, and tool approval decisions.
-- Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, and auth status.
+- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, row-click transcript folding, a live elapsed/token status line, footer BrainPet progress, and tool approval decisions.
+- Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, auth status, authenticated subscription model selection, and usage statistics.
 - Brain preset inheritance via `extends`, so small Brain Model presets can override only the differing planner, role, routing, or context fields.
 - Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.
 - `routeBrain` LLM routing during execution and plan previews, with deterministic heuristic routing available for diagnostics and fallback.
@@ -95,7 +105,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
 - First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, long-running exec sessions with stdin polling, git diffs, changed-file inspection, and package scripts.
 - Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.
-- Tool-call evidence cache for repeated deterministic read-only local tool calls, with duplicate reminders and cache invalidation after write/execute tools.
+- Tool-call evidence cache for repeated deterministic read-only local tool calls, with duplicate reminders plus cached-entry and duplicate-counter invalidation after write/execute tools.
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
 - Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.

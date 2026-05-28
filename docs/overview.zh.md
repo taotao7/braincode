@@ -47,7 +47,7 @@ Braincode 是一个 **基于 Bun 的 monorepo，目标是构建一个以编码�
 ```
 apps/
   cli/             Bun CLI + Ink TUI（BrainPet、/plan、/team……）
-  config-web/      由 packages/server 托管的浏览器配置 UI
+  config-web/      由 packages/server 托管的多 tab 浏览器配置 UI
 
 packages/
   shared/          极少量工具函数（debugLog、基础类型）。不要往这里堆代码。
@@ -84,7 +84,7 @@ packages/
 7. 如果 `requiresReview = true` 且主 agent 本身不是 review 角色，会拉起一个 review worker，给它主 agent 摘要和各 worker 结果。
 8. 跑 `Stop` hook。最终摘要（含 review 备注）返回给调用方，并把 `run_end` 追加到 `~/.braincode/sessions/<id>.jsonl`。
 
-交互式 TUI 走同一条路径。TUI 还订阅了来自 `pi-agent-core` 的 `AgentEvent` 和来自 `agent-runtime` 的 `WorkerLifecycleEvent`，用来驱动 BrainPet 状态面板。
+交互式 TUI 走同一条路径。TUI 还订阅了来自 `pi-agent-core` 的 `AgentEvent` 和来自 `agent-runtime` 的 `WorkerLifecycleEvent`，用来驱动 BrainPet 状态面板、实时 elapsed/token 状态行，以及可折叠的 transcript 行。
 
 ## 执行模式
 
@@ -126,6 +126,8 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
   sessions/          每个 session 一份 JSONL，记录编排事件
   logs/、cache/      运行时副产物
 ```
+
+`braincode config` 在 localhost 上提供多 tab Web UI。模型管理放在第一个 tab；数据统计有独立 tab，用 Recharts 展示按模型、角色、运行阶段聚合的 token 用量，并支持点击查看明细。通过 OAuth 认证过的订阅 provider，比如 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot，会出现在模型目录里，添加模型时不需要重复填 API key。
 
 项目级的支持文件就放在代码旁边：
 

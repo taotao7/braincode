@@ -250,14 +250,17 @@ TUI（`apps/cli`）从两条事件流驱动右下角 BrainPet footer 和实时�
 ```ts
 type WorkerLifecycleEvent =
   | { type: "worker_start"; role: RoutedAgentRole; goal: string;
-      phase: "support" | "review"; modelId: string }
+      phase: "support" | "review"; modelId: string; todoIds?: string[] }
   | { type: "worker_end";   role: RoutedAgentRole;
       phase: "support" | "review";
-      status: "completed" | "failed"; summary?: string; error?: string }
+      status: "completed" | "failed"; summary?: string; error?: string;
+      todoIds?: string[] }
 ```
 
 Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后发 `worker_end`。CLI 用它们填充 BrainPet 进度片段，并驱动任务队列列表。BrainPet 只是只读 UI：可以基于可见上下文总结或吐槽，但不会影响路由或执行。
 
+- **实时运行状态** —— TUI 的 elapsed 时间由本地 1 秒计时器驱动，token 总量仍来自 provider 的 `AgentEvent` usage 数据；这样长时间没有流式事件时，用时显示也不会停住。
+- **Transcript 折叠** —— 带 `▸` / `▾` 标记的工具或 agent 行可以点击任意可见换行区域展开/收起。默认启用鼠标捕获；需要保留终端选择文本时可设 `BRAINCODE_TUI_MOUSE=false`。
 - **Intent graph 视图** —— `Ctrl+O` 或 `/intent` 会打开最新 `RuntimePlan` 的任务拆解和依赖路径，并显示路由来源、置信度、原因、worker 和 mode 预算。
 - **Router plan 预览** —— `/plan <task>` 默认请求配置的 `routeBrain`；`/plan --heuristic <task>` 只用于确定性、无 provider 调用的诊断。如果 router 不可用，`RuntimePlan.routing` 会把结果标成 heuristic fallback。
 

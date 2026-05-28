@@ -110,7 +110,7 @@ Expected commands:
 
 The CLI should stay thin. It should delegate implementation to packages.
 
-The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, and session state. It should let users switch Braincode mode between `auto` and `radical` without leaving the TUI. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
+The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, transcript folding, live token/elapsed status, and session state. The running status line should tick independently of provider/tool events so elapsed time stays current during long quiet calls. Transcript folding uses mouse capture by default and lets users click any visible row with a fold marker; set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture. The TUI should let users switch Braincode mode between `auto` and `radical` without leaving the TUI. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
 
 Early TUI commands:
 
@@ -126,7 +126,7 @@ Early TUI commands:
 Browser UI for configuration.
 
 It should talk to the local server API and should not write `~/.braincode/` directly.
-It shows model, role, and runtime-phase token usage through the server usage-statistics API.
+It uses tabbed navigation with model management first, so long configuration surfaces stay scannable. It shows model, role, and runtime-phase token usage through the server usage-statistics API, including charted summaries and clickable details. When auth status reports OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, or GitHub Copilot, the model catalog can add those provider models without requiring a duplicate API key.
 
 ### `packages/config`
 
@@ -161,7 +161,7 @@ Responsibilities:
 - Load local skill Markdown from `.agents/skill/<skill-id>/SKILL.md` or top-level `.agents/skill/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
-- Aggregate token usage from session JSONL records by model, role, and runtime phase for the local config UI.
+- Aggregate token usage from session JSONL records by model, role, runtime phase, and recent call details for the local config UI.
 
 ### `packages/server`
 
@@ -217,7 +217,7 @@ Responsibilities:
 - Run a review worker for risky tasks when Brain policy requires it.
 - Merge structured worker and review results into the final run result.
 - Connect tools to the underlying agent runtime.
-- Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and invalidate cached evidence after write/execute tools.
+- Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and reset cached evidence plus duplicate counters after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
@@ -308,6 +308,7 @@ Remaining work:
 - Serve a minimal web page.
 - Read/write `settings.json`.
 - Show auth/model/brain config sections.
+- Keep model management first in the tabbed Web UI and expose usage charts/details from session token records.
 
 ### MVP-2: single-agent runtime - done
 

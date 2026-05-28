@@ -8,6 +8,8 @@ import {
   ensureSessionHandoff,
   executePromptFromConfig,
   humanizeAgentRuntimeError,
+  isHandoffRequiredError,
+  isProviderMessageSizeLimitError,
   planRuntimeFromConfig,
   type AgentEvent,
   type RuntimePlan,
@@ -89,6 +91,7 @@ type TranscriptItem = {
   queueId?: string;
   editPreview?: EditPreview;
   toolArgs?: Record<string, unknown>;
+  toolDetail?: string;
 };
 
 type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool";
@@ -119,7 +122,8 @@ type QueuedTask = {
 
 type TranscriptClickBound = {
   itemId: string;
-  row: number;
+  rowStart: number;
+  rowEnd: number;
   foldLeft: number;
   foldRight: number;
 };
@@ -336,15 +340,16 @@ const INPUT_RESERVED_COLUMNS = 4; // "› " prefix + cursor + a little padding
 const ROOT_PADDING_X = 1;
 const PET_PANEL_MIN_WIDTH = 28;
 const PET_PANEL_MAX_WIDTH = 42;
-const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const;
+const RUN_SPINNER_FRAMES = [".:,:.", ":,:.:", ",:.:,", ":.:,:", ",:,:."] as const;
 const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
 const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400;
 const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
+const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
-const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE === "true";
+const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE !== "false";
 
 type UiColor =
   | "blue"
@@ -738,7 +743,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const row = click.y + transcriptClickViewportOffset.current;
     const target = transcriptClickBounds.current.find(
       (bound) =>
-        row === bound.row &&
+        row >= bound.rowStart &&
+        row <= bound.rowEnd &&
         click.x >= bound.foldLeft &&
         click.x <= bound.foldRight,
     );
@@ -2181,7 +2187,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             toolName: event.toolName,
             toolCategory,
             startedAt: Date.now(),
-            text: formatToolStartText(event.toolName, argsCount),
+            text: formatToolStartText(event.toolName),
             toolArgs: argsObject,
             collapsed: true,
           });
@@ -2213,7 +2219,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             const duplicateCount = Math.max(1, (evidence.callCount ?? 2) - 1);
             const text = formatRepeatedReadToolText(
               event.toolName,
-              tracked.argsCount,
+              duplicateCount,
+            );
+            const toolDetail = formatRepeatedReadToolDetail(
               duplicateCount,
               evidence,
             );
@@ -2226,6 +2234,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                 toolCategory: tracked.toolCategory,
                 finishedAt: Date.now(),
                 text,
+                toolDetail,
+                collapsed: true,
               });
             } else {
               repeatedReadToolItems.set(tracked.argsKey, {
@@ -2236,6 +2246,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                 toolCategory: tracked.toolCategory,
                 finishedAt: Date.now(),
                 text,
+                toolDetail,
+                collapsed: true,
               });
             }
             updateStatus(
@@ -2249,11 +2261,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             finishedAt: Date.now(),
             text: formatToolEndText(
               event.toolName,
-              tracked.argsCount,
               event.isError,
               elapsed,
-              summarizeToolResult(event.result),
             ),
+            toolDetail: formatToolResultDetail(event.result),
+            collapsed: true,
           });
           if (tracked.editArgs) {
             const editArgs = tracked.editArgs;
@@ -2606,6 +2618,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     } catch (error) {
       finalizeStreamingBuffers();
       const message = showRuntimeErrorPanel(error, "Run Failed");
+      if (isHandoffRequiredError(error) || isProviderMessageSizeLimitError(error)) {
+        applyDraftChange("/handoff ");
+        flash("Context boundary reached — run /handoff to continue from a compact packet", "error", 6000);
+      }
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
         { id: crypto.randomUUID(), kind: "error", text: message },
@@ -3435,6 +3451,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                         ))}
                       </Box>
                     ) : null}
+                    {item.kind === "tool" &&
+                    !item.collapsed &&
+                    item.toolDetail ? (
+                      <Box flexDirection="column" marginLeft={2}>
+                        <Text color={colors.gray}>↳ {item.toolDetail}</Text>
+                      </Box>
+                    ) : null}
                     {item.plan ? (
                       <>
                         <Text color={colors.gray}>
@@ -4119,7 +4142,7 @@ function sameTokenUsage(
 }
 
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
-  if (item.kind === "tool") return toolArgsCount(item.toolArgs) > 0;
+  if (item.kind === "tool") return true;
   return isTranscriptItemAutoCollapsed({
     ...item,
     text:
@@ -4128,7 +4151,7 @@ function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
 }
 
 function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
-  if (item.kind === "tool") return toolArgsCount(item.toolArgs) > 0;
+  if (item.kind === "tool") return true;
   if (!["assistant", "panel", "help", "error"].includes(item.kind))
     return false;
   const lines = item.text.split(/\r?\n/);
@@ -4169,18 +4192,25 @@ function layoutTranscriptItems(
     const rowStart = row;
     if (showDivider) row += 1;
     const contentRow = row;
-    const itemRows =
-      estimateTranscriptItemRows(item, width, continuation, collapsible) +
-      estimateTranscriptSupplementRows(item, width);
+    const mainRows = estimateTranscriptItemRows(
+      item,
+      width,
+      continuation,
+      collapsible,
+    );
+    const supplementRows = estimateTranscriptSupplementRows(item, width);
+    const itemRows = mainRows + supplementRows;
     if (collapsible) {
       const foldHitBox = transcriptFoldHitBox(
         normalized,
         continuation,
         collapsible,
+        width,
       );
       bounds.push({
         itemId: normalized.id,
-        row: contentRow,
+        rowStart: contentRow,
+        rowEnd: contentRow + Math.max(0, mainRows - 1),
         foldLeft: foldHitBox.foldLeft,
         foldRight: foldHitBox.foldRight,
       });
@@ -4240,12 +4270,17 @@ function viewportTranscriptLayout(
     .filter((bound) => visibleIds.has(bound.itemId))
     .map((bound) => ({
       ...bound,
-      row: firstTerminalRow + bound.row - scrollTop,
+      rowStart: Math.max(firstTerminalRow, firstTerminalRow + bound.rowStart - scrollTop),
+      rowEnd: Math.min(
+        firstTerminalRow + height - 1,
+        firstTerminalRow + bound.rowEnd - scrollTop,
+      ),
     }))
     .filter(
       (bound) =>
-        bound.row >= firstTerminalRow &&
-        bound.row < firstTerminalRow + height,
+        bound.rowStart <= bound.rowEnd &&
+        bound.rowEnd >= firstTerminalRow &&
+        bound.rowStart < firstTerminalRow + height,
     );
 
   return { entries, bounds, scrollTop, maxScrollTop, viewportRows: height };
@@ -4376,12 +4411,13 @@ function transcriptFoldHitBox(
   item: TranscriptItem,
   continuation: boolean,
   collapsible: boolean,
+  width: number,
 ): { foldLeft: number; foldRight: number } {
   if (!collapsible) return { foldLeft: 0, foldRight: 0 };
   const foldColumn = transcriptFoldColumn(item, continuation);
   return {
-    foldLeft: Math.max(1, foldColumn + ROOT_PADDING_X - 1),
-    foldRight: foldColumn + ROOT_PADDING_X + 2,
+    foldLeft: 1,
+    foldRight: Math.max(foldColumn + ROOT_PADDING_X + 2, width + ROOT_PADDING_X),
   };
 }
 
@@ -4419,6 +4455,7 @@ function estimateTranscriptItemRows(
   if (item.kind === "user") {
     return rightAlignTranscriptRows(item.text, width, 6).length;
   }
+  if (item.kind === "tool") return 1;
   const line = transcriptPlainLine(item, continuation, collapsible);
   return wrapByVisualWidth(line, Math.max(20, width)).length;
 }
@@ -4435,6 +4472,9 @@ function estimateTranscriptSupplementRows(
         Math.max(10, width - 2),
       );
     }
+  }
+  if (item.kind === "tool" && !item.collapsed && item.toolDetail) {
+    rows += countWrappedRows(`↳ ${item.toolDetail}`, Math.max(10, width - 2));
   }
   if (item.plan) {
     rows += countWrappedRows(formatPlanMetadataLine(item.plan), width);
@@ -5292,20 +5332,43 @@ function ToastView({ toast }: { toast: ToastState }) {
 
 function RuntimeStatusLine({ status }: { status: RunStatusState }) {
   const theme = useTuiTheme();
-  const spinner = RUN_SPINNER_FRAMES[status.frame % RUN_SPINNER_FRAMES.length];
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 180);
+    return () => clearInterval(timer);
+  }, [status.startedAt]);
+  const elapsedMs = now - status.startedAt;
+  const spinner =
+    RUN_SPINNER_FRAMES[
+      Math.floor(elapsedMs / 180) % RUN_SPINNER_FRAMES.length
+    ];
   const label = truncate(
     status.label.replace(/\s+/g, " ").trim() || "Thinking…",
     80,
   );
-  const elapsed = formatElapsed(Date.now() - status.startedAt);
+  const labelChars = Array.from(label);
+  const activeIndex =
+    labelChars.length > 0 ? Math.floor(elapsedMs / 140) % labelChars.length : 0;
+  const elapsed = formatElapsed(elapsedMs);
   const tokens = formatRunStatusTokens(status.tokens);
+  const highlightColor =
+    theme.name === "dark" ? "#ffffff" : "#000000";
 
   return (
     <Text>
       <Text color={theme.colors.yellow} bold>
         {spinner}{" "}
       </Text>
-      <Text color={theme.colors.yellow}>{label}</Text>
+      {labelChars.map((char, index) => (
+        <Text
+          key={`${char}-${index}`}
+          color={index === activeIndex ? highlightColor : theme.colors.yellow}
+          bold={index === activeIndex}
+        >
+          {char}
+        </Text>
+      ))}
       <Text color={theme.colors.gray}>
         {" "}
         ({elapsed}
@@ -5777,12 +5840,12 @@ function formatHelp(): string {
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
     TUI_MOUSE_ENABLED
       ? "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown, wheel, or Ctrl+↑/Ctrl+↓ also scroll it."
-      : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is off by default so terminal selection/copy works.",
+      : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is disabled by BRAINCODE_TUI_MOUSE=false.",
     "  • Press Ctrl+P/Ctrl+N for prompt history; ↑/↓ still moves within multi-line input.",
     "  • Press Ctrl+Y to edit the most recent queued prompt.",
     TUI_MOUSE_ENABLED
-      ? "  • Click ▸/▾ on long transcript items to expand or collapse that item."
-      : "  • Set BRAINCODE_TUI_MOUSE=true to enable mouse wheel and click folding; terminal text selection works best with it off.",
+      ? "  • Click any long transcript item row with ▸/▾ to expand or collapse it."
+      : "  • Unset BRAINCODE_TUI_MOUSE=false to enable mouse wheel and click folding.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n");
@@ -6069,32 +6132,30 @@ type ToolEvidenceCacheInfo = {
   warning?: string;
 };
 
-function formatToolStartText(toolName: string, argsCount: number): string {
-  return `${toolName}${argsCount > 0 ? ` · ${argsCount} ${argsCount === 1 ? "arg" : "args"}` : ""}`;
+function formatToolStartText(toolName: string): string {
+  return `${toolName} · running`;
 }
 
 function formatToolEndText(
   toolName: string,
-  argsCount: number,
   isError: boolean,
   elapsedMs: number,
-  resultSummary: string,
 ): string {
   const status = isError ? "failed" : "completed";
-  const args =
-    argsCount > 0 ? ` · ${argsCount} ${argsCount === 1 ? "arg" : "args"}` : "";
-  const result = resultSummary ? ` · result ${resultSummary}` : "";
-  return `${toolName} · ${status} (${elapsedMs}ms)${args}${result}`;
+  return `${toolName} · ${status} (${elapsedMs}ms)`;
 }
 
 function formatRepeatedReadToolText(
   toolName: string,
-  argsCount: number,
+  duplicateCount: number,
+): string {
+  return `${toolName} · cached duplicate x${duplicateCount}`;
+}
+
+function formatRepeatedReadToolDetail(
   duplicateCount: number,
   evidence: ToolEvidenceCacheInfo,
 ): string {
-  const args =
-    argsCount > 0 ? ` · ${argsCount} ${argsCount === 1 ? "arg" : "args"}` : "";
   const repeated =
     evidence.consecutiveCount && evidence.consecutiveCount >= 3
       ? ` · repeated ${evidence.consecutiveCount}x in a row`
@@ -6103,7 +6164,7 @@ function formatRepeatedReadToolText(
     evidence.cacheAgeMs === undefined
       ? ""
       : ` · cache ${formatElapsed(evidence.cacheAgeMs)} old`;
-  return `${toolName} · cached duplicate x${duplicateCount}${args}${repeated}${age}`;
+  return `cache reused ${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"}${repeated}${age}`;
 }
 
 function toolArgsObject(args: unknown): Record<string, unknown> | undefined {
@@ -6115,6 +6176,11 @@ function toolArgsObject(args: unknown): Record<string, unknown> | undefined {
 
 function toolArgsCount(args: Record<string, unknown> | undefined): number {
   return args ? Object.keys(args).length : 0;
+}
+
+function formatToolResultDetail(result: unknown): string | undefined {
+  const summary = summarizeToolResult(result, TOOL_DETAIL_CHAR_LIMIT);
+  return summary ? `result ${summary}` : undefined;
 }
 
 function toolCallDisplayKey(
@@ -6216,10 +6282,13 @@ function summarizeArgValue(value: unknown, maxLen = 40): string {
   return truncate(String(value), maxLen);
 }
 
-function summarizeToolResult(result: unknown): string {
+function summarizeToolResult(
+  result: unknown,
+  maxLength = 120,
+): string {
   if (!result) return "";
   if (typeof result === "string")
-    return truncate(result.replace(/\s+/g, " ").trim(), 120);
+    return truncate(result.replace(/\s+/g, " ").trim(), maxLength);
   if (typeof result !== "object") return String(result);
   try {
     const record = result as {
@@ -6243,9 +6312,9 @@ function summarizeToolResult(result: unknown): string {
         )
         .filter(Boolean);
       const merged = texts.join(" ").replace(/\s+/g, " ").trim();
-      if (merged) return truncate(merged, 120);
+      if (merged) return truncate(merged, maxLength);
     }
-    return truncate(JSON.stringify(result), 120);
+    return truncate(JSON.stringify(result), maxLength);
   } catch {
     return "(unserializable result)";
   }

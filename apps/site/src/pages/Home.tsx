@@ -1,4 +1,7 @@
+import { useRef } from "react";
+import { useGSAP } from "@gsap/react";
 import { useI18n } from "../i18n";
+import { createHeroTimeline, createReveal, createScaleReveal } from "../animations";
 import routingUrl from "../assets/routing-diagram.png";
 
 declare const __VERSION__: string;
@@ -11,11 +14,121 @@ const ROLES = [
 
 export function Home() {
   const { t } = useI18n();
+  const mainRef = useRef<HTMLElement>(null);
 
   const copyInstall = () => navigator.clipboard.writeText("npm i -g @taotao7/braincode");
 
+  useGSAP(() => {
+    if (!mainRef.current) return;
+
+    // Hero cascade
+    const heroTl = createHeroTimeline(mainRef.current, [
+      ".hero .eyebrow",
+      ".hero h1",
+      ".hero .hero-tagline",
+      ".hero .lead",
+      ".hero .hero-cta",
+      ".hero .code-block",
+      ".hero .workflow-strip span",
+    ]);
+    if (heroTl) {
+      heroTl.from(".hero-img", {
+        x: 60,
+        autoAlpha: 0,
+        duration: 1,
+        ease: "power3.out",
+      }, "-=0.5");
+    }
+
+    // Features
+    createReveal(mainRef.current, "#features .eyebrow, #features h2", { y: 24, stagger: 0.1 });
+    createReveal(mainRef.current, "#features .feature", {
+      y: 36,
+      stagger: 0.12,
+      duration: 0.7,
+    }, { start: "top 85%" });
+
+    // Intent Graph
+    createReveal(mainRef.current, "#intent .eyebrow, #intent h2, #intent .lead", {
+      y: 24,
+      stagger: 0.1,
+    });
+    createScaleReveal(mainRef.current, "#intent .intent-graph-frame", {
+      y: 40,
+      duration: 0.8,
+    }, { start: "top 85%" });
+    createReveal(mainRef.current, "#intent .pillar", {
+      y: 30,
+      stagger: 0.1,
+    }, { start: "top 88%" });
+
+    // Runtime Output
+    createReveal(mainRef.current, "#output .eyebrow, #output h2, #output .lead", {
+      y: 24,
+      stagger: 0.1,
+    });
+    createScaleReveal(mainRef.current, "#output .runtime-frame", {
+      y: 40,
+      duration: 0.8,
+    }, { start: "top 85%" });
+    createReveal(mainRef.current, "#output .pillar", {
+      y: 30,
+      stagger: 0.1,
+    }, { start: "top 88%" });
+
+    // Modes
+    createReveal(mainRef.current, "#modes .eyebrow, #modes h2", {
+      y: 24,
+      stagger: 0.1,
+    });
+    createScaleReveal(mainRef.current, "#modes .card", {
+      y: 30,
+      scale: 0.95,
+      stagger: 0.15,
+      duration: 0.7,
+    }, { start: "top 85%" });
+
+    // Handoff
+    createReveal(mainRef.current, "#handoff .eyebrow, #handoff h2, #handoff .lead", {
+      y: 24,
+      stagger: 0.1,
+    });
+    createScaleReveal(mainRef.current, "#handoff .handoff-packet", {
+      y: 40,
+      duration: 0.8,
+    }, { start: "top 85%" });
+    createReveal(mainRef.current, "#handoff .feature", {
+      y: 28,
+      stagger: 0.12,
+    }, { start: "top 88%" });
+
+    // Roles
+    createReveal(mainRef.current, "#roles .eyebrow, #roles h2, #roles .lead", {
+      y: 24,
+      stagger: 0.1,
+    });
+    createReveal(mainRef.current, "#roles .role-tag", {
+      y: 20,
+      scale: 0.95,
+      stagger: { amount: 0.4, from: "random" },
+      duration: 0.5,
+      ease: "back.out(1.4)",
+    }, { start: "top 88%" });
+    createReveal(mainRef.current, "#roles .ph-img", {
+      y: 30,
+      stagger: 0.15,
+    }, { start: "top 85%" });
+
+    // Install CTA
+    createScaleReveal(mainRef.current, "#install h2, #install .lead, #install .code-block, #install .btn", {
+      y: 24,
+      stagger: 0.1,
+      duration: 0.6,
+    }, { start: "top 88%" });
+  }, { scope: mainRef });
+
   return (
-    <main id="content">
+    <main id="content" ref={mainRef}>
       {/* Hero Split */}
       <section className="section hero">
         <div className="container hero-split">
@@ -257,7 +370,7 @@ export function Home() {
       </section>
 
       {/* Roles */}
-      <section className="section">
+      <section className="section" id="roles">
         <div className="container grid-2-1">
           <div>
             <p className="eyebrow">{t("section_roles_eyebrow")}</p>
