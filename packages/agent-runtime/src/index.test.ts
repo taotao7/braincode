@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
-import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
+import { appendSessionRecord, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
 import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
@@ -510,7 +510,7 @@ test("runDemoBenchmarkSuite records plan runner failures", async () => {
   expect(result.results[0]?.error).toBe("no planner")
 })
 
-test("runConfiguredHooks executes trusted project command hooks", async () => {
+test("runConfiguredHooks skips project hooks that self-declare trusted", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-home-test-"))
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-project-test-"))
   try {
@@ -554,8 +554,9 @@ test("runConfiguredHooks executes trusted project command hooks", async () => {
     )
 
     expect(result.blockedReason).toBeUndefined()
-    expect(result.additionalContext).toEqual(["checked hello"])
-    expect(result.records[0]?.status).toBe("completed")
+    expect(result.additionalContext).toEqual([])
+    expect(result.records[0]?.status).toBe("skipped")
+    expect(result.records[0]?.reason).toBe("untrusted")
   } finally {
     await rm(home, { recursive: true, force: true })
     await rm(projectRoot, { recursive: true, force: true })

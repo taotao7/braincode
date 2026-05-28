@@ -153,7 +153,7 @@ test("readHookSources discovers user and project hook config", async () => {
     join(projectRoot, ".agents", "hooks.json"),
     JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: "command", command: "echo project" }] }],
+        Stop: [{ hooks: [{ type: "command", command: "echo project", trusted: true }] }],
       },
     }),
   )

@@ -606,6 +606,20 @@ export function normalizeHooks(value: unknown): BraincodeHooks {
   return { hooks };
 }
 
+function stripTrustedHooks(document: BraincodeHooks): BraincodeHooks {
+  const hooks: BraincodeHooks["hooks"] = {};
+  for (const [eventName, groups] of Object.entries(document.hooks) as Array<
+    [HookEventName, HookMatcherGroup[] | undefined]
+  >) {
+    if (!groups) continue;
+    hooks[eventName] = groups.map((group) => ({
+      ...group,
+      hooks: group.hooks.map((handler) => ({ ...handler, trusted: false })),
+    }));
+  }
+  return { hooks };
+}
+
 async function readProjectSkills(skillsPath: string): Promise<ProjectSkill[]> {
   let entries;
   try {
@@ -724,7 +738,7 @@ export async function readProjectHooks(
   return {
     kind: "project",
     path: paths.hooks,
-    document: hooks,
+    document: stripTrustedHooks(hooks),
   };
 }
 

@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
 import { ensureSessionHandoff, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type ToolApprovalDecision, type ToolApprovalRequest, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
-import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTheme, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
+import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTheme, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionContext, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
 import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
@@ -19,6 +19,7 @@ type TranscriptItem = {
   id: string
   kind: "user" | "status" | "assistant" | "error" | "help" | "panel" | "tool" | "thinking" | "worker" | "todo" | "queued" | "decision"
   text: string
+  collapsed?: boolean
   plan?: RuntimePlan
   toolName?: string
   toolCategory?: ToolCategory
@@ -57,6 +58,20 @@ type QueuedTask = {
   skipCommand: boolean
   forceRoles?: string[]
   itemId: string
+}
+
+type TranscriptClickBound = {
+  itemId: string
+  top: number
+  bottom: number
+}
+
+type TranscriptRenderEntry = {
+  item: TranscriptItem
+  index: number
+  continuation: boolean
+  showDivider: boolean
+  collapsible: boolean
 }
 
 type CommandDefinition = {
@@ -204,6 +219,9 @@ const INPUT_MAX_LINES = 6
 const INPUT_PROMPT_PREFIX = "› "
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
 const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const
+const COLLAPSED_TEXT_LINE_LIMIT = 10
+const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18
+const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400
 
 type UiColor = "blue" | "cyan" | "green" | "yellow" | "magenta" | "red" | "gray"
 
@@ -374,6 +392,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const activeUsageKey = useRef<string | null>(null)
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage())
   const verticalCursorColumn = useRef<number | null>(null)
+  const transcriptClickBounds = useRef<TranscriptClickBound[]>([])
+  const mouseInputBuffer = useRef("")
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion((value) => value + 1)
 
@@ -472,6 +492,26 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }, [])
 
   useEffect(() => {
+    if (!stdout || !process.stdin.isTTY) return
+    const enableMouse = "\x1b[?1000h\x1b[?1006h"
+    const disableMouse = "\x1b[?1000l\x1b[?1006l"
+    stdout.write(enableMouse)
+    const onData = (chunk: Buffer | string) => {
+      mouseInputBuffer.current = `${mouseInputBuffer.current}${String(chunk)}`
+      const parsed = consumeMouseClicks(mouseInputBuffer.current)
+      mouseInputBuffer.current = parsed.rest
+      for (const click of parsed.clicks) {
+        handleTranscriptClick(click.y)
+      }
+    }
+    process.stdin.on("data", onData)
+    return () => {
+      process.stdin.off("data", onData)
+      stdout.write(disableMouse)
+    }
+  }, [stdout])
+
+  useEffect(() => {
     if (initialRan.current) return
     initialRan.current = true
     if (initialPrompt?.trim()) {
@@ -480,7 +520,17 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }, [])
 
   function appendItem(item: Omit<TranscriptItem, "id">) {
-    setItems((previous) => [...previous, { id: crypto.randomUUID(), ...item }])
+    setItems((previous) => [...previous, normalizeTranscriptItem({ id: crypto.randomUUID(), ...item })])
+  }
+
+  function handleTranscriptClick(row: number) {
+    const target = transcriptClickBounds.current.find((bound) => row >= bound.top && row <= bound.bottom)
+    if (!target) return
+    setItems((previous) => previous.map((item) => {
+      if (item.id !== target.itemId || !isTranscriptItemCollapsible(item)) return item
+      const normalized = normalizeTranscriptItem(item)
+      return { ...item, collapsed: !(normalized.collapsed ?? false) }
+    }))
   }
 
   function flash(text: string, tone: ToastTone = "info", durationMs = 2500) {
@@ -904,19 +954,17 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         appendItem({ kind: "error", text: `Session '${trimmed}' not found.` })
         return
       }
-      applyResume(target)
+      await applyResume(target)
     } catch (error) {
       appendItem({ kind: "error", text: `Resume failed: ${formatError(error)}` })
     }
   }
 
-  function applyResume(target: SessionSummary) {
+  async function applyResume(target: SessionSummary) {
+    const context = await readSessionContext(target.sessionId, undefined, 1000)
+    const restoredItems = restoreSessionTranscriptItems(context, target)
     setSessionId(target.sessionId)
-    setItems([
-      { id: crypto.randomUUID(), kind: "status", text: `Resumed session ${target.sessionId.slice(0, 8)} (${target.status})` },
-      ...(target.prompt ? [{ id: crypto.randomUUID(), kind: "user" as const, text: target.prompt }] : []),
-      ...(target.summary ? [{ id: crypto.randomUUID(), kind: target.status === "failed" ? "error" as const : "assistant" as const, text: target.summary }] : []),
-    ])
+    setItems(restoredItems)
     setSessionPanel(null)
     flash(`Now writing to session ${target.sessionId.slice(0, 8)}`)
   }
@@ -1311,6 +1359,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     let approvalMode: BraincodeMode = mode
     const currentAssistant = { id: null as string | null, text: "" }
     let thinkingShown = false
+    let activeStreamPhase: "primary" | "support" | "review" | null = null
     const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string; editArgs?: EditArgs; editBeforePromise?: Promise<string | null> }>()
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
@@ -1327,6 +1376,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (currentAssistant.id && currentAssistant.text.length === 0) {
         const id = currentAssistant.id
         setItems((previous) => previous.filter((item) => item.id !== id))
+      }
+      if (currentAssistant.id && currentAssistant.text.length > 0) {
+        const id = currentAssistant.id
+        setItems((previous) => previous.map((item) => item.id === id ? normalizeTranscriptItem(item) : item))
       }
       currentAssistant.id = null
       currentAssistant.text = ""
@@ -1366,6 +1419,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           if (update.type === "done") registerTokenUsage(update.message)
           if (update.type === "error") registerTokenUsage(update.error)
           if (update.type === "text_delta") {
+            if (activeStreamPhase !== "primary") return
             const id = ensureAssistantItem()
             currentAssistant.text += update.delta
             updateItem(id, { text: currentAssistant.text })
@@ -1505,6 +1559,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const key = workerKey(event)
       const phaseLabel = formatWorkerPhase(event.phase)
       if (event.type === "worker_start") {
+        activeStreamPhase = event.phase
         const itemId = crypto.randomUUID()
         workerItems.set(key, { itemId, startedAt: Date.now() })
         appendItemRaw({
@@ -1518,6 +1573,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return
       }
       // worker_end
+      if (activeStreamPhase === event.phase) activeStreamPhase = null
       const tracked = workerItems.get(key)
       const itemId = tracked?.itemId
       const elapsed = tracked ? Date.now() - tracked.startedAt : undefined
@@ -1654,18 +1710,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       finalizeStreamingBuffers()
       const tokenSummary = formatRunTokenSummary(runUsage.current)
       setItems((previous) => {
-        const next = previous.filter((item) => item.id !== statusId)
+        const normalizedPrevious = previous.map(normalizeTranscriptItem)
+        const next = normalizedPrevious.filter((item) => item.id !== statusId)
         next.push({
           id: crypto.randomUUID(),
           kind: "status",
           text: `${result.plan.brain.id} → ${result.plan.role} → ${result.plan.piModel.provider}/${result.plan.piModel.id}${tokenSummary ? ` · ${tokenSummary}` : ""}`,
           plan: result.plan,
         })
-        const trimmedSummary = (result.summary ?? "").trim()
-        const hasMatchingAssistant = trimmedSummary && previous.some((item) => item.kind === "assistant" && item.text.trim() === trimmedSummary)
-        const sawAssistantText = previous.some((item) => item.kind === "assistant" && item.text.trim().length > 0)
+        const trimmedSummary = normalizeAssistantText((result.summary ?? "").trim())
+        const hasMatchingAssistant = trimmedSummary && normalizedPrevious.some((item) => item.kind === "assistant" && item.text.trim() === trimmedSummary)
+        const sawAssistantText = normalizedPrevious.some((item) => item.kind === "assistant" && item.text.trim().length > 0)
         if (trimmedSummary && !hasMatchingAssistant) {
-          next.push({ id: crypto.randomUUID(), kind: "assistant", text: trimmedSummary })
+          next.push(normalizeTranscriptItem({ id: crypto.randomUUID(), kind: "assistant", text: trimmedSummary }))
         } else if (!trimmedSummary && !sawAssistantText) {
           next.push({ id: crypto.randomUUID(), kind: "assistant", text: "(model returned no text — check tool calls above or run /sessions to inspect)" })
         }
@@ -1857,6 +1914,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   useInput((input, key) => {
+    if (isMouseInput(input)) return
+
     if (key.ctrl && input === "c") {
       exit()
       return
@@ -2030,7 +2089,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const target = sessionPanel.entries[sessionPanel.selected]
       if (!target) return
       if (key.return) {
-        applyResume(target)
+        void applyResume(target).catch((error) => appendItem({ kind: "error", text: `Resume failed: ${formatError(error)}` }))
         return
       }
       if (input === "v") {
@@ -2143,6 +2202,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0
   const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
   const contentWidth = Math.max(20, terminalCols - 4)
+  const transcriptLayout = layoutTranscriptItems(items, contentWidth)
+  transcriptClickBounds.current = transcriptLayout.bounds
   const projectPath = relative(homedir(), projectRoot) || projectRoot
   const headerRootLimit = Math.max(18, Math.min(54, terminalCols - 92))
   const headerRoot = truncate(projectPath, headerRootLimit)
@@ -2198,10 +2259,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ) : (
         <Box flexDirection="column">
           <SectionDivider label="TRANSCRIPT" color="cyan" width={contentWidth} />
-          {items.map((item, index) => (
+          {transcriptLayout.entries.map(({ item, index, continuation, showDivider, collapsible }) => (
             <Box key={item.id} flexDirection="column" marginBottom={1}>
-              {index > 0 ? <ThinDivider width={contentWidth} /> : null}
-              <TranscriptLine item={item} width={contentWidth} />
+              {showDivider ? <ThinDivider width={contentWidth} /> : null}
+              <TranscriptLine item={item} width={contentWidth} continuation={continuation} collapsible={collapsible} />
               {item.plan ? (
                 <>
                   <Text color={colors.gray}>{formatPlanMetadataLine(item.plan)}</Text>
@@ -2392,7 +2453,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         {draftWindow.hiddenBelow > 0 ? <Text color={colors.gray}>↓ {draftWindow.hiddenBelow} more line{draftWindow.hiddenBelow === 1 ? "" : "s"}</Text> : null}
       </Box>
       <Text color={colors.gray}>
-        Enter submits · / commands · /mode auto|radical · /theme · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+        Enter submits · / commands · /mode auto|radical · /theme · @ files · @@ sessions · Ctrl+O intent · click ▸/▾ toggles long output · ↑↓ move input · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
         <Text color={colors.yellow}>
@@ -2409,6 +2470,271 @@ function filteredCommands(filter: string): CommandDefinition[] {
   if (!filter) return COMMANDS
   const lower = filter.toLowerCase()
   return COMMANDS.filter((command) => command.name.startsWith(lower) || command.label.includes(lower))
+}
+
+function restoreSessionTranscriptItems(context: SessionContext | undefined, target: SessionSummary): TranscriptItem[] {
+  const runEntries = context?.entries.filter((entry): entry is Extract<SessionContext["entries"][number], { type: "run" }> => entry.type === "run") ?? []
+  const restored: TranscriptItem[] = []
+
+  for (const entry of runEntries) {
+    if (entry.prompt) {
+      restored.push({ id: crypto.randomUUID(), kind: "user", text: entry.prompt })
+    }
+    if (entry.summary) {
+      restored.push({
+        id: crypto.randomUUID(),
+        kind: entry.status === "failed" ? "error" : "assistant",
+        text: entry.summary,
+      })
+    } else if (entry.status !== "completed") {
+      restored.push({
+        id: crypto.randomUUID(),
+        kind: "status",
+        text: `Run${entry.attempt ? ` attempt ${entry.attempt}` : ""} is ${entry.status}.`,
+      })
+    }
+  }
+
+  if (restored.length === 0) {
+    if (target.prompt) restored.push({ id: crypto.randomUUID(), kind: "user", text: target.prompt })
+    if (target.summary) {
+      restored.push({
+        id: crypto.randomUUID(),
+        kind: target.status === "failed" ? "error" : "assistant",
+        text: target.summary,
+      })
+    }
+  }
+
+  const restoredTurns = restored.filter((item) => item.kind === "user").length
+  const statusParts = [
+    `Resumed session ${target.sessionId.slice(0, 8)} (${context?.status ?? target.status})`,
+    restoredTurns > 0 ? `restored ${restoredTurns} turn${restoredTurns === 1 ? "" : "s"}` : "no recorded turns found",
+    context?.truncated ? "latest records only" : "",
+  ].filter(Boolean)
+  const statusItem: TranscriptItem = { id: crypto.randomUUID(), kind: "status", text: statusParts.join(" · ") }
+
+  return [
+    statusItem,
+    ...restored,
+  ].map(normalizeTranscriptItem)
+}
+
+function normalizeTranscriptItem(item: TranscriptItem): TranscriptItem {
+  const text = item.kind === "assistant" ? normalizeAssistantText(item.text) : item.text
+  const next = text === item.text ? item : { ...item, text }
+  if (next.collapsed !== undefined) return next
+  return isTranscriptItemAutoCollapsed(next) ? { ...next, collapsed: true } : next
+}
+
+function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
+  return isTranscriptItemAutoCollapsed({ ...item, text: item.kind === "assistant" ? normalizeAssistantText(item.text) : item.text })
+}
+
+function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
+  if (!["assistant", "panel", "help", "error"].includes(item.kind)) return false
+  const lines = item.text.split(/\r?\n/)
+  return lines.length >= COLLAPSIBLE_TEXT_LINE_THRESHOLD || item.text.length >= COLLAPSIBLE_TEXT_CHAR_THRESHOLD
+}
+
+function layoutTranscriptItems(items: TranscriptItem[], width: number): { entries: TranscriptRenderEntry[]; bounds: TranscriptClickBound[] } {
+  const entries: TranscriptRenderEntry[] = []
+  const bounds: TranscriptClickBound[] = []
+  let row = transcriptFirstItemRow(items.length > 0)
+
+  for (let index = 0; index < items.length; index++) {
+    const previous = index > 0 ? normalizeTranscriptItem(items[index - 1]!) : undefined
+    const normalized = normalizeTranscriptItem(items[index]!)
+    const collapsible = isTranscriptItemCollapsible(normalized)
+    const displayText = normalized.collapsed ? collapseTranscriptText(normalized.text).text : normalized.text
+    const item = displayText === normalized.text ? normalized : { ...normalized, text: displayText }
+    const continuation = previous ? isTranscriptContinuation(previous, item) : false
+    const showDivider = index > 0 && !continuation
+    if (showDivider) row += 1
+    const itemRows = estimateTranscriptItemRows(item, width, continuation, collapsible)
+      + estimateTranscriptSupplementRows(item)
+    if (collapsible) {
+      bounds.push({ itemId: normalized.id, top: row, bottom: Math.max(row, row + itemRows - 1) })
+    }
+    entries.push({ item, index, continuation, showDivider, collapsible })
+    row += itemRows + 1
+  }
+
+  return { entries, bounds }
+}
+
+function transcriptFirstItemRow(hasTranscript: boolean): number {
+  if (!hasTranscript) return 0
+  // Header: 4 rows, margin: 1 row, transcript divider: 1 row. Mouse rows are 1-based.
+  return 7
+}
+
+function isTranscriptContinuation(previous: TranscriptItem, item: TranscriptItem): boolean {
+  if (previous.kind === "tool" && item.kind === "tool") {
+    return previous.toolCategory === item.toolCategory
+  }
+  return false
+}
+
+function estimateTranscriptItemRows(item: TranscriptItem, width: number, continuation: boolean, collapsible: boolean): number {
+  if (item.kind === "user") {
+    return rightAlignTranscriptRows(item.text, width, 6).length
+  }
+  const line = transcriptPlainLine(item, continuation, collapsible)
+  return wrapByVisualWidth(line, Math.max(20, width)).length
+}
+
+function estimateTranscriptSupplementRows(item: TranscriptItem): number {
+  let rows = 0
+  if (item.plan) {
+    rows += 1
+    if (item.plan.routing.reason) rows += 1
+    rows += item.plan.todos.length
+  }
+  if (item.editPreview) {
+    rows += 2
+    if (item.editPreview.binary) rows += 1
+    for (const hunk of item.editPreview.hunks) {
+      if (hunk.unchangedAbove > 0) rows += 1
+      rows += hunk.rows.length
+    }
+    if (item.editPreview.truncated) rows += 1
+  }
+  return rows
+}
+
+function transcriptPlainLine(item: TranscriptItem, continuation: boolean, collapsible: boolean): string {
+  const fold = collapsible ? (item.collapsed ? "▸ " : "▾ ") : ""
+  if (item.kind === "tool") {
+    const category = item.toolCategory ?? "tool"
+    return continuation
+      ? `  ↳ [${toolCategoryTitle(category)}] ${item.text}`
+      : `[TOOL] · [${toolCategoryTitle(category)}] ${item.text}`
+  }
+  if (item.kind === "decision") {
+    const category = item.toolCategory ?? "tool"
+    const status = item.decisionStatus ?? "pending"
+    return `[ASK] · [${toolCategoryTitle(category)}] · ${status.toUpperCase()} ${item.text}`
+  }
+  const badge = transcriptBadge(item)
+  return `${fold}[${badge.label}] ${item.text}`
+}
+
+function collapseTranscriptText(text: string): { text: string; hiddenLines: number } {
+  const lines = text.split(/\r?\n/)
+  const output: string[] = []
+  let nonCodeLines = 0
+  let hiddenLines = 0
+  let markerIndex: number | null = null
+  let inFence = false
+
+  for (const line of lines) {
+    const isFence = /^\s*```/.test(line)
+    if (inFence) {
+      output.push(line)
+      if (isFence) inFence = false
+      continue
+    }
+    if (isFence) {
+      output.push(line)
+      inFence = true
+      continue
+    }
+    if (nonCodeLines < COLLAPSED_TEXT_LINE_LIMIT) {
+      output.push(line)
+      nonCodeLines++
+      continue
+    }
+    hiddenLines++
+    if (markerIndex === null) {
+      markerIndex = output.length
+      output.push("")
+    }
+  }
+
+  if (markerIndex !== null) {
+    output[markerIndex] = `... ${hiddenLines} non-code line${hiddenLines === 1 ? "" : "s"} collapsed`
+  }
+
+  return { text: output.join("\n"), hiddenLines }
+}
+
+function normalizeAssistantText(text: string): string {
+  const result = parseWorkerResultEnvelope(text)
+  return result ? formatWorkerResultEnvelope(result) : text
+}
+
+function parseWorkerResultEnvelope(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  const candidate = fenced?.[1] ?? sliceJsonObject(trimmed)
+  if (!candidate) return null
+  try {
+    const parsed = JSON.parse(candidate) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    if (!("taskId" in record) || !("summary" in record) || !("progress" in record)) return null
+    return record
+  } catch {
+    return null
+  }
+}
+
+function formatWorkerResultEnvelope(record: Record<string, unknown>): string {
+  const progress = record.progress && typeof record.progress === "object" ? record.progress as Record<string, unknown> : undefined
+  const status = typeof progress?.status === "string" ? progress.status : "completed"
+  const progressSummary = typeof progress?.summary === "string" ? cleanInline(progress.summary) : ""
+  const summary = typeof record.summary === "string" ? record.summary.trim() : ""
+  const artifacts = Array.isArray(record.artifacts) ? record.artifacts : []
+  const risks = Array.isArray(record.risks) ? record.risks.filter((risk): risk is string => typeof risk === "string" && risk.trim().length > 0) : []
+  const lines: string[] = [`Worker result · ${status}${progressSummary ? ` · ${progressSummary}` : ""}`]
+  if (summary) lines.push("", summary)
+  const findingLabels = artifacts
+    .map((artifact) => artifact && typeof artifact === "object" ? (artifact as { kind?: unknown; label?: unknown }).label : undefined)
+    .filter((label): label is string => typeof label === "string" && label.trim().length > 0)
+  if (findingLabels.length > 0) {
+    lines.push("", "Findings:")
+    for (const label of findingLabels.slice(0, 8)) lines.push(`- ${label.trim()}`)
+    if (findingLabels.length > 8) lines.push(`- ... ${findingLabels.length - 8} more`)
+  }
+  if (risks.length > 0) {
+    lines.push("", "Risks:")
+    for (const risk of risks.slice(0, 4)) lines.push(`- ${risk.trim()}`)
+    if (risks.length > 4) lines.push(`- ... ${risks.length - 4} more`)
+  }
+  return lines.join("\n").trim()
+}
+
+function sliceJsonObject(text: string): string | null {
+  const start = text.indexOf("{")
+  const end = text.lastIndexOf("}")
+  if (start < 0 || end <= start) return null
+  return text.slice(start, end + 1)
+}
+
+function consumeMouseClicks(input: string): { clicks: Array<{ x: number; y: number }>; rest: string } {
+  const clicks: Array<{ x: number; y: number }> = []
+  const regex = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g
+  let match: RegExpExecArray | null
+  let consumedUntil = 0
+  while ((match = regex.exec(input))) {
+    consumedUntil = regex.lastIndex
+    const code = Number(match[1])
+    const x = Number(match[2])
+    const y = Number(match[3])
+    const action = match[4]
+    const button = code & 3
+    const isWheel = (code & 64) === 64
+    if (action === "M" && button === 0 && !isWheel && Number.isFinite(x) && Number.isFinite(y)) {
+      clicks.push({ x, y })
+    }
+  }
+  const rest = consumedUntil > 0 ? input.slice(consumedUntil) : input.slice(Math.max(0, input.length - 32))
+  return { clicks, rest }
+}
+
+function isMouseInput(input: string): boolean {
+  return /\x1b\[<\d+;\d+;\d+[Mm]/.test(input)
 }
 
 function computeOverlay(draft: string, cursor: number, current: Overlay): Overlay {
@@ -2674,8 +3000,9 @@ function clipDraftToWindow(draft: string, cursor: number, width: number, maxLine
   }
 }
 
-function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }) {
+function TranscriptLine({ item, width, continuation = false, collapsible = false }: { item: TranscriptItem; width: number; continuation?: boolean; collapsible?: boolean }) {
   const theme = useTuiTheme()
+  const foldGlyph = collapsible ? (item.collapsed ? "▸ " : "▾ ") : ""
   if (item.kind === "user") {
     const rows = rightAlignTranscriptRows(item.text, width, 6)
     return (
@@ -2700,6 +3027,15 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
   }
   if (item.kind === "tool") {
     const category = item.toolCategory ?? "tool"
+    if (continuation) {
+      return (
+        <Text>
+          <Text color={theme.colors.gray}>  ↳ </Text>
+          <Text color={tone(theme, toolCategoryColor(category))} bold>[{toolCategoryTitle(category)}]</Text>
+          <Text color={tone(theme, colorFor(item))}> {item.text}</Text>
+        </Text>
+      )
+    }
     return (
       <Text>
         <Badge label="TOOL" backgroundColor="yellow" />
@@ -2727,6 +3063,7 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
   const badge = transcriptBadge(item)
   return (
     <Text>
+      {foldGlyph ? <Text color={theme.colors.gray}>{foldGlyph}</Text> : null}
       <Badge label={badge.label} backgroundColor={badge.color} />
       <Text color={tone(theme, colorFor(item))}> {item.text}</Text>
     </Text>
@@ -3183,6 +3520,7 @@ function formatHelp(): string {
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
+    "  • Click ▸/▾ on long transcript items to expand or collapse that item.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n")
