@@ -10,6 +10,7 @@ export type BraincodeModel = {
   name: string
   api?: Api
   baseUrl?: string
+  headers?: Record<string, string>
   builtIn?: boolean
   contextWindow: number
   supportsTools: boolean
@@ -97,16 +98,17 @@ export function listBuiltInModelCatalog(): ModelCatalogProvider[] {
 
 export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
   if (model.baseUrl && model.builtIn !== true) {
-    const api = normalizeModelApi(model.api)
-    debugLog("llm", "resolving OpenAI-compatible model", {
+    const piModel = toOpenAICompatiblePiModel(model)
+    debugLog("llm", "resolving custom model", {
       provider: model.provider,
       modelId: model.modelId,
-      baseUrl: model.baseUrl,
-      api: api ?? "openai-responses",
+      baseUrl: piModel.baseUrl,
+      configuredBaseUrl: model.baseUrl,
+      api: piModel.api,
     })
     return {
       braincodeModel: model,
-      piModel: toOpenAICompatiblePiModel(model),
+      piModel,
     }
   }
 
@@ -277,15 +279,43 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`
 }
 
+const OPENAI_COMPATIBLE_APIS = new Set<string>(["openai-responses", "openai-completions", "openai-codex-responses", "azure-openai-responses"])
+
+function normalizeBaseUrlForApi(baseUrl: string | undefined, api: string): string | undefined {
+  const trimmed = (baseUrl ?? "").trim().replace(/\/+$/, "")
+  if (!trimmed) return undefined
+  if (api === "anthropic-messages") return trimmed.endsWith("/v1") ? trimmed.slice(0, -3) : trimmed
+  if (api === "google-generative-ai") return trimmed
+  if (OPENAI_COMPATIBLE_APIS.has(api)) return normalizeOpenAICompatibleBaseUrl(trimmed)
+  return trimmed
+}
+
+function providerStaticHeaders(provider: string): Record<string, string> | undefined {
+  if (provider === "kimi-coding") return { "User-Agent": "KimiCLI/1.5" }
+  return undefined
+}
+
+function defaultApiForProvider(provider: string): Api {
+  if (provider === "kimi-coding") return "anthropic-messages"
+  return "openai-responses"
+}
+
+function mergeModelHeaders(...headers: Array<Record<string, string> | undefined>): Record<string, string> | undefined {
+  const merged = Object.assign({}, ...headers.filter(Boolean))
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
 function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
-  const api = normalizeModelApi(model.api)
+  const api = (normalizeModelApi(model.api) ?? defaultApiForProvider(model.provider)) as Api
   const input: ("text" | "image")[] = model.supportsVision === true ? ["text", "image"] : ["text"]
+  const headers = mergeModelHeaders(providerStaticHeaders(model.provider), model.headers)
   return {
     id: model.modelId,
     name: model.name,
-    api: api ?? "openai-responses",
+    api,
     provider: model.provider as never,
-    baseUrl: model.baseUrl ?? "",
+    baseUrl: normalizeBaseUrlForApi(model.baseUrl, api) ?? "",
+    ...(headers ? { headers } : {}),
     reasoning: model.defaultThinkingLevel !== "off",
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -450,6 +480,7 @@ function summarizeCompletionResult(result: unknown): Record<string, unknown> {
 }
 
 export function toBraincodeModel(model: Model<Api>): BraincodeModel {
+  const headers = (model as Model<Api> & { headers?: Record<string, string> }).headers
   return {
     id: `${model.provider}/${model.id}`,
     provider: model.provider,
@@ -457,6 +488,7 @@ export function toBraincodeModel(model: Model<Api>): BraincodeModel {
     name: model.name,
     api: normalizeModelApi(model.api) as Api,
     baseUrl: model.baseUrl || undefined,
+    ...(headers ? { headers } : {}),
     builtIn: true,
     contextWindow: model.contextWindow,
     supportsTools: true,

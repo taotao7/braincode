@@ -5,7 +5,7 @@ import { Type } from "typebox"
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
 import type { ToolConfiguration, ToolPermission } from "./index"
 
-export type LocalToolMode = "all" | "read-only"
+export type LocalToolMode = "all" | "read-only" | "read-write"
 
 export type LocalCodingToolOptions = {
   projectRoot: string
@@ -32,6 +32,12 @@ type LocalToolContext = {
 }
 
 type JsonRecord = Record<string, unknown>
+
+type PackageManager = {
+  name: "bun" | "pnpm" | "yarn" | "npm"
+  command: string
+  runArgs: (script: string, args: string[]) => string[]
+}
 
 export const localCodingToolNames = [
   "list_files",
@@ -63,7 +69,11 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
   const mode = options.mode ?? "all"
 
   return localToolSpecs
-    .filter((tool) => mode === "all" || !tool.permissions.some((permission) => permission === "write" || permission === "execute"))
+    .filter((tool) => {
+      if (mode === "all") return true
+      if (mode === "read-write") return !tool.permissions.includes("execute")
+      return !tool.permissions.some((permission) => permission === "write" || permission === "execute")
+    })
     .filter((tool) => (options.tools ? enabled.get(tool.name) === true : true))
     .map((tool) => tool.create(context))
 }
@@ -128,7 +138,7 @@ const localToolSpecs: LocalToolSpec[] = [
   {
     name: "run_script",
     label: "Run Script",
-    description: "Run a package script with bun run from the current project workspace.",
+    description: "Run a package script with the detected package manager from the current project workspace.",
     permissions: ["execute"],
     create: createRunScriptTool,
   },
@@ -437,7 +447,7 @@ function createRunScriptTool(context: LocalToolContext): AgentTool {
   return {
     name: "run_script",
     label: "Run Script",
-    description: "Run a package script with bun run from the current project workspace.",
+    description: "Run a package script with the detected package manager from the current project workspace.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
@@ -450,16 +460,63 @@ function createRunScriptTool(context: LocalToolContext): AgentTool {
     },
     execute: async (_toolCallId, params, signal) => {
       const input = params as { script: string; args?: string[]; timeoutMs?: number }
-      const result = await runProcess("bun", ["run", input.script, ...(input.args ?? [])], {
+      const packageManager = await detectPackageManager(context.projectRoot)
+      const scriptArgs = input.args ?? []
+      const result = await runProcess(packageManager.command, packageManager.runArgs(input.script, scriptArgs), {
         cwd: context.projectRoot,
         signal,
         maxOutputBytes: context.maxOutputBytes,
         timeoutMs: clampInteger(input.timeoutMs, 1000, 600_000, context.commandTimeoutMs),
         allowExitCodes: ALL_EXIT_CODES,
       })
-      return textResult(formatProcessResult(result), { ...result, tool: "run_script", script: input.script, scriptArgs: input.args ?? [] })
+      return textResult(formatProcessResult(result), { ...result, tool: "run_script", packageManager: packageManager.name, script: input.script, scriptArgs })
     },
     executionMode: "sequential",
+  }
+}
+
+async function detectPackageManager(projectRoot: string): Promise<PackageManager> {
+  if (await fileExists(resolve(projectRoot, "bun.lockb")) || await fileExists(resolve(projectRoot, "bun.lock"))) {
+    return {
+      name: "bun",
+      command: "bun",
+      runArgs: (script, args) => ["run", script, ...args],
+    }
+  }
+  if (await fileExists(resolve(projectRoot, "pnpm-lock.yaml"))) {
+    return {
+      name: "pnpm",
+      command: "pnpm",
+      runArgs: (script, args) => ["run", script, ...(args.length > 0 ? ["--", ...args] : [])],
+    }
+  }
+  if (await fileExists(resolve(projectRoot, "yarn.lock"))) {
+    return {
+      name: "yarn",
+      command: "yarn",
+      runArgs: (script, args) => ["run", script, ...(args.length > 0 ? ["--", ...args] : [])],
+    }
+  }
+  if (await fileExists(resolve(projectRoot, "package-lock.json"))) {
+    return {
+      name: "npm",
+      command: "npm",
+      runArgs: (script, args) => ["run", script, ...(args.length > 0 ? ["--", ...args] : [])],
+    }
+  }
+  return {
+    name: "bun",
+    command: "bun",
+    runArgs: (script, args) => ["run", script, ...args],
+  }
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
   }
 }
 

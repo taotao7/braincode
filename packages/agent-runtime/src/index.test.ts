@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Type } from "typebox"
 import { appendSessionRecord, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { collectPatchBaseline, collectPatchSummary, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 test("selectRuntimeModel rejects unknown configured model ids before runtime execution", () => {
   expect(() =>
@@ -86,6 +87,107 @@ test("createBraincodeAgentRuntime blocks risky tools when no approval callback e
 
   expect(decision?.block).toBe(true)
   expect(decision?.reason).toContain("approval callback is required")
+})
+
+test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", async () => {
+  let calls = 0
+  const runtime = createBraincodeAgentRuntime({
+    mode: "auto",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+    toolEvidenceCache: createToolEvidenceCache(),
+    tools: [
+      {
+        name: "read_file",
+        label: "Read File",
+        description: "test read",
+        parameters: Type.Object({ path: Type.String() }),
+        execute: async () => {
+          calls += 1
+          return { content: [{ type: "text", text: `read call ${calls}` }], details: { calls } }
+        },
+      },
+    ],
+  })
+
+  const tool = runtime.agent.state.tools[0]
+  if (!tool) throw new Error("missing wrapped tool")
+  const first = await tool.execute("read-1", { path: "README.md" } as never)
+  const second = await tool.execute("read-2", { path: "README.md" } as never)
+
+  expect(calls).toBe(1)
+  expect(first.content[0]?.type === "text" ? first.content[0].text : "").toBe("read call 1")
+  expect(second.content[0]?.type === "text" ? second.content[0].text : "").toContain("Reusing cached read-only result")
+  expect(second.content[0]?.type === "text" ? second.content[0].text : "").toContain("read call 1")
+  expect((second.details as { evidenceCache?: { reused?: boolean; callCount?: number } }).evidenceCache).toMatchObject({
+    reused: true,
+    callCount: 2,
+  })
+})
+
+test("createBraincodeAgentRuntime invalidates evidence cache after shell calls", async () => {
+  let readCalls = 0
+  let shellCalls = 0
+  const runtime = createBraincodeAgentRuntime({
+    mode: "auto",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+    toolEvidenceCache: createToolEvidenceCache(),
+    tools: [
+      {
+        name: "read_file",
+        label: "Read File",
+        description: "test read",
+        parameters: Type.Object({ path: Type.String() }),
+        execute: async () => {
+          readCalls += 1
+          return { content: [{ type: "text", text: `read call ${readCalls}` }], details: { readCalls } }
+        },
+      },
+      {
+        name: "shell",
+        label: "Shell",
+        description: "test shell",
+        parameters: Type.Object({ command: Type.String() }),
+        execute: async () => {
+          shellCalls += 1
+          return { content: [{ type: "text", text: `shell call ${shellCalls}` }], details: { shellCalls } }
+        },
+      },
+    ],
+  })
+
+  const readTool = runtime.agent.state.tools.find((tool) => tool.name === "read_file")
+  const shellTool = runtime.agent.state.tools.find((tool) => tool.name === "shell")
+  if (!readTool || !shellTool) throw new Error("missing wrapped tools")
+
+  await readTool.execute("read-1", { path: "README.md" } as never)
+  await shellTool.execute("shell-1", { command: "git status --short" } as never)
+  const secondRead = await readTool.execute("read-2", { path: "README.md" } as never)
+
+  expect(readCalls).toBe(2)
+  expect(shellCalls).toBe(1)
+  expect(secondRead.content[0]?.type === "text" ? secondRead.content[0].text : "").toContain("read call 2")
 })
 
 test("humanizeAgentRuntimeError gives actionable provider configuration guidance", () => {
@@ -217,6 +319,29 @@ test("runPatchChecks supports configured script selection and disabled checks", 
   }
 })
 
+test("runPatchChecks uses npm when package-lock.json is present", async () => {
+  const npmCheck = spawnSync("npm", ["--version"])
+  if (npmCheck.status !== 0) return
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-npm-check-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package-lock.json"), JSON.stringify({ lockfileVersion: 3 }))
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        check: "node -e \"console.log('npm check ok')\"",
+      },
+    }))
+
+    const summary = await runPatchChecks(projectRoot, { timeoutMs: 10_000, maxOutputBytes: 4_000 })
+
+    expect(summary.status).toBe("passed")
+    expect(summary.results[0]?.command).toBe("npm")
+    expect(summary.results[0]?.args).toEqual(["run", "check"])
+    expect(summary.results[0]?.stdout).toContain("npm check ok")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("normalizeReviewDecisionText parses typed decisions and gates failed checks", () => {
   const review = {
     summary: "No code issue found.",
@@ -228,8 +353,19 @@ test("normalizeReviewDecisionText parses typed decisions and gates failed checks
   const decision = normalizeReviewDecisionText(JSON.stringify({
     decision: "approved",
     rationale: "Patch is logically correct.",
+    findings: [
+      {
+        severity: "high",
+        file: "src/auth.ts",
+        line: 42,
+        evidence: "missing validation branch",
+        issue: "Auth validation can be bypassed.",
+        suggestion: "Validate before issuing the token.",
+      },
+    ],
     requiredChanges: [],
     blockingIssues: [],
+    residualRisks: ["Manual auth flow not exercised."],
   }), review, {
     status: "failed",
     results: [
@@ -250,7 +386,15 @@ test("normalizeReviewDecisionText parses typed decisions and gates failed checks
 
   expect(decision.decision).toBe("changes_requested")
   expect(decision.rationale).toBe("Patch is logically correct.")
+  expect(decision.findings[0]).toMatchObject({
+    severity: "high",
+    file: "src/auth.ts",
+    line: 42,
+    issue: "Auth validation can be bypassed.",
+  })
+  expect(decision.findings.at(-1)?.issue).toContain("Fix failing checks")
   expect(decision.requiredChanges[0]).toContain("test")
+  expect(decision.residualRisks).toContain("Manual auth flow not exercised.")
 })
 
 test("normalizeReviewDecisionText falls back to risks when decision is missing", () => {
@@ -264,6 +408,7 @@ test("normalizeReviewDecisionText falls back to risks when decision is missing",
 
   expect(decision.decision).toBe("changes_requested")
   expect(decision.rationale).toBe("Found an issue.")
+  expect(decision.residualRisks).toEqual(["missing regression test"])
 })
 
 test("demo benchmark task catalog covers representative coding categories", () => {

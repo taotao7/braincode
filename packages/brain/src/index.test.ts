@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel } from "./index"
+import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -125,6 +125,33 @@ test("selectBrain and selectModelPolicy return configured policies", () => {
   expect(selectModelPolicy(brain, "review")).toEqual({ modelId: "review", thinkingLevel: "high" })
   expect(selectModelPolicy({ ...brain, roles: { ...brain.roles, qa: undefined as never } }, "qa")).toEqual({ modelId: "rush", thinkingLevel: "low" })
   expect(() => selectBrain([brain], "missing")).toThrow("Unknown brain id")
+})
+
+test("selectBrain resolves preset inheritance with focused overrides", () => {
+  const presets: BrainPreset[] = [
+    brain,
+    {
+      id: "safe-review",
+      extends: "brain",
+      name: "Safe Review",
+      routing: { requireReviewForFileEdits: false },
+      roles: {
+        review: { modelId: "strong-review", thinkingLevel: "xhigh" },
+      },
+    },
+  ]
+  const derived = selectBrain(presets, "safe-review")
+
+  expect(derived.id).toBe("safe-review")
+  expect(derived.name).toBe("Safe Review")
+  expect(derived.description).toBe("Test brain")
+  expect(derived.routing).toMatchObject({
+    maxParallelAgents: 2,
+    requireReviewForFileEdits: false,
+  })
+  expect(derived.roles.review).toEqual({ modelId: "strong-review", thinkingLevel: "xhigh" })
+  expect(derived.roles.backend).toEqual(brain.roles.backend)
+  expect(derived.context).toEqual(brain.context)
 })
 
 test("role prompt and fallback role helpers normalize simple inputs", () => {

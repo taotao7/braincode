@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
-import { Agent, type AgentEvent } from "@earendil-works/pi-agent-core"
+import { Agent, type AgentEvent, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
@@ -8,14 +8,14 @@ export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTasks, runDemoBenchmarkSuite } from "./benchmark"
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
-import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration } from "@braincode/tools"
+import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode } from "@braincode/tools"
 
 export type AgentRunRequest = {
   prompt: string
@@ -26,6 +26,7 @@ export type AgentRunRequest = {
   onTodoEvent?: (event: TodoLifecycleEvent) => void | Promise<void>
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
+  localToolMode?: LocalToolMode
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
 }
@@ -153,11 +154,24 @@ export type PatchReviewArtifacts = {
 
 export type ReviewDecisionStatus = "approved" | "changes_requested" | "blocked"
 
+export type ReviewFindingSeverity = "low" | "medium" | "high"
+
+export type ReviewFinding = {
+  severity: ReviewFindingSeverity
+  issue: string
+  file?: string
+  line?: number
+  evidence?: string
+  suggestion?: string
+}
+
 export type ReviewDecision = {
   decision: ReviewDecisionStatus
   rationale: string
+  findings: ReviewFinding[]
   requiredChanges: string[]
   blockingIssues: string[]
+  residualRisks: string[]
 }
 
 export type RuntimeModelSelection = {
@@ -166,13 +180,26 @@ export type RuntimeModelSelection = {
   piModel: Model<any>
 }
 
+type ToolEvidenceCacheEntry = {
+  result: AgentToolResult<any>
+  createdAt: number
+}
+
+export type ToolEvidenceCache = {
+  entries: Map<string, ToolEvidenceCacheEntry>
+  counts: Map<string, number>
+  lastKey?: string
+  consecutiveCount: number
+}
+
 export type BraincodeAgentRuntimeOptions = {
   mode: BraincodeMode
   systemPrompt: string
   model: BraincodeModel
   policy: ModelPolicy
   sessionId?: string
-  tools?: import("@earendil-works/pi-agent-core").AgentTool[]
+  tools?: AgentTool[]
+  toolEvidenceCache?: ToolEvidenceCache
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
@@ -616,15 +643,166 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
   throw new Error(`No usable model with API key for policy. Tried: ${errors.join("; ")}`)
 }
 
+const CACHEABLE_EVIDENCE_TOOLS = new Set(["list_files", "read_file", "search_files", "git_diff", "get_changed_files"])
+
+export function createToolEvidenceCache(): ToolEvidenceCache {
+  return {
+    entries: new Map(),
+    counts: new Map(),
+    consecutiveCount: 0,
+  }
+}
+
+function wrapToolsWithEvidenceCache(tools: AgentTool[], cache: ToolEvidenceCache): AgentTool[] {
+  return tools.map((tool) => {
+    const wrapped: AgentTool = {
+      ...tool,
+      execute: async (toolCallId, params, signal, onUpdate) => {
+        const key = toolEvidenceKey(tool.name, params)
+        const count = recordToolEvidenceCall(cache, key)
+        const cacheable = isCacheableEvidenceToolCall(tool.name, params)
+        const cached = cacheable ? cache.entries.get(key) : undefined
+        if (cached) {
+          return annotateToolEvidenceResult(cached.result, {
+            toolName: tool.name,
+            reused: true,
+            callCount: count,
+            consecutiveCount: cache.consecutiveCount,
+            cacheAgeMs: Date.now() - cached.createdAt,
+          })
+        }
+
+        const result = await tool.execute(toolCallId, params as never, signal, onUpdate as never)
+        if (toolInvalidatesEvidenceCache(tool.name, params)) {
+          cache.entries.clear()
+        } else if (cacheable) {
+          cache.entries.set(key, { result, createdAt: Date.now() })
+        }
+
+        return annotateToolEvidenceResult(result, {
+          toolName: tool.name,
+          reused: false,
+          callCount: count,
+          consecutiveCount: cache.consecutiveCount,
+        })
+      },
+    }
+    return wrapped
+  })
+}
+
+function recordToolEvidenceCall(cache: ToolEvidenceCache, key: string): number {
+  const count = (cache.counts.get(key) ?? 0) + 1
+  cache.counts.set(key, count)
+  cache.consecutiveCount = cache.lastKey === key ? cache.consecutiveCount + 1 : 1
+  cache.lastKey = key
+  return count
+}
+
+function toolEvidenceKey(toolName: string, args: unknown): string {
+  return `${toolName.toLowerCase()}:${canonicalToolArgs(args)}`
+}
+
+function canonicalToolArgs(value: unknown): string {
+  try {
+    return JSON.stringify(toStableJsonValue(value, new WeakSet())) ?? ""
+  } catch {
+    return safeStringify(value)
+  }
+}
+
+function toStableJsonValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value
+  if (typeof value === "bigint") return value.toString()
+  if (Array.isArray(value)) return value.map((item) => toStableJsonValue(item, seen))
+  if (typeof value !== "object") return String(value)
+  if (seen.has(value)) return "[Circular]"
+  seen.add(value)
+  const output: Record<string, unknown> = {}
+  for (const key of Object.keys(value).sort()) {
+    output[key] = toStableJsonValue((value as Record<string, unknown>)[key], seen)
+  }
+  seen.delete(value)
+  return output
+}
+
+function isCacheableEvidenceToolCall(toolName: string, _args: unknown): boolean {
+  const name = toolName.toLowerCase()
+  if (CACHEABLE_EVIDENCE_TOOLS.has(name)) return true
+  return false
+}
+
+function toolInvalidatesEvidenceCache(toolName: string, args: unknown): boolean {
+  if (isCacheableEvidenceToolCall(toolName, args)) return false
+  const name = toolName.toLowerCase()
+  return /(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write|shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)
+}
+
+function annotateToolEvidenceResult<TDetails>(
+  result: AgentToolResult<TDetails>,
+  evidence: {
+    toolName: string
+    reused: boolean
+    callCount: number
+    consecutiveCount: number
+    cacheAgeMs?: number
+  },
+): AgentToolResult<TDetails> {
+  const warning = formatEvidenceCacheReminder(evidence)
+  const details = addEvidenceCacheDetails(result.details, { ...evidence, warning })
+  if (!warning) return { ...result, details }
+
+  const [first, ...rest] = result.content
+  if (first && first.type === "text" && typeof first.text === "string") {
+    return {
+      ...result,
+      details,
+      content: [{ ...first, text: `${warning}\n\n${first.text}` }, ...rest],
+    }
+  }
+  return {
+    ...result,
+    details,
+    content: [{ type: "text", text: warning }, ...result.content],
+  }
+}
+
+function addEvidenceCacheDetails<TDetails>(details: TDetails, evidenceCache: Record<string, unknown>): TDetails {
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    return { ...(details as Record<string, unknown>), evidenceCache } as TDetails
+  }
+  return { value: details, evidenceCache } as TDetails
+}
+
+function formatEvidenceCacheReminder(evidence: { toolName: string; reused: boolean; callCount: number; consecutiveCount: number; cacheAgeMs?: number }): string | undefined {
+  if (evidence.callCount <= 1) return undefined
+  const age = evidence.cacheAgeMs === undefined ? "" : ` (${evidence.cacheAgeMs}ms old)`
+  if (evidence.consecutiveCount >= 8) {
+    return `[Braincode evidence cache] Repeated ${evidence.toolName} with identical arguments ${evidence.consecutiveCount} times in a row. Stop repeating this call; use the cached evidence${age} or change the arguments.`
+  }
+  if (evidence.consecutiveCount >= 5) {
+    return `[Braincode evidence cache] Strong duplicate reminder: ${evidence.toolName} has identical arguments ${evidence.consecutiveCount} times in a row. Reuse the existing evidence${age} unless inputs changed.`
+  }
+  if (evidence.consecutiveCount >= 3) {
+    return `[Braincode evidence cache] Duplicate reminder: ${evidence.toolName} has identical arguments ${evidence.consecutiveCount} times in a row. Avoid looping over the same evidence.`
+  }
+  return evidence.reused
+    ? `[Braincode evidence cache] Reusing cached read-only result for duplicate ${evidence.toolName} call${age}.`
+    : `[Braincode evidence cache] Duplicate ${evidence.toolName} call detected; reuse prior evidence unless the arguments need to change.`
+}
+
 export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOptions): BraincodeAgentRuntime {
   const { piModel } = resolveBuiltInPiModel(options.model)
+  const tools = options.toolEvidenceCache && options.tools
+    ? wrapToolsWithEvidenceCache(options.tools, options.toolEvidenceCache)
+    : options.tools ?? []
   const agent = new Agent({
     sessionId: options.sessionId,
     initialState: {
       systemPrompt: options.systemPrompt,
       model: piModel,
       thinkingLevel: normalizeRuntimeThinkingLevel(options.model, options.policy),
-      tools: options.tools ?? [],
+      tools,
       messages: [],
     },
     getApiKey: options.getApiKey,
@@ -852,6 +1030,12 @@ const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
 const MAX_REVIEW_DIFF_CHARS = 60_000
 const CHECK_SCRIPT_PRIORITY = ["check", "typecheck", "lint", "test"] as const
 
+type PackageManager = {
+  name: "bun" | "pnpm" | "yarn" | "npm"
+  command: string
+  runArgs: (script: string) => string[]
+}
+
 export async function collectPatchBaseline(projectRoot: string): Promise<PatchBaseline | undefined> {
   const status = await runGitCommand(projectRoot, ["status", "--short"])
   if (status.exitCode !== 0) return undefined
@@ -897,6 +1081,7 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
   if (!packageScripts) {
     return { status: "skipped", reason: "package.json not found or has no scripts", results: [] }
   }
+  const packageManager = await detectPackageManager(projectRoot)
 
   const scripts = normalizeCheckScripts(options.scripts?.length ? options.scripts : selectDefaultCheckScripts(packageScripts))
   if (scripts.length === 0) {
@@ -908,8 +1093,8 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
     if (!Object.prototype.hasOwnProperty.call(packageScripts, script)) {
       results.push({
         name: script,
-        command: "bun",
-        args: ["run", script],
+        command: packageManager.command,
+        args: packageManager.runArgs(script),
         status: "failed",
         exitCode: null,
         signal: null,
@@ -920,7 +1105,7 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
       })
       continue
     }
-    results.push(await runBunScriptCheck(projectRoot, script, {
+    results.push(await runPackageScriptCheck(projectRoot, script, packageManager, {
       timeoutMs: options.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
       maxOutputBytes: options.maxOutputBytes ?? DEFAULT_CHECK_OUTPUT_BYTES,
     }))
@@ -991,15 +1176,52 @@ function normalizeCheckScripts(scripts: readonly string[] | undefined): string[]
   return output
 }
 
-async function runBunScriptCheck(
+async function detectPackageManager(projectRoot: string): Promise<PackageManager> {
+  if (await Bun.file(resolvePath(projectRoot, "bun.lockb")).exists() || await Bun.file(resolvePath(projectRoot, "bun.lock")).exists()) {
+    return {
+      name: "bun",
+      command: "bun",
+      runArgs: (script) => ["run", script],
+    }
+  }
+  if (await Bun.file(resolvePath(projectRoot, "pnpm-lock.yaml")).exists()) {
+    return {
+      name: "pnpm",
+      command: "pnpm",
+      runArgs: (script) => ["run", script],
+    }
+  }
+  if (await Bun.file(resolvePath(projectRoot, "yarn.lock")).exists()) {
+    return {
+      name: "yarn",
+      command: "yarn",
+      runArgs: (script) => ["run", script],
+    }
+  }
+  if (await Bun.file(resolvePath(projectRoot, "package-lock.json")).exists()) {
+    return {
+      name: "npm",
+      command: "npm",
+      runArgs: (script) => ["run", script],
+    }
+  }
+  return {
+    name: "bun",
+    command: "bun",
+    runArgs: (script) => ["run", script],
+  }
+}
+
+async function runPackageScriptCheck(
   cwd: string,
   script: string,
+  packageManager: PackageManager,
   options: { timeoutMs: number; maxOutputBytes: number },
 ): Promise<PatchCheckResult> {
   const startedAt = Date.now()
   return await new Promise((resolve) => {
-    const command = "bun"
-    const args = ["run", script]
+    const command = packageManager.command
+    const args = packageManager.runArgs(script)
     let settled = false
     let child
     try {
@@ -1341,7 +1563,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
   const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
-  const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
+  const brain = selectBrain(brains as BrainPreset[], settings.defaultBrainId)
   const modePolicy = getModePolicy(settings.mode)
   const routingLimits = getModeRoutingLimits(settings.mode, brain.routing?.maxParallelAgents)
   const heuristicPlan = planAgentRouting(prompt, brain)
@@ -1434,7 +1656,7 @@ export async function resolvePetRuntime(home?: string): Promise<ResolvedPetRunti
     const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
     const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
     const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
-    const brain = selectBrain(brains as BrainModel[], settings.defaultBrainId)
+    const brain = selectBrain(brains as BrainPreset[], settings.defaultBrainId)
     const policy = brain.roles.pet
     if (!policy?.modelId) return null
     const { selection, apiKey } = await selectRuntimeModelWithApiKey(policy, models as BraincodeModel[], home)
@@ -1638,10 +1860,15 @@ function summarizeProjectSupport(projectSupport: ProjectSupport) {
   }
 }
 
+const readOnlyToolWorkerRoles = new Set<RoutedAgentRole>(["librarian", "qa", "security", "review"])
+
 function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = []): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
   const priorResultContext = priorResults.length > 0
     ? `\nBrain-supplied prior worker results for dependencies:\n${formatWorkerResults(priorResults)}\n`
+    : ""
+  const toolContext = readOnlyToolWorkerRoles.has(handoff.task.agentRole as RoutedAgentRole)
+    ? "\nTool access:\nRead-only project tools may be available. Use them to gather concrete evidence, but do not attempt edits, shell execution, package scripts, or other state-changing actions.\n"
     : ""
   return `Run this isolated Braincode worker handoff.
 
@@ -1649,6 +1876,7 @@ ${supportContext}
 Original user request:
 ${originalPrompt}
 ${priorResultContext}
+${toolContext}
 
 Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
@@ -1686,6 +1914,9 @@ function buildReviewPrompt(
   return `Review this Braincode run as an isolated review agent.
 
 ${supportContext}
+Tool access:
+Read-only project tools may be available. Use them to verify changed files, inspect diffs, and check specific source evidence. Do not edit files or execute commands.
+
 Original user request:
 ${originalPrompt}
 
@@ -1702,7 +1933,7 @@ Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
 Return only JSON in this shape:
-{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","rationale":"brief reason for the decision","requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","rationale":"brief reason for the decision","findings":[{"severity":"low|medium|high","file":"optional project-relative path","line":1,"evidence":"short evidence","issue":"specific issue","suggestion":"specific fix"}],"requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"residualRisks":["risk that remains after review"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
 }
 
 function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
@@ -1836,15 +2067,50 @@ export function normalizeReviewDecisionText(text: string, review: WorkerResult, 
 
   const explicitDecision = normalizeReviewDecisionStatus(parsedRecord?.decision)
   const rationale = stringValue(parsedRecord?.rationale) ?? review.summary
+  const findings = normalizeReviewFindings(parsedRecord?.findings)
   const requiredChanges = normalizeStringArray(parsedRecord?.requiredChanges)
   const blockingIssues = normalizeStringArray(parsedRecord?.blockingIssues)
+  const residualRisks = uniqueStrings([...normalizeStringArray(parsedRecord?.residualRisks), ...review.risks])
   const fallbackDecision = fallbackReviewDecision(review, checks)
   return applyCheckGateToReviewDecision({
     decision: explicitDecision ?? fallbackDecision,
     rationale,
+    findings,
     requiredChanges,
     blockingIssues,
+    residualRisks,
   }, checks)
+}
+
+function normalizeReviewFindings(value: unknown): ReviewFinding[] {
+  if (!Array.isArray(value)) return []
+  const findings: ReviewFinding[] = []
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    const issue = stringValue(record.issue)
+    if (!issue) continue
+    const severity = normalizeReviewFindingSeverity(record.severity)
+    const file = stringValue(record.file)
+    const evidence = stringValue(record.evidence)
+    const suggestion = stringValue(record.suggestion)
+    const line = typeof record.line === "number" && Number.isInteger(record.line) && record.line > 0
+      ? record.line
+      : undefined
+    findings.push({
+      severity,
+      issue,
+      ...(file ? { file } : {}),
+      ...(line ? { line } : {}),
+      ...(evidence ? { evidence } : {}),
+      ...(suggestion ? { suggestion } : {}),
+    })
+  }
+  return findings
+}
+
+function normalizeReviewFindingSeverity(value: unknown): ReviewFindingSeverity {
+  return value === "low" || value === "medium" || value === "high" ? value : "medium"
 }
 
 function normalizeReviewDecisionStatus(value: unknown): ReviewDecisionStatus | undefined {
@@ -1866,6 +2132,18 @@ function applyCheckGateToReviewDecision(decision: ReviewDecision, checks?: Patch
   return {
     ...decision,
     decision: "changes_requested",
+    findings: [
+      ...decision.findings,
+      {
+        severity: "high",
+        issue: checkChange,
+        evidence: checks.results
+          .filter((result) => result.status === "failed")
+          .map((result) => `${result.name}: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode ?? "n/a"}`}`)
+          .join("\n"),
+        suggestion: "Run and fix the failing checks before approval.",
+      },
+    ],
     requiredChanges: uniqueStrings([...decision.requiredChanges, checkChange]),
   }
 }
@@ -1928,6 +2206,9 @@ async function runWorkerFromPlan(
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   onTodoStatus?: WorkerTodoStatusHandler,
   promptImages: ImageContent[] = [],
+  tools: AgentTool[] = [],
+  toolEvidenceCache?: ToolEvidenceCache,
+  onEvent?: (event: AgentEvent) => void | Promise<void>,
 ): Promise<ExecutedWorkerResult> {
   const emit = async (event: WorkerLifecycleEvent) => {
     if (!onWorkerEvent) return
@@ -1987,7 +2268,10 @@ async function runWorkerFromPlan(
       model: selection.configured,
       policy: worker.policy,
       sessionId: agentSessionId,
+      tools,
+      toolEvidenceCache,
       getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
+      onEvent,
     })
 
     try {
@@ -2069,6 +2353,9 @@ async function runSupportWorkers(
   concurrencyCap?: number,
   onTodoStatus?: WorkerTodoStatusHandler,
   promptImages: ImageContent[] = [],
+  readOnlyTools: AgentTool[] = [],
+  toolEvidenceCache?: ToolEvidenceCache,
+  onEvent?: (event: AgentEvent) => void | Promise<void>,
 ): Promise<ExecutedWorkerResult[]> {
   if (workers.length === 0) return []
   void toolExecution // tool execution governs intra-agent tool calls; worker dependency scheduling is Brain-mediated.
@@ -2104,6 +2391,7 @@ async function runSupportWorkers(
       pending.delete(index)
       const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
       const worker = workers[index]!
+      const workerTools = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
       results[index] = await runWorkerFromPlan(
         worker,
         (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
@@ -2117,6 +2405,9 @@ async function runSupportWorkers(
         onWorkerEvent,
         onTodoStatus,
         promptImages,
+        workerTools,
+        workerTools.length > 0 ? toolEvidenceCache : undefined,
+        workerTools.length > 0 ? onEvent : undefined,
       )
       for (const todoId of worker.todoIds ?? []) {
         completedTodoIds.add(todoId)
@@ -2182,8 +2473,18 @@ function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undef
         decision.blockingIssues.length > 0 ? `Blocking issues:\n${decision.blockingIssues.map((issue) => `- ${issue}`).join("\n")}` : "",
       ].filter(Boolean).join("\n")
     : review.summary
-  const risks = review.risks.length > 0 ? `\nRisks:\n${review.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
-  return `${summary}\n\nReview:\n${decisionText}${risks}`
+  const findings = decision?.findings.length
+    ? `\nFindings:\n${decision.findings.map((finding) => {
+        const location = finding.file ? ` (${finding.file}${finding.line ? `:${finding.line}` : ""})` : ""
+        const suggestion = finding.suggestion ? ` Suggestion: ${finding.suggestion}` : ""
+        return `- [${finding.severity}]${location} ${finding.issue}${suggestion}`
+      }).join("\n")}`
+    : ""
+  const residualRisks = decision?.residualRisks.length
+    ? `\nResidual risks:\n${decision.residualRisks.map((risk) => `- ${risk}`).join("\n")}`
+    : ""
+  const risks = !decision && review.risks.length > 0 ? `\nRisks:\n${review.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
+  return `${summary}\n\nReview:\n${decisionText}${findings}${residualRisks}${risks}`
 }
 
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
@@ -2245,9 +2546,6 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       // ignore listener errors
     }
   }
-  const patchBaseline = await collectPatchBaseline(cwd)
-  const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages)
-  const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
 
   const mcpHub = new McpToolHub()
   const { servers: mcpServers, skipped: mcpSkipped } = collectMcpToolServers({
@@ -2275,10 +2573,16 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const mcpTools = mcpHub.getTools()
   const toolConfig = await readTools(home)
   const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
-  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: request.onToolApproval ? "all" : "read-only" })
+  const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
+  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode })
+  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only" })
   const runtimeTools = [...localTools, ...mcpTools]
+  const toolEvidenceCache = createToolEvidenceCache()
 
   try {
+    const patchBaseline = await collectPatchBaseline(cwd)
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
+    const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
     let lastError: unknown
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
       plan.model = selection.configured
@@ -2318,6 +2622,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         policy: plan.policy,
         sessionId,
         tools: runtimeTools,
+        toolEvidenceCache,
         getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
         onEvent: request.onEvent,
         onToolApproval: request.onToolApproval,
@@ -2356,7 +2661,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           : undefined
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
             : undefined
         const reviewDecision = reviewResult
           ? applyCheckGateToReviewDecision(reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult, checks), checks)

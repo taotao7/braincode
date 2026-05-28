@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -26,7 +26,7 @@ function printHelp() {
 Usage:
   braincode [tui]
   braincode config [--port <port>] [--host <host>] [--no-open]
-  braincode run [--dry-run] [--heuristic] <prompt>
+  braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] <prompt>
   braincode benchmark [--heuristic] [--task <id>] [--json]
   braincode help
 
@@ -41,6 +41,9 @@ Commands:
 Run flags:
   --dry-run     Print the routeBrain runtime plan instead of executing.
   --heuristic   With --dry-run, skip routeBrain and print the deterministic fallback plan.
+  --read-only   Expose read-only local tools only.
+  --allow-edits Expose read/write local tools and auto-approve file edits, but block command execution.
+  --yes         Expose all local tools and auto-approve tool calls for non-interactive execution.
 
 Benchmark flags:
   --heuristic   Skip routeBrain and benchmark the deterministic fallback plan.
@@ -95,10 +98,16 @@ async function openInBrowser(url: string): Promise<void> {
 async function runTask(args: string[]) {
   const dryRun = args.includes("--dry-run")
   const heuristic = args.includes("--heuristic") || args.includes("--no-router")
-  const prompt = args.filter((arg) => arg !== "--dry-run" && arg !== "--heuristic" && arg !== "--no-router").join(" ").trim()
+  const yes = args.includes("--yes") || args.includes("-y")
+  const allowEdits = args.includes("--allow-edits")
+  const readOnly = args.includes("--read-only")
+  const prompt = args.filter((arg) => !["--dry-run", "--heuristic", "--no-router", "--yes", "-y", "--allow-edits", "--read-only"].includes(arg)).join(" ").trim()
 
   if (!prompt) {
-    throw new Error("Missing prompt. Usage: braincode run [--dry-run] [--heuristic] <prompt>")
+    throw new Error("Missing prompt. Usage: braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] <prompt>")
+  }
+  if ([readOnly, allowEdits, yes].filter(Boolean).length > 1) {
+    throw new Error("Choose only one run permission mode: --read-only, --allow-edits, or --yes.")
   }
 
   if (dryRun) {
@@ -107,9 +116,51 @@ async function runTask(args: string[]) {
     return
   }
 
-  const result = await executePromptFromConfig({ prompt })
+  const runPermissions = yes ? "yes" : allowEdits ? "allow-edits" : "read-only"
+  if (!yes && !allowEdits) {
+    console.error("Running in read-only mode because no approval handler is available. Use --yes, --allow-edits, or the TUI for edits.")
+  } else if (yes) {
+    console.error("Running with --yes: tool calls are auto-approved for this non-interactive run.")
+  } else {
+    console.error("Running with --allow-edits: local file edits are auto-approved; command execution, MCP tools, and unknown tools remain blocked. Use --yes or the TUI for broader access.")
+  }
+
+  const result = await executePromptFromConfig({
+    prompt,
+    localToolMode: runPermissions === "yes" ? "all" : runPermissions === "allow-edits" ? "read-write" : "read-only",
+    onToolApproval: runPermissions === "read-only" ? undefined : createRunApprovalHandler(runPermissions),
+  })
   console.log(result.summary)
   console.error(`\nSession: ${result.sessionId}`)
+}
+
+function createRunApprovalHandler(mode: "yes" | "allow-edits") {
+  return (request: ToolApprovalRequest): ToolApprovalDecision => {
+    if (mode === "yes") return { approved: true, reason: "auto-approved by --yes" }
+    if (isExecuteToolName(request.toolName)) {
+      return { approved: false, reason: "Command execution is blocked by --allow-edits; use --yes or the TUI to allow commands." }
+    }
+    if (localWriteToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local file edit by --allow-edits" }
+    if (localReadOnlyToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local read-only tool call by --allow-edits" }
+    return { approved: false, reason: `Tool ${request.toolName} is not auto-approved by --allow-edits; use --yes or the TUI to allow it.` }
+  }
+}
+
+const localReadOnlyToolNames = new Set([
+  "list_files",
+  "read_file",
+  "search_files",
+  "git_diff",
+  "get_changed_files",
+])
+
+const localWriteToolNames = new Set([
+  "edit_file",
+  "apply_patch",
+])
+
+function isExecuteToolName(toolName: string): boolean {
+  return /(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/i.test(toolName)
 }
 
 async function runBenchmark(args: string[]) {

@@ -104,6 +104,29 @@ test("createLocalCodingTools read-only mode excludes write and execute tools", a
   }
 })
 
+test("createLocalCodingTools read-write mode excludes execute tools only", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-readwrite-test-"))
+  try {
+    const tools = createLocalCodingTools({
+      projectRoot,
+      tools: createDefaultToolConfiguration().tools,
+      mode: "read-write",
+    })
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "apply_patch",
+      "edit_file",
+      "get_changed_files",
+      "git_diff",
+      "list_files",
+      "read_file",
+      "search_files",
+    ])
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("local tool prepareArguments normalizes aliases and primitive coercions", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-prepare-test-"))
   try {
@@ -305,6 +328,28 @@ test("shell and run_script return process results without throwing on nonzero ex
     expect(textContent(shellResult)).toContain("exit: 7")
     expect(textContent(scriptResult)).toContain("bun run echoargs a b")
     expect(textContent(scriptResult)).toContain("stdout:\nb")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("run_script uses npm when package-lock.json is present", async () => {
+  const npmCheck = spawnSync("npm", ["--version"])
+  if (npmCheck.status !== 0) return
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-npm-script-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package-lock.json"), JSON.stringify({ lockfileVersion: 3 }))
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        echoargs: "node -e \"console.log(process.argv.slice(1).join(','))\"",
+      },
+    }))
+    const runScript = getTool("run_script", projectRoot)
+    const scriptResult = await runScript.execute("script-npm", { script: "echoargs", args: ["a", "b"] } as never)
+
+    expect(textContent(scriptResult)).toContain("npm run echoargs -- a b")
+    expect(textContent(scriptResult)).toContain("a,b")
+    expect((scriptResult.details as { packageManager?: string }).packageManager).toBe("npm")
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

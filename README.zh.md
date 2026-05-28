@@ -1,6 +1,6 @@
 # Braincode
 
-一个多模型 coding agent 编排器。
+一个多模型代码工作流引擎。
 
 Braincode 把一次编码请求变成协同工程流程：
 
@@ -8,7 +8,7 @@ Braincode 把一次编码请求变成协同工程流程：
 planner -> specialist workers -> primary executor -> reviewer -> final report
 ```
 
-它不是“又一个 AI CLI”，不是把一个模型绑到终端里让它自己规划、自己写、自己审。Braincode 是一个 coding workflow engine：有角色分工、模型路由、上下文隔离、review 闸门和结构化最终报告。
+它不是“又一个 AI CLI”，不是把一个模型绑到终端里让它自己规划、自己写、自己审。Braincode 会把一个需求拆成角色分工、上下文隔离、代码修改、检查和独立审查，最后产出可审计 patch。
 
 **语言版本**：[English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
@@ -26,13 +26,15 @@ planner -> specialist workers -> primary executor -> reviewer -> final report
 
 ```bash
 braincode run "add login validation"
+braincode run --allow-edits "add login validation"
+braincode run --yes "fix the failing test"
 braincode run --dry-run "add login validation"
 braincode run --dry-run --heuristic "add login validation"
 BRAINCODE_DEBUG=true braincode run "hello"
 braincode benchmark
 ```
 
-`braincode run` 使用当前配置的 Brain Model。`--dry-run` 预览与真实执行相同的 routeBrain 规划路径；需要不调用 provider 的诊断时，加 `--heuristic`。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
+`braincode run` 使用当前配置的 Brain Model。非交互运行默认只读，因为没有审批 UI；`--allow-edits` 会自动批准内置本地读取和文件编辑，但阻止命令执行、MCP 工具和未知工具，`--yes` 会自动批准工具调用。`--dry-run` 预览与真实执行相同的 routeBrain 规划路径；需要不调用 provider 的诊断时，加 `--heuristic`。用 `braincode config` 修改当前 Brain Model 和 provider/model 配置。
 
 `braincode benchmark` 运行一组代表性 coding prompt：README 编辑、失败测试修复、auth 风险改动、package/script 改动，以及只做安全审查的只读任务。默认会在有凭据时请求 routeBrain，并标注 heuristic fallback；`--heuristic` 可用于无 provider 的诊断运行。
 

@@ -240,6 +240,20 @@ test("resolvePiModel maps legacy OpenAI chat completions API id", () => {
     supportsTools: true,
   })
   expect(anthropic.piModel.api).toBe("anthropic-messages")
+
+  const kimi = resolvePiModel({
+    id: "kimi-coding/kimi-for-coding",
+    provider: "kimi-coding",
+    modelId: "kimi-for-coding",
+    name: "Kimi For Coding",
+    api: "anthropic-messages",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    contextWindow: 262144,
+    supportsTools: true,
+  })
+  expect(kimi.piModel.api).toBe("anthropic-messages")
+  expect((kimi.piModel as { baseUrl?: string }).baseUrl).toBe("https://api.kimi.com/coding")
+  expect((kimi.piModel as { headers?: Record<string, string> }).headers).toEqual({ "User-Agent": "KimiCLI/1.5" })
 })
 
 test("resolvePiModel resolves built-ins and reports missing catalog models", () => {
@@ -443,8 +457,8 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
 
   const kimiModel: BraincodeModel = {
     ...visionModel,
-    id: "kimi/kimi-for-coding",
-    provider: "kimi",
+    id: "kimi-coding/kimi-for-coding",
+    provider: "kimi-coding",
     modelId: "kimi-for-coding",
     baseUrl: "https://api.kimi.com/coding/v1",
   }
@@ -458,6 +472,9 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
     detail: expect.stringContaining("Kimi For Coding is currently only available"),
   })
   expect((completeSimpleCalls.at(-1)?.[2] as { maxTokens?: number }).maxTokens).toBe(128)
+  const testedKimiModel = completeSimpleCalls.at(-1)?.[0] as { baseUrl?: string; headers?: Record<string, string> }
+  expect(testedKimiModel.baseUrl).toBe("https://api.kimi.com/coding")
+  expect(testedKimiModel.headers).toEqual({ "User-Agent": "KimiCLI/1.5" })
 })
 
 test("callPetCompletion handles OpenAI-compatible success and errors", async () => {

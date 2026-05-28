@@ -7,41 +7,59 @@ export type ModelPolicy = {
 
 export type BraincodeMode = "auto" | "radical"
 
+export type BrainRolePolicies = {
+  routeBrain: ModelPolicy
+  frontend: ModelPolicy
+  backend: ModelPolicy
+  designer: ModelPolicy
+  dba: ModelPolicy
+  devops: ModelPolicy
+  security: ModelPolicy
+  qa: ModelPolicy
+  review: ModelPolicy
+  summarize: ModelPolicy
+  oracle: ModelPolicy
+  librarian: ModelPolicy
+  rush: ModelPolicy
+  pet: ModelPolicy
+}
+
+export type BrainRoutingPolicy = {
+  maxParallelAgents: number
+  preferCheapModelForSimpleTasks: boolean
+  escalateOnUncertainty: boolean
+  requireReviewForFileEdits: boolean
+}
+
+export type BrainContextPolicy = {
+  maxInputTokens: number
+  compaction: "auto" | "manual" | "aggressive"
+  isolation: "strict" | "shared-facts"
+}
+
 export type BrainModel = {
   id: string
+  extends?: string
   name: string
   description: string
   planner: ModelPolicy
-  roles: {
-    routeBrain: ModelPolicy
-    frontend: ModelPolicy
-    backend: ModelPolicy
-    designer: ModelPolicy
-    dba: ModelPolicy
-    devops: ModelPolicy
-    security: ModelPolicy
-    qa: ModelPolicy
-    review: ModelPolicy
-    summarize: ModelPolicy
-    oracle: ModelPolicy
-    librarian: ModelPolicy
-    rush: ModelPolicy
-    pet: ModelPolicy
-  }
-  routing: {
-    maxParallelAgents: number
-    preferCheapModelForSimpleTasks: boolean
-    escalateOnUncertainty: boolean
-    requireReviewForFileEdits: boolean
-  }
-  context: {
-    maxInputTokens: number
-    compaction: "auto" | "manual" | "aggressive"
-    isolation: "strict" | "shared-facts"
-  }
+  roles: BrainRolePolicies
+  routing: BrainRoutingPolicy
+  context: BrainContextPolicy
 }
 
-export type AgentRole = keyof BrainModel["roles"]
+export type AgentRole = keyof BrainRolePolicies
+
+export type BrainPreset = {
+  id: string
+  extends?: string
+  name?: string
+  description?: string
+  planner?: Partial<ModelPolicy>
+  roles?: Partial<Record<AgentRole, Partial<ModelPolicy>>>
+  routing?: Partial<BrainRoutingPolicy>
+  context?: Partial<BrainContextPolicy>
+}
 
 export type RoutedAgentRole = Exclude<AgentRole, "routeBrain" | "pet">
 
@@ -531,12 +549,68 @@ export function getModeRoutingLimits(mode: BraincodeMode, configuredMaxParallelA
   }
 }
 
-export function selectBrain(brains: BrainModel[], brainId: string): BrainModel {
-  const brain = brains.find((candidate) => candidate.id === brainId)
-  if (!brain) {
-    throw new Error(`Unknown brain id: ${brainId}`)
+export function selectBrain(brains: BrainPreset[], brainId: string): BrainModel {
+  try {
+    const brain = resolveBrainPreset(brains, brainId, [])
+    if (brain) return brain
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
   }
-  return brain
+  throw new Error(`Unknown brain id: ${brainId}`)
+}
+
+function resolveBrainPreset(brains: BrainPreset[], brainId: string, stack: string[]): BrainModel | undefined {
+  const brain = brains.find((candidate) => candidate.id === brainId)
+  if (!brain) return undefined
+  const parentId = typeof brain.extends === "string" && brain.extends.trim() ? brain.extends.trim() : undefined
+  if (!parentId) return requireCompleteBrainPreset(brain)
+  if (stack.includes(brainId)) {
+    throw new Error(`Brain preset inheritance cycle: ${[...stack, brainId].join(" -> ")}`)
+  }
+  const parent = resolveBrainPreset(brains, parentId, [...stack, brainId])
+  if (!parent) {
+    throw new Error(`Unknown parent brain id: ${parentId} for brain id: ${brainId}`)
+  }
+  return mergeBrainPreset(parent, brain)
+}
+
+function requireCompleteBrainPreset(brain: BrainPreset): BrainModel {
+  if (!brain.name || !brain.description || !brain.planner || !brain.roles || !brain.routing || !brain.context) {
+    throw new Error(`Brain preset ${brain.id} must either extend another brain or define name, description, planner, roles, routing, and context.`)
+  }
+  return brain as BrainModel
+}
+
+function mergeBrainPreset(parent: BrainModel, child: BrainPreset): BrainModel {
+  return {
+    ...parent,
+    ...child,
+    id: child.id,
+    extends: child.extends,
+    name: child.name ?? parent.name,
+    description: child.description ?? parent.description,
+    planner: mergeModelPolicy(parent.planner, child.planner),
+    roles: mergeRolePolicies(parent.roles, child.roles),
+    routing: { ...parent.routing, ...(child.routing ?? {}) },
+    context: { ...parent.context, ...(child.context ?? {}) },
+  }
+}
+
+function mergeRolePolicies(parent: BrainRolePolicies, child: BrainPreset["roles"] | undefined): BrainRolePolicies {
+  const roles = { ...parent }
+  if (!child) return roles
+  for (const role of Object.keys(parent) as AgentRole[]) {
+    roles[role] = mergeModelPolicy(parent[role], child[role])
+  }
+  return roles
+}
+
+function mergeModelPolicy(parent: ModelPolicy, child: Partial<ModelPolicy> | undefined): ModelPolicy {
+  return {
+    ...parent,
+    ...(child ?? {}),
+    fallbackModelIds: child?.fallbackModelIds ? [...child.fallbackModelIds] : parent.fallbackModelIds ? [...parent.fallbackModelIds] : undefined,
+  }
 }
 
 export function getAgentRoleSystemPrompt(role: AgentRole, policy?: ModelPolicy): string {

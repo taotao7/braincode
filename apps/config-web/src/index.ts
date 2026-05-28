@@ -595,10 +595,17 @@ export const configWebHtml = `<!doctype html>
         return model ? { ...model, supportsVision: catalogVisionInput.checked } : undefined
       }
 
-      function normalizeBaseUrl(value) {
+      function isOpenAICompatibleApi(apiType) {
+        return ["openai-responses", "openai-completions", "openai-codex-responses", "azure-openai-responses"].includes(normalizeApiType(apiType))
+      }
+
+      function normalizeBaseUrl(value, apiType = "openai-responses") {
         const trimmed = value.trim().replace(new RegExp("/+$"), "")
         if (!trimmed) return ""
-        return trimmed.endsWith("/v1") ? trimmed : trimmed + "/v1"
+        const api = normalizeApiType(apiType)
+        if (api === "anthropic-messages") return trimmed.endsWith("/v1") ? trimmed.slice(0, -3) : trimmed
+        if (api === "google-generative-ai") return trimmed
+        return isOpenAICompatibleApi(api) ? (trimmed.endsWith("/v1") ? trimmed : trimmed + "/v1") : trimmed
       }
 
       function normalizeApiType(value) {
@@ -611,14 +618,15 @@ export const configWebHtml = `<!doctype html>
         const provider = manualProviderInput.value.trim()
         const modelId = manualModelIdInput.value.trim()
         const name = manualNameInput.value.trim() || modelId
-        const baseUrl = normalizeBaseUrl(manualBaseUrlInput.value)
+        const api = normalizeApiType(manualApiInput.value)
+        const baseUrl = normalizeBaseUrl(manualBaseUrlInput.value, api)
         const contextWindow = Number(manualContextWindowInput.value) || 128000
         return {
           id: provider + "/" + modelId,
           provider,
           modelId,
           name,
-          api: normalizeApiType(manualApiInput.value),
+          api,
           ...(baseUrl ? { baseUrl } : {}),
           contextWindow,
           supportsTools: true,
@@ -690,7 +698,8 @@ export const configWebHtml = `<!doctype html>
         const provider = controls.provider.value.trim()
         const modelId = controls.modelId.value.trim()
         const name = controls.name.value.trim() || modelId
-        const baseUrl = normalizeBaseUrl(controls.baseUrl.value)
+        const api = normalizeApiType(controls.api.value)
+        const baseUrl = normalizeBaseUrl(controls.baseUrl.value, api)
         const contextWindow = Number(controls.contextWindow.value) || 128000
         const nextModel = {
           ...previousModel,
@@ -698,7 +707,7 @@ export const configWebHtml = `<!doctype html>
           provider,
           modelId,
           name,
-          api: normalizeApiType(controls.api.value),
+          api,
           contextWindow,
           supportsTools: true,
           supportsVision: controls.vision.checked,

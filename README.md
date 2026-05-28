@@ -2,11 +2,11 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-107%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-A multi-model coding agent orchestrator.
+A multi-model coding workflow engine.
 
 Braincode turns one coding request into a coordinated engineering workflow:
 
@@ -14,7 +14,7 @@ Braincode turns one coding request into a coordinated engineering workflow:
 planner -> specialist workers -> primary executor -> reviewer -> final report
 ```
 
-It is not another AI CLI that asks one model to plan, code, and review itself. Braincode is a coding workflow engine with role separation, model routing, isolated worker contexts, review gates, and structured final reports.
+It is not another AI CLI that asks one model to plan, code, and review itself. Braincode turns one prompt into a routed, review-gated, auditable patch with role separation, model routing, isolated worker contexts, and structured final reports.
 
 **Languages**: [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
@@ -34,12 +34,14 @@ Most coding agents ask one model to plan, code, and review itself. Braincode sep
 
 ```bash
 braincode run "add login validation"
+braincode run --allow-edits "add login validation"
+braincode run --yes "fix the failing test"
 braincode run --dry-run "add login validation"
 braincode run --dry-run --heuristic "add login validation"
 braincode benchmark
 ```
 
-`braincode run` uses the configured Brain Model. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
+`braincode run` uses the configured Brain Model. Non-interactive runs are read-only by default because there is no approval UI; use `--allow-edits` to auto-approve first-party local reads and file edits while blocking command execution, MCP tools, and unknown tools, or `--yes` to auto-approve tool calls. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
 
 `braincode benchmark` runs a deterministic demo suite of representative coding prompts: README edits, failing-test fixes, auth-risk changes, package/script changes, and security-review-only runs. By default it asks routeBrain when credentials are available and labels heuristic fallback checks; use `--heuristic` for a no-provider diagnostic run.
 
@@ -74,18 +76,22 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - CLI entrypoints for `braincode`, `braincode run`, `braincode run --dry-run`, and `braincode config`.
 - Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, and tool approval decisions.
 - Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, and auth status.
+- Brain preset inheritance via `extends`, so small Brain Model presets can override only the differing planner, role, routing, or context fields.
 - Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.
 - `routeBrain` LLM routing during execution and plan previews, with deterministic heuristic routing available for diagnostics and fallback.
 - Isolated support workers, primary executor, and policy-triggered review worker using structured handoff/result packets.
+- Read-only project tools for `librarian`, `qa`, `security`, and `review` workers, so support agents can inspect files, search code, read diffs, and report evidence without edit/execute capability.
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
 - Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
 - First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, git diffs, changed-file inspection, and package scripts.
+- Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.
+- Tool-call evidence cache for repeated deterministic read-only local tool calls, with duplicate reminders and cache invalidation after write/execute tools.
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
-- Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, append `check_summary`, and pass patch/check artifacts to review workers.
+- Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.
 - Check runner policy in `tools.json`: checks can be disabled, pinned to explicit package scripts, and bounded by timeout/output limits.
-- Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked`; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
+- Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked` with severity-ranked findings, file/line evidence, required changes, blocking issues, and residual risks; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 - Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.
 - Demo benchmark CLI for representative coding tasks covering docs edits, failing tests, auth-risk implementation, package/script changes, and security-review-only prompts.
@@ -154,6 +160,8 @@ bun run braincode -- config --port 14581
 bun run braincode -- run --dry-run "review this patch"
 bun run braincode -- run --dry-run --heuristic "review this patch"
 bun run braincode -- run "hello"
+bun run braincode -- run --allow-edits "update README wording"
+bun run braincode -- run --yes "fix a failing test and run checks"
 BRAINCODE_DEBUG=true bun run braincode -- run "hello"
 bun run benchmark
 bun run benchmark -- --heuristic

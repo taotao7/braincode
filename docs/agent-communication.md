@@ -140,6 +140,7 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
 4. runSupportWorkers (parallel when independent, capped by the mode-adjusted routing limit):
    - Each worker is independent. No worker sees another's handoff or transcript.
    - If todo dependencies require one support result before another, Brain runs the upstream worker first and supplies only its normalized summary to the dependent worker.
+   - Librarian, QA, security, and review-style support workers receive read-only project tools for evidence gathering.
 5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
 6. Try each model candidate for the primary role:
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
@@ -147,13 +148,14 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
      primarySummary = last assistant text
 7. If plan.requiresReview && primary !== "review":
      runWorkerFromPlan(reviewWorker, buildReviewPrompt(...), phase="review")
-     mergeReviewResult appends review summary + risks to primarySummary.
+     mergeReviewResult appends review decision, findings, residual risks, and risks to primarySummary.
 8. Run Stop hook. Append run_end. Return { sessionId, summary, plan, workerResults, mcp }.
 ```
 
 Notes worth internalizing before changing this code:
 
 - **Support workers and the primary are not the same kind of call.** Support workers return a normalized `WorkerResult`. The primary returns free-form assistant text that is shown to the user. Confusing the two breaks the contract for both.
+- **Support worker tools are evidence-only.** Read-only support tools help selected workers inspect code and diffs, but tool transcripts do not cross into the primary context except through the worker's structured summary/artifacts/risks.
 - **Review is post-primary, not parallel.** Review needs the primary's output to do its job.
 - **The forced-roles path (`/team`) skips review** by setting `requiresReview = false`. That is intentional — team mode is for independent multi-agent answers, not a workflow.
 
@@ -179,6 +181,8 @@ type AgentRoutingPlan = {
 
 `buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. It also applies mode routing limits: auto uses the configured worker/concurrency cap and 6 todos; radical raises the effective worker and support-concurrency budgets to at least 4 and allows 8 todos. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
+Before routing, `selectBrain` resolves Brain preset inheritance. A brain with `extends: "brain"` inherits the parent planner, roles, routing, and context, then applies its own focused overrides.
+
 If you add a new role:
 
 1. Add it to `routedAgentRoles` and to `BrainModel.roles`.
@@ -193,7 +197,7 @@ Three builders shape every worker prompt:
 
 - `buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport)` — used for parallel support workers. Contents: project support section, original user request, the full `HandoffPacket` as JSON, and the expected reply JSON shape (with `taskId` / `parentId` pre-filled to enforce echo).
 - `buildPrimaryPrompt(originalPrompt, workerResults, primaryRole, projectSupport)` — used for the primary agent. Contents: project support section, original user request, formatted worker summaries, and a directive to "treat worker results as advisory context, resolve conflicts explicitly".
-- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — used for the review worker. Contents: project support section, original user request, primary summary, worker summaries, the review handoff packet, and the expected JSON reply shape.
+- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — used for the review worker. Contents: project support section, read-only tool guidance, original user request, primary summary, worker summaries, the review handoff packet, and the expected JSON reply shape with `decision`, severity-ranked `findings`, `requiredChanges`, `blockingIssues`, and `residualRisks`.
 
 `formatWorkerResults` is the shared formatter for the worker-summary block. Each entry is:
 

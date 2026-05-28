@@ -103,7 +103,9 @@ Expected commands:
 - `braincode daemon` — future long-running service mode.
 - `braincode run --dry-run <task>` — inspect mode, brain, role, model selection, and the routeBrain plan.
 - `braincode run --dry-run --heuristic <task>` — inspect deterministic fallback routing without making provider calls.
-- `braincode run <task>` — execute one non-interactive prompt through the configured provider when auth is available.
+- `braincode run <task>` — execute one non-interactive prompt through the configured provider in read-only mode by default.
+- `braincode run --allow-edits <task>` — non-interactive execution with first-party local read/write tools and auto-approved file edits, while command execution, MCP tools, and unknown tools remain blocked.
+- `braincode run --yes <task>` — non-interactive execution with all local tools and auto-approved tool calls.
 - `braincode benchmark [--heuristic] [--task <id>] [--json]` — run the representative coding-task plan benchmark suite.
 
 The CLI should stay thin. It should delegate implementation to packages.
@@ -181,6 +183,7 @@ Responsibilities:
 - Select agent roles.
 - Maintain role definitions and built-in role prompts for every Braincode agent.
 - Select model policies.
+- Resolve Brain preset inheritance with `extends`, so derived brains can override only planner, role, routing, or context differences.
 - Decide when to escalate to stronger models.
 - Decide when to spawn worker agents.
 - Decide when review is required.
@@ -206,10 +209,12 @@ Responsibilities:
 - Start and run agent sessions.
 - Expand routing plans into runtime worker plans with model selections.
 - Run isolated support workers from compact handoff packets.
+- Give selected support/review roles read-only project tools for evidence gathering without edit/execute capability.
 - Run the primary agent with only structured worker results as additional context.
 - Run a review worker for risky tasks when Brain policy requires it.
 - Merge structured worker and review results into the final run result.
 - Connect tools to the underlying agent runtime.
+- Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and invalidate cached evidence after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
@@ -249,6 +254,7 @@ Responsibilities:
 
 - Register coding tools such as read, write, edit, shell, search, patch application, git diff, changed-file inspection, and check/script execution.
 - Provide first-party local implementations for the default coding toolset.
+- Detect JS package managers from lockfiles for package-script execution (`bun`, `pnpm`, `yarn`, or `npm`).
 - Coordinate with `packages/agent-runtime` for project/user MCP tools declared through `.mcp.json` and user MCP config.
 - Define safe execution policies that can account for path, command, risk, and review requirements.
 - Keep permission checks outside individual UI surfaces.
@@ -262,12 +268,13 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 
 ## Current implementation phase
 
-The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, review decisions, and permission policy are in place.
+The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, structured review decisions, permission policy, read-only evidence workers, package-manager-aware checks, and tool-call evidence caching are in place.
 
 The coding patch engine now follows this path:
 
 ```text
 local tools
+  -> read-only support/review evidence
   -> file edits
   -> changed files
   -> git diff
@@ -339,9 +346,13 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: review worker execution for risky tasks.
 - Done: user confirmation flows for risky tool calls in the TUI.
 - Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
+- Done: read-only tool access for `librarian`, `qa`, `security`, and review workers.
+- Done: non-interactive run permission modes: read-only default, `--allow-edits` for local reads/file edits, and `--yes`.
 - Done: minimal patch ledger record with changed files and git diff stats.
-- Done: automated package-script checks for file-changing runs with `check_summary` session records and review-worker patch/check artifacts.
+- Done: automated package-script checks for file-changing runs with package manager detection, `check_summary` session records, and review-worker patch/check artifacts.
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
-- Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` `review_decision` session records.
+- Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
+- Done: run-level read-only evidence cache with duplicate tool-call reminders and write/execute invalidation.
+- Done: Brain preset inheritance through `extends`.
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
