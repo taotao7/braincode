@@ -830,6 +830,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     },
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
     beforeToolCall: async (context, signal) => {
+      if (options.mode === "radical") return undefined
       if (options.onToolApproval) {
         const decision = await options.onToolApproval?.({
           toolCallId: context.toolCall.id,
@@ -849,7 +850,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
   })
 
   agent.subscribe((event) => {
-    if (isDebugEnabled()) {
+    if (isDebugEnabled() && shouldDebugAgentEvent(event)) {
       debugLog("runtime", "agent event", summarizeAgentEvent(event))
     }
     return options.onEvent?.(event)
@@ -985,6 +986,15 @@ function summarizeAgentEvent(event: AgentEvent): Record<string, unknown> {
         result: summarizeToolResultForDebug(event.result),
       }
   }
+}
+
+function shouldDebugAgentEvent(event: AgentEvent): boolean {
+  if (process.env.BRAINCODE_DEBUG_STREAM === "true") return true
+  if (event.type !== "message_update") return true
+  const update = event.assistantMessageEvent
+  if (!update || typeof update !== "object") return true
+  const updateType = (update as { type?: unknown }).type
+  return updateType !== "text_delta" && updateType !== "thinking_delta"
 }
 
 function summarizeAssistantMessageEvent(event: unknown): Record<string, unknown> {
@@ -1519,6 +1529,7 @@ Routing principles (read these before deciding):
 - Use oracle only for hard architecture/tradeoff/debugging reasoning, high uncertainty, or cross-domain technical judgment.
 - Use review for defect inspection of existing code; use qa for forward-looking test strategy. They are not interchangeable.
 - Use rush for short conversational replies or tiny chores that need no tools (it absorbs what would have been a "fastReply" role).
+- Never use rush for workspace actions that require tools: git status/diff/add/commit/push, shell commands, package scripts, tests, file edits, or repository inspection. Route git/commit/release/CI/package-command work to devops unless another specialist is clearly primary.
 - Use summarize only when the user explicitly needs a handoff or recap.
 - Route only by role responsibility. Do not name, choose, or reason about execution engines; user configuration binds each role to its engine.
 - Dependencies are Brain-mediated: add one only when the downstream todo should receive the upstream todo's summarized result before it runs.
@@ -1885,13 +1896,15 @@ Return only JSON in this shape:
 {"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"concise actionable result","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
 }
 
-function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: ProjectSupport): string {
+function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: ProjectSupport, toolNames: string[] = []): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
+  const toolContext = formatPrimaryToolContext(toolNames)
   if (workerResults.length === 0) {
-    return supportContext ? `${supportContext}\nUser request:\n${originalPrompt}` : originalPrompt
+    return `${supportContext}${toolContext}${supportContext || toolContext ? "\n" : ""}User request:\n${originalPrompt}`
   }
 
   return `${supportContext}
+${toolContext}
 User request:
 ${originalPrompt}
 
@@ -1899,6 +1912,24 @@ Supporting worker results:
 ${formatWorkerResults(workerResults)}
 
 Complete the request as the primary ${primaryRole} agent. Treat worker results as advisory context, resolve conflicts explicitly, and produce the final user-facing result.`
+}
+
+function formatPrimaryToolContext(toolNames: string[]): string {
+  if (toolNames.length === 0) {
+    return "Runtime tool access:\nNo runtime tools are exposed in this run. Do not claim to have performed local file, shell, git, or command actions.\n"
+  }
+  const names = [...new Set(toolNames)].sort()
+  const hasExecuteTool = names.some((name) => /^(shell|exec_command|run_script|write_stdin)$/.test(name))
+  const executeGuidance = hasExecuteTool
+    ? "Shell/command execution is available through shell and/or exec_command. For workspace requests such as git status, git add, git commit, tests, and package scripts, use tools instead of saying shell/git tools are unavailable."
+    : "Shell/command execution is not exposed in this run. If the user asks for git commits, shell commands, tests, or package scripts, explain that this run lacks execute tools and suggest TUI radical/current-session approval or `braincode run --yes`."
+  return [
+    "Runtime tool access:",
+    `Available tools: ${names.join(", ")}`,
+    executeGuidance,
+    "If a tool call is blocked or fails, report the concrete tool result or block reason.",
+    "",
+  ].join("\n")
 }
 
 function buildReviewPrompt(
@@ -2582,7 +2613,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
     const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
-    const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport)
+    const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name))
     let lastError: unknown
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
       plan.model = selection.configured

@@ -40,6 +40,8 @@ test("mode policies distinguish auto and radical", () => {
   expect(getModePolicy("radical").mode).toBe("radical")
   expect(getModePolicy("auto").routing.strategy).toBe("focused")
   expect(getModePolicy("radical").routing.strategy).toBe("expansive")
+  expect(getModePolicy("auto").requiresExplicitApprovalForRiskyActions).toBe(true)
+  expect(getModePolicy("radical").requiresExplicitApprovalForRiskyActions).toBe(false)
 })
 
 test("mode routing limits make radical materially more parallel", () => {
@@ -61,6 +63,12 @@ test("planAgentRouting falls back to rush deterministically (LLM-driven routing 
   const plan = planAgentRouting("review this patch", brain)
   expect(plan.primaryRole).toBe("rush")
   expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
+})
+
+test("planAgentRouting fallback avoids rush for obvious workspace tool operations", () => {
+  const plan = planAgentRouting("git status, add the changes, and commit them", brain)
+  expect(plan.primaryRole).toBe("devops")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["devops"])
 })
 
 test("planAgentRouting flags requiresReview when file-edit risk words appear", () => {
@@ -92,6 +100,8 @@ test("routedAgentRoles contains exactly the 12 routed roles (no coding/fastReply
 test("agent role prompts cover every routed role and the router", () => {
   expect(agentRoleSystemPrompts.routeBrain).toContain("intelligent routing")
   expect(agentRoleSystemPrompts.routeBrain).toContain("Agent role catalog")
+  expect(agentRoleSystemPrompts.routeBrain).toContain("Never use rush for workspace actions")
+  expect(agentRoleSystemPrompts.rush).toContain("it is not rush work")
   for (const role of routedAgentRoles) {
     expect(agentRoleSystemPrompts[role]).toContain("Braincode")
     expect(agentRoleSystemPrompts.routeBrain).toContain(`- ${role} `)

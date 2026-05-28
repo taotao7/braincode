@@ -305,6 +305,7 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     ],
     boundaries: [
       "Do not force specialist, risky, or multi-step work into rush.",
+      "Do not handle tasks that require repository tools, shell commands, git operations, file edits, tests, package scripts, or project inspection.",
       "Do not invent broad architecture or process for a small task.",
       "Do not skip needed verification when even a small change has meaningful risk.",
     ],
@@ -375,6 +376,7 @@ function buildRouteBrainSystemPrompt(): string {
     "- Choose routeBrain only as yourself, never as primary role or worker.",
     "- Never include pet in routing decisions; it is a read-only UI status reporter.",
     "- Pick specialists by work domain, not by cost, speed, availability, or product names.",
+    "- Never use rush for workspace actions that require tools: git status/diff/add/commit/push, shell commands, package scripts, tests, file edits, or repository inspection.",
     "- Worker goals must be self-contained because each Braincode worker owns a separate task context and never receives the full Brain context or another worker's private context.",
     "- Dependencies mean Brain should wait for one todo result before feeding that summary into dependent work; they are Brain-mediated, never direct worker-to-worker chat.",
   ].join("\n")
@@ -440,6 +442,7 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
   rush: buildAgentRoleSystemPrompt("rush", [
     "Rush-specific working rules:",
     "- Move directly, keep scope tight, and finish with minimal ceremony.",
+    "- If the task requires local tools, repository inspection, git commands, shell commands, file edits, tests, or package scripts, it is not rush work.",
     "- If the request clearly belongs to a specialist role, state the appropriate handoff instead of forcing it into rush.",
   ]),
   pet: [
@@ -510,8 +513,8 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
   },
   radical: {
     mode: "radical",
-    description: "Use a more aggressive autonomous strategy while preserving tool permission boundaries.",
-    requiresExplicitApprovalForRiskyActions: true,
+    description: "Use a more aggressive autonomous strategy with automatic approval for exposed tools.",
+    requiresExplicitApprovalForRiskyActions: false,
     routing: {
       maxTodos: 8,
       minParallelAgents: 4,
@@ -627,6 +630,7 @@ export function formatRoutedAgentRoleCatalog(): string {
 // prompt in packages/agent-runtime); the patterns below intentionally do NOT
 // pick a role — they only flag risk.
 const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
+const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试)\b/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
   return `todo-${String(index + 1).padStart(2, "0")}-${role}`
@@ -743,15 +747,19 @@ export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" |
 }
 
 // Deterministic fallback plan used when the LLM-driven routeBrain in
-// packages/agent-runtime fails or is unavailable. Always returns a safe rush
-// worker; the LLM is expected to override this in the normal path.
+// packages/agent-runtime fails or is unavailable. It keeps direct replies in
+// rush, but routes obvious workspace operations away from rush because they
+// need runtime tools.
 export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRoutingPlan {
   const normalized = prompt.toLowerCase()
+  const primaryRole: RoutedAgentRole = workspaceOperationPattern.test(normalized) ? "devops" : "rush"
   return normalizeAgentRoutingPlan({
-    primaryRole: "rush",
+    primaryRole,
     workers: [{
-      role: "rush",
-      goal: "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
+      role: primaryRole,
+      goal: primaryRole === "devops"
+        ? "Handle the workspace operation when no router decision is available; use runtime tools when exposed."
+        : "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
       reason: "Deterministic fallback used when no router decision is available.",
     }],
     requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),

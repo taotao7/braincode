@@ -46,6 +46,7 @@ type RunStatusState = {
   startedAt: number
   label: string
   tokens: TokenUsageSnapshot
+  frame: number
 }
 
 type QueuedTask = {
@@ -200,8 +201,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 const INPUT_MAX_LINES = 6
 const INPUT_PROMPT_PREFIX = "› "
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
-const RUN_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
-const THINKING_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const
+const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const
 
 const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
@@ -378,13 +378,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     usageByTurn.current = new Map()
     activeUsageKey.current = null
     runUsage.current = emptyTokenUsage()
-    setRunStatus({ startedAt: Date.now(), label, tokens: runUsage.current })
+    setRunStatus({ startedAt: Date.now(), label, tokens: runUsage.current, frame: 0 })
   }
 
   function updateRunStatus(label: string) {
     setRunStatus((previous) => previous
-      ? { ...previous, label, tokens: runUsage.current }
-      : { startedAt: Date.now(), label, tokens: runUsage.current })
+      ? { ...previous, label, tokens: runUsage.current, frame: previous.frame + 1 }
+      : { startedAt: Date.now(), label, tokens: runUsage.current, frame: 0 })
   }
 
   function stopRunStatus() {
@@ -1180,7 +1180,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     let approvalMode: BraincodeMode = mode
     const currentAssistant = { id: null as string | null, text: "" }
-    const currentThinking = { id: null as string | null }
+    let thinkingShown = false
     const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string; editArgs?: EditArgs; editBeforePromise?: Promise<string | null> }>()
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
@@ -1200,11 +1200,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }
       currentAssistant.id = null
       currentAssistant.text = ""
-      if (currentThinking.id) {
-        const id = currentThinking.id
-        setItems((previous) => previous.filter((item) => item.id !== id))
-      }
-      currentThinking.id = null
+      thinkingShown = false
     }
     const ensureAssistantItem = () => {
       if (currentAssistant.id) return currentAssistant.id
@@ -1214,13 +1210,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       appendItemRaw({ id, kind: "assistant", text: "" })
       return id
     }
-    const ensureThinkingItem = () => {
-      if (currentThinking.id) return currentThinking.id
-      const id = crypto.randomUUID()
-      currentThinking.id = id
-      appendItemRaw({ id, kind: "thinking", text: "" })
+    const showThinkingStatus = () => {
+      if (thinkingShown) return
+      thinkingShown = true
       updateStatus("Thinking…")
-      return id
     }
 
     const onEvent = (event: AgentEvent) => {
@@ -1247,7 +1240,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             currentAssistant.text += update.delta
             updateItem(id, { text: currentAssistant.text })
           } else if (update.type === "thinking_delta") {
-            ensureThinkingItem()
+            showThinkingStatus()
           } else if (update.type === "toolcall_start") {
             updateStatus("Tool Call · preparing arguments…")
           } else if (update.type === "toolcall_end") {
@@ -2008,26 +2001,43 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0
   const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
   const contentWidth = Math.max(20, terminalCols - 4)
+  const projectPath = relative(homedir(), projectRoot) || projectRoot
+  const headerRootLimit = Math.max(18, Math.min(54, terminalCols - 92))
+  const headerRoot = truncate(projectPath, headerRootLimit)
+  const projectSummary = projectSupport
+    ? `AGENTS ${projectSupport.agents ? "✓" : "·"} · mcp ${projectMcpCount} · skills ${projectSkillCount}`
+    : "loading…"
+  const userSummary = userSupport ? `mcp ${userMcpCount} · skills ${userSkillCount}` : "loading…"
   const draftWindow = clipDraftToWindow(draft, cursor, inputWidth, INPUT_MAX_LINES)
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1} flexDirection="column">
-        <Text>
-          <Badge label="BRAIN / CODE" backgroundColor="cyan" />
-          <Text color="gray"> session {sessionId.slice(0, 8)} · </Text>
-          <Badge label={mode} backgroundColor={mode === "radical" ? "magenta" : "green"} />
-          <Text color="gray"> {relative(homedir(), projectRoot) || projectRoot}</Text>
-        </Text>
-        <Box marginTop={1} flexDirection="column">
-          <Text>
-            <Badge label="PROJECT" backgroundColor="blue" />
-            <Text color="gray"> {projectSupport ? `AGENTS.md ${projectSupport.agents ? "✓" : "·"} · mcp ${projectMcpCount} · skills ${projectSkillCount}` : "loading…"}</Text>
-          </Text>
-          <Text>
-            <Badge label="USER" backgroundColor="magenta" />
-            <Text color="gray"> {userSupport ? `mcp ${userMcpCount} · skills ${userSkillCount}` : "loading…"}</Text>
-          </Text>
+      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+        <Box flexDirection="row" alignItems="center">
+          <Box flexDirection="column" marginRight={1}>
+            <Text><Badge label="BRAIN / CODE" backgroundColor="cyan" /></Text>
+            <Text><Badge label={mode.toUpperCase().padEnd(12)} backgroundColor={mode === "radical" ? "magenta" : "green"} /></Text>
+          </Box>
+
+          <HeaderSeparator />
+
+          <Box flexDirection="column" marginRight={1}>
+            <HeaderMetaLine label="SESSION" value={sessionId.slice(0, 8)} />
+            <HeaderMetaLine label="ROOT" value={headerRoot} />
+          </Box>
+
+          <HeaderSeparator />
+
+          <Box flexDirection="column" marginRight={1}>
+            <HeaderInfoLine label="PROJECT" backgroundColor="blue" value={projectSummary} />
+            <HeaderInfoLine label="USER" backgroundColor="magenta" value={userSummary} />
+          </Box>
+
+          <HeaderSeparator />
+
+          <Box marginLeft={2}>
+            <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
+          </Box>
         </Box>
       </Box>
 
@@ -2227,12 +2237,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
-      <Box justifyContent="flex-end" marginTop={items.length > 0 ? 0 : 1}>
-        <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
-      </Box>
       <SectionDivider label={running ? "RUNNING" : "INPUT"} color={running ? "yellow" : "green"} width={contentWidth} />
       <Box borderStyle="single" borderColor={running ? "yellow" : "green"} paddingX={1} flexDirection="column">
-        {running ? <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current }} /> : null}
+        {running ? <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current, frame: 0 }} /> : null}
         {draftWindow.hiddenAbove > 0 ? <Text color="gray">↑ {draftWindow.hiddenAbove} more line{draftWindow.hiddenAbove === 1 ? "" : "s"}</Text> : null}
         {draftWindow.lines.map((line, index) => (
           <Text key={index} color={running ? "yellow" : "green"} wrap="truncate-end">{line || " "}</Text>
@@ -2447,6 +2454,33 @@ function Badge({ label, backgroundColor }: { label: string; backgroundColor: UiC
   return <Text backgroundColor={backgroundColor} color={foreground} bold> {label} </Text>
 }
 
+function HeaderSeparator() {
+  return (
+    <Box flexDirection="column" marginRight={1}>
+      <Text color="gray">│</Text>
+      <Text color="gray">│</Text>
+    </Box>
+  )
+}
+
+function HeaderMetaLine({ label, value }: { label: string; value: string }) {
+  return (
+    <Text>
+      <Text color="gray" bold>{label.padEnd(7)}</Text>
+      <Text color="gray"> {value}</Text>
+    </Text>
+  )
+}
+
+function HeaderInfoLine({ label, backgroundColor, value }: { label: string; backgroundColor: UiColor; value: string }) {
+  return (
+    <Text>
+      <Badge label={label.padEnd(7)} backgroundColor={backgroundColor} />
+      <Text color="gray"> {value}</Text>
+    </Text>
+  )
+}
+
 function SectionDivider({ label, color, width }: { label: string; color: UiColor; width: number }) {
   const line = "─".repeat(Math.max(1, width - label.length - 4))
   return (
@@ -2550,17 +2584,11 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
 }
 
 function ThinkingTranscriptLine() {
-  const [frame, setFrame] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 240)
-    return () => clearInterval(interval)
-  }, [])
-
   return (
     <Text>
       <Badge label="THINKING" backgroundColor="yellow" />
       <Text color="gray"> working</Text>
-      <Text color="yellow"> {THINKING_FRAMES[frame % THINKING_FRAMES.length]}</Text>
+      <Text color="yellow"> ...</Text>
     </Text>
   )
 }
@@ -2651,21 +2679,15 @@ function ToastView({ toast }: { toast: ToastState }) {
 }
 
 function RuntimeStatusLine({ status }: { status: RunStatusState }) {
-  const [frame, setFrame] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 240)
-    return () => clearInterval(interval)
-  }, [])
-
-  const spinner = RUN_SPINNER_FRAMES[frame % RUN_SPINNER_FRAMES.length]
+  const spinner = RUN_SPINNER_FRAMES[status.frame % RUN_SPINNER_FRAMES.length]
   const label = truncate(status.label.replace(/\s+/g, " ").trim() || "Thinking…", 80)
   const elapsed = formatElapsed(Date.now() - status.startedAt)
   const tokens = formatRunStatusTokens(status.tokens)
 
   return (
     <Text>
-      <Text color="redBright" bold>{spinner} </Text>
-      <Text color="redBright">{label}</Text>
+      <Text color="yellow" bold>{spinner} </Text>
+      <Text color="yellow">{label}</Text>
       <Text color="gray"> ({elapsed}{tokens ? ` · ${tokens}` : " · tokens pending"})</Text>
     </Text>
   )

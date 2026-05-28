@@ -74,12 +74,12 @@ export function usePetWatcher(input: PetWatcherInput): PetWatcherState {
         if (stopped) return
         const parsed = parsePetResponse(text)
         if (parsed) {
-          setState({ status: parsed.status, lines: parsed.lines, source: "model" })
+          setState((previous) => samePetState(previous, parsed) ? previous : { status: parsed.status, lines: parsed.lines, source: "model" })
         } else {
-          setState({ source: "error" })
+          setState((previous) => previous.source === "error" ? previous : { source: "error" })
         }
       } catch {
-        if (!stopped) setState((previous) => ({ ...previous, source: "error" }))
+        if (!stopped) setState((previous) => previous.source === "error" ? previous : { ...previous, source: "error" })
       } finally {
         if (inFlight.current === controller) inFlight.current = null
       }
@@ -98,6 +98,17 @@ export function usePetWatcher(input: PetWatcherInput): PetWatcherState {
   }, [input.thinking, runtime, input.pollIntervalMs])
 
   return state
+}
+
+function samePetState(previous: PetWatcherState, next: { status: string; lines: string[] }): boolean {
+  return previous.source === "model"
+    && previous.status === next.status
+    && sameLines(previous.lines, next.lines)
+}
+
+function sameLines(left: string[] | undefined, right: string[]): boolean {
+  if (!left || left.length !== right.length) return false
+  return left.every((line, index) => line === right[index])
 }
 
 function buildSnapshot(input: PetWatcherInput): string {

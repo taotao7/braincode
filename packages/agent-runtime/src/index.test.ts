@@ -89,6 +89,31 @@ test("createBraincodeAgentRuntime blocks risky tools when no approval callback e
   expect(decision?.reason).toContain("approval callback is required")
 })
 
+test("createBraincodeAgentRuntime auto-approves exposed tools in radical mode", async () => {
+  const runtime = createBraincodeAgentRuntime({
+    mode: "radical",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+  })
+
+  const decision = await runtime.agent.beforeToolCall?.({
+    toolCall: { id: "tool-call-1", name: "shell" },
+    args: { command: "git status --short" },
+  } as never)
+
+  expect(decision).toBeUndefined()
+})
+
 test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", async () => {
   let calls = 0
   const runtime = createBraincodeAgentRuntime({
