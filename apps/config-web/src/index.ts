@@ -123,6 +123,12 @@ export const configWebHtml = `<!doctype html>
         padding-block: var(--gap-lg);
         border-bottom: 1px solid var(--border);
       }
+      .tab-section { position: sticky; top: 0; z-index: 10; padding-block: 10px; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(12px); }
+      .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+      .tab-button { min-height: 34px; padding-inline: 14px; font-family: var(--font-mono); }
+      .tab-button.active { border-color: var(--fg); background: var(--fg); color: var(--surface); }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
       label { display: block; margin-bottom: 4px; color: var(--fg); font-size: 13px; font-weight: 500; }
       input, select, textarea {
         width: 100%;
@@ -198,6 +204,14 @@ export const configWebHtml = `<!doctype html>
         min-height: 32px;
         margin: 0;
       }
+      .subscription-strip {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--gap-sm);
+        align-items: end;
+        padding-block: 10px;
+        border-block: 1px solid var(--border);
+      }
       .list { display: grid; gap: 8px; }
       .item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 12px; font: 12px/1.45 var(--font-mono); white-space: pre-line; }
       .item-header { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
@@ -224,6 +238,15 @@ export const configWebHtml = `<!doctype html>
       .metric { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
       .metric-label { color: var(--muted); font: 11px var(--font-mono); text-transform: uppercase; }
       .metric-value { margin-top: 4px; color: var(--fg); font: 600 22px var(--font-mono); line-height: 1.15; overflow-wrap: anywhere; }
+      .chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-md); }
+      .chart-card { min-height: 260px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+      .chart-card h3 { margin-bottom: 8px; }
+      .chart-frame { width: 100%; height: 210px; }
+      .chart-empty { display: grid; height: 100%; place-items: center; color: var(--muted); font: 12px var(--font-mono); text-align: center; }
+      .fallback-bars { display: grid; align-content: center; gap: 10px; height: 100%; }
+      .fallback-bar-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; font: 11px var(--font-mono); color: var(--muted); }
+      .fallback-bar-track { height: 8px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg-hover); }
+      .fallback-bar-fill { height: 100%; background: var(--accent); }
       .stats-board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: var(--gap-lg); align-items: start; }
       .stats-row { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: var(--gap-sm); align-items: center; justify-content: stretch; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font: 12px var(--font-mono); text-align: left; }
       .stats-row-main { min-width: 0; overflow-wrap: anywhere; }
@@ -247,7 +270,7 @@ export const configWebHtml = `<!doctype html>
       .combo-option { padding: 6px 10px; border-radius: 3px; cursor: pointer; font: 13px/1.3 var(--font-mono); }
       .combo-option:hover, .combo-option.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
       .combo-empty { padding: 6px 10px; color: var(--muted); font: 12px var(--font-mono); }
-      @media (max-width: 900px) { .panel-grid, .stats-board, .stats-lists, #role-models { grid-template-columns: 1fr; } .hero-split { align-items: flex-start; flex-direction: column; } .logo-card::before { display: none; } }
+      @media (max-width: 900px) { .panel-grid, .chart-grid, .stats-board, .stats-lists, #role-models, .subscription-strip { grid-template-columns: 1fr; } .hero-split { align-items: flex-start; flex-direction: column; } .logo-card::before { display: none; } .tab-section { position: static; } }
     </style>
   </head>
   <body>
@@ -277,7 +300,17 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
-        <section>
+        <section class="tab-section">
+          <div class="container tabs" role="tablist" aria-label="Configuration sections">
+            <button class="tab-button" type="button" data-tab="models" data-i18n="tabModels">Models</button>
+            <button class="tab-button" type="button" data-tab="settings" data-i18n="tabSettings">Settings</button>
+            <button class="tab-button" type="button" data-tab="routing" data-i18n="tabRouting">Routing</button>
+            <button class="tab-button" type="button" data-tab="usage" data-i18n="tabUsage">Statistics</button>
+            <button class="tab-button" type="button" data-tab="tools" data-i18n="tabTools">Tools & auth</button>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="settings">
           <div class="container stack">
           <h2 data-i18n="settingsTitle">Settings</h2>
           <form id="settings-form" class="stack">
@@ -294,7 +327,7 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
-        <section>
+        <section class="tab-panel" data-tab-panel="models">
           <div class="container stack">
           <h2 data-i18n="modelsTitle">Model selection</h2>
           <p class="muted" data-i18n="modelsHint">Choose models from the provider catalog. The UI stores selected models in ~/.braincode/models.json.</p>
@@ -308,6 +341,10 @@ export const configWebHtml = `<!doctype html>
               </div>
               <div class="field"><label for="custom-api-key" data-i18n="apiKey">API key</label><input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-..." /></div>
               <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
+              <div id="subscription-models-panel" class="subscription-strip" hidden>
+                <div class="field"><label for="subscription-provider-select" data-i18n="subscriptionModels">Authenticated subscriptions</label><select id="subscription-provider-select"></select></div>
+                <button id="use-subscription-provider" type="button" data-i18n="useSubscriptionProvider">Use subscription</button>
+              </div>
               <div class="field"><label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select></div>
               <div class="field"><label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select></div>
               <div class="field checkbox-field"><label for="catalog-vision"><input id="catalog-vision" type="checkbox" /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
@@ -339,11 +376,25 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
-        <section id="usage-section">
+        <section id="usage-section" class="tab-panel" data-tab-panel="usage">
           <div class="container stack">
           <h2 data-i18n="usageStatsTitle">Usage statistics</h2>
           <p class="muted" data-i18n="usageStatsHint">Token usage collected from local session records, grouped by model, agent role, and runtime phase.</p>
           <div id="usage-summary" class="metric-grid"></div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <h3 data-i18n="usageChartModels">Model token chart</h3>
+              <div id="usage-chart-models" class="chart-frame"></div>
+            </div>
+            <div class="chart-card">
+              <h3 data-i18n="usageChartRoles">Role token chart</h3>
+              <div id="usage-chart-roles" class="chart-frame"></div>
+            </div>
+            <div class="chart-card">
+              <h3 data-i18n="usageChartPhases">Phase share</h3>
+              <div id="usage-chart-phases" class="chart-frame"></div>
+            </div>
+          </div>
           <div class="stats-board">
             <div class="stack">
               <div class="row-between">
@@ -365,7 +416,7 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
-        <section>
+        <section class="tab-panel" data-tab-panel="routing">
           <div class="container stack">
           <h2 data-i18n="brainRoutingTitle">Brain routing</h2>
           <p class="muted" data-i18n="brainRoutingHint">Select which configured model each agent role should use. No JSON editing required.</p>
@@ -383,7 +434,7 @@ export const configWebHtml = `<!doctype html>
           </div>
         </section>
 
-        <section>
+        <section class="tab-panel" data-tab-panel="tools">
           <div class="container stack">
           <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
           <div class="panel-grid">
@@ -409,9 +460,10 @@ export const configWebHtml = `<!doctype html>
       const translations = {
         en: {
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
+          tabSettings: "Settings", tabModels: "Models", tabUsage: "Statistics", tabRouting: "Routing", tabTools: "Tools & auth",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
-          modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
-          usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.",
+          modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", subscriptionModels: "Authenticated subscriptions", useSubscriptionProvider: "Use subscription", subscriptionProviderApplied: "Subscription provider selected", apiKeyOptional: "Optional token saved for the selected provider", apiKeyOptionalAuthenticated: "Optional; authenticated subscription token is used if empty", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
+          usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.", usageChartModels: "Model token chart", usageChartRoles: "Role token chart", usageChartPhases: "Phase share",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
@@ -435,9 +487,10 @@ export const configWebHtml = `<!doctype html>
         },
         zh: {
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
+          tabSettings: "基础设置", tabModels: "模型", tabUsage: "数据统计", tabRouting: "路由", tabTools: "工具与认证",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
-          modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
-          usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。",
+          modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", subscriptionModels: "已认证订阅", useSubscriptionProvider: "使用订阅", subscriptionProviderApplied: "已选择订阅 Provider", apiKeyOptional: "可选；会保存到选中的 Provider", apiKeyOptionalAuthenticated: "可选；留空会使用已认证订阅 token", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
+          usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。", usageChartModels: "模型 token 图表", usageChartRoles: "角色 token 图表", usageChartPhases: "阶段占比",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
@@ -470,6 +523,8 @@ export const configWebHtml = `<!doctype html>
       const authStatus = document.querySelector("#auth-status")
       const refresh = document.querySelector("#refresh")
       const language = document.querySelector("#language")
+      const tabButtons = Array.from(document.querySelectorAll("[data-tab]"))
+      const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
       const settingsForm = document.querySelector("#settings-form")
       const modelForm = document.querySelector("#model-form")
       const manualModelForm = document.querySelector("#manual-model-form")
@@ -482,6 +537,9 @@ export const configWebHtml = `<!doctype html>
       const customBaseUrlInput = document.querySelector("#custom-base-url")
       const customApiKeyInput = document.querySelector("#custom-api-key")
       const loadProviderModelsButton = document.querySelector("#load-provider-models")
+      const subscriptionModelsPanel = document.querySelector("#subscription-models-panel")
+      const subscriptionProviderSelect = document.querySelector("#subscription-provider-select")
+      const useSubscriptionProviderButton = document.querySelector("#use-subscription-provider")
       const providerSelect = document.querySelector("#provider-select")
       const catalogModelSelect = document.querySelector("#catalog-model-select")
       const catalogVisionInput = document.querySelector("#catalog-vision")
@@ -506,6 +564,9 @@ export const configWebHtml = `<!doctype html>
       const usageDetailTitle = document.querySelector("#usage-detail-title")
       const usageFilterNote = document.querySelector("#usage-filter-note")
       const usageShowAll = document.querySelector("#usage-show-all")
+      const usageChartModels = document.querySelector("#usage-chart-models")
+      const usageChartRoles = document.querySelector("#usage-chart-roles")
+      const usageChartPhases = document.querySelector("#usage-chart-phases")
       const brainSelect = document.querySelector("#brain-select")
       const applyAllModel = document.querySelector("#apply-all-model")
       const applyAllRoles = document.querySelector("#apply-all-roles")
@@ -523,8 +584,13 @@ export const configWebHtml = `<!doctype html>
       let currentBrains = { brains: [] }
       let currentModels = { models: [] }
       let currentTools = { tools: [] }
+      let currentAuthStatus = { configuredProviders: [], providerAuth: [] }
       let currentUsageStats = { generatedAt: Date.now(), sessions: 0, totals: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byModel: [], byRole: [], byPhase: [], recent: [] }
       let currentUsageFilter = null
+      const activeTabStorageKey = "braincode-config-tab-v2"
+      let activeTab = localStorage.getItem(activeTabStorageKey) || "models"
+      let chartRuntimePromise = null
+      let chartRoots = new Map()
       let catalog = { providers: [] }
       let oauthProviders = []
       let oauthLoginSession = null
@@ -541,6 +607,22 @@ export const configWebHtml = `<!doctype html>
       async function getJson(path) { const response = await fetch(path); const body = await response.json(); if (!response.ok || !body.ok) throw new Error(body.error || "Request failed"); return body.data }
       async function postJson(path, value) { const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) }); const body = await response.json(); if (!response.ok || !body.ok) throw new Error(body.error || "Request failed"); return body.data }
       async function putJson(path, value) { const response = await fetch(path, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value) }); const body = await response.json(); if (!response.ok || !body.ok) throw new Error(body.error || "Request failed"); return body.data }
+
+      function setActiveTab(tab, options = {}) {
+        const nextTab = tabPanels.some((panel) => panel.dataset.tabPanel === tab) ? tab : "models"
+        activeTab = nextTab
+        localStorage.setItem(activeTabStorageKey, nextTab)
+        for (const button of tabButtons) {
+          const selected = button.dataset.tab === nextTab
+          button.classList.toggle("active", selected)
+          button.setAttribute("aria-selected", String(selected))
+        }
+        for (const panel of tabPanels) {
+          panel.classList.toggle("active", panel.dataset.tabPanel === nextTab)
+        }
+        if (nextTab === "usage") renderUsageCharts()
+        if (options.scroll !== false) document.querySelector(".tab-section")?.scrollIntoView({ block: "start" })
+      }
 
       const enhancedSelects = new WeakMap()
       function fuzzyMatches(text, query) {
@@ -607,6 +689,7 @@ export const configWebHtml = `<!doctype html>
         providerSelect.replaceChildren(...catalog.providers.map((entry) => option(entry.provider, entry.provider)))
         enhanceSelect(providerSelect)
         renderCatalogModels()
+        renderSubscriptionProviders()
       }
 
       function renderCatalogModels() {
@@ -614,6 +697,55 @@ export const configWebHtml = `<!doctype html>
         catalogModelSelect.replaceChildren(...(entry?.models || []).map((model) => option(model.id, model.name + " / " + model.modelId)))
         enhanceSelect(catalogModelSelect)
         syncCatalogVision()
+        syncCatalogApiKeyPlaceholder()
+      }
+
+      function authenticatedCatalogProviders() {
+        const catalogByProvider = new Map(catalog.providers.map((entry) => [entry.provider, entry]))
+        const oauthById = new Map(oauthProviders.map((provider) => [provider.id, provider]))
+        const matched = new Map()
+        for (const authEntry of currentAuthStatus.providerAuth || []) {
+          if (authEntry.kind !== "oauth") continue
+          const candidates = [authEntry.provider, authEntry.oauthProviderId].filter(Boolean)
+          const catalogEntry = candidates.map((provider) => catalogByProvider.get(provider)).find(Boolean)
+          if (!catalogEntry || matched.has(catalogEntry.provider)) continue
+          const oauthProvider = candidates.map((provider) => oauthById.get(provider)).find(Boolean)
+          matched.set(catalogEntry.provider, {
+            provider: catalogEntry.provider,
+            label: (oauthProvider?.name || catalogEntry.provider) + " / " + catalogEntry.provider,
+          })
+        }
+        return Array.from(matched.values())
+      }
+
+      function renderSubscriptionProviders() {
+        const providers = authenticatedCatalogProviders()
+        subscriptionModelsPanel.hidden = providers.length === 0
+        subscriptionProviderSelect.disabled = providers.length === 0
+        useSubscriptionProviderButton.disabled = providers.length === 0
+        subscriptionProviderSelect.replaceChildren(...providers.map((entry) => option(entry.provider, entry.label)))
+        enhanceSelect(subscriptionProviderSelect)
+        syncCatalogApiKeyPlaceholder()
+      }
+
+      function applySubscriptionProvider() {
+        const provider = subscriptionProviderSelect.value
+        if (!provider) return
+        providerSelect.value = provider
+        catalogApiKeyInput.value = ""
+        renderCatalogModels()
+        status.textContent = t("subscriptionProviderApplied") + ": " + provider
+      }
+
+      function syncCatalogApiKeyPlaceholder() {
+        const authenticatedProviderIds = new Set(authenticatedCatalogProviders().map((entry) => entry.provider))
+        catalogApiKeyInput.placeholder = authenticatedProviderIds.has(providerSelect.value) ? t("apiKeyOptionalAuthenticated") : t("apiKeyOptional")
+      }
+
+      function setAuthStatusData(authStatusData) {
+        currentAuthStatus = authStatusData || { configuredProviders: [], providerAuth: [] }
+        authStatus.textContent = JSON.stringify(currentAuthStatus, null, 2)
+        renderSubscriptionProviders()
       }
 
       function renderSavedProviders() {
@@ -836,7 +968,7 @@ export const configWebHtml = `<!doctype html>
       function selectUsageFilter(type, id, label) {
         currentUsageFilter = type && id ? { type, id, label: label || id } : null
         renderUsageStats()
-        document.querySelector("#usage-section")?.scrollIntoView({ block: "start" })
+        setActiveTab("usage")
       }
 
       function createMetric(label, value) {
@@ -865,6 +997,131 @@ export const configWebHtml = `<!doctype html>
         renderUsageBucketList(usageRoles, currentUsageStats.byRole || [], "role")
         renderUsageBucketList(usagePhases, currentUsageStats.byPhase || [], "phase")
         renderUsageDetails()
+        renderUsageCharts()
+      }
+
+      function chartData(buckets, limit = 8) {
+        return (buckets || []).slice(0, limit).map((bucket) => ({
+          name: String(bucket.label || bucket.id || "unknown"),
+          tokens: Number(bucket.total) || 0,
+          input: Number(bucket.input) || 0,
+          output: Number(bucket.output) || 0,
+          calls: Number(bucket.calls) || 0,
+        }))
+      }
+
+      function loadChartsRuntime() {
+        if (!chartRuntimePromise) {
+          chartRuntimePromise = Promise.all([
+            import("https://esm.sh/react@18.3.1"),
+            import("https://esm.sh/react-dom@18.3.1/client"),
+            import("https://esm.sh/recharts@2.15.0?deps=react@18.3.1,react-dom@18.3.1"),
+          ]).then(([React, ReactDOM, Recharts]) => ({ React, ReactDOM, Recharts }))
+        }
+        return chartRuntimePromise
+      }
+
+      async function renderUsageCharts() {
+        const containers = [usageChartModels, usageChartRoles, usageChartPhases].filter(Boolean)
+        if (activeTab !== "usage" || containers.length === 0) return
+        const modelData = chartData(currentUsageStats.byModel, 8)
+        const roleData = chartData(currentUsageStats.byRole, 8)
+        const phaseData = chartData(currentUsageStats.byPhase, 8)
+        if (!modelData.length && !roleData.length && !phaseData.length) {
+          renderChartEmpty(usageChartModels)
+          renderChartEmpty(usageChartRoles)
+          renderChartEmpty(usageChartPhases)
+          return
+        }
+        try {
+          const runtime = await loadChartsRuntime()
+          renderRechartsBar(runtime, usageChartModels, modelData)
+          renderRechartsBar(runtime, usageChartRoles, roleData)
+          renderRechartsPie(runtime, usageChartPhases, phaseData)
+        } catch {
+          renderFallbackBars(usageChartModels, modelData)
+          renderFallbackBars(usageChartRoles, roleData)
+          renderFallbackBars(usageChartPhases, phaseData)
+        }
+      }
+
+      function renderChartEmpty(container) {
+        if (!container) return
+        disposeChartRoot(container)
+        container.innerHTML = '<div class="chart-empty">' + t("usageNoData") + '</div>'
+      }
+
+      function disposeChartRoot(container) {
+        const root = chartRoots.get(container)
+        if (!root) return
+        try { root.unmount() } catch {}
+        chartRoots.delete(container)
+      }
+
+      function chartRoot(runtime, container) {
+        let root = chartRoots.get(container)
+        if (!root) {
+          container.replaceChildren()
+          root = runtime.ReactDOM.createRoot(container)
+          chartRoots.set(container, root)
+        }
+        return root
+      }
+
+      function renderRechartsBar(runtime, container, data) {
+        if (!container) return
+        if (!data.length) { renderChartEmpty(container); return }
+        const { React, Recharts } = runtime
+        const e = React.createElement
+        const axisStyle = { fill: "var(--muted)", fontSize: 11, fontFamily: "var(--font-mono)" }
+        chartRoot(runtime, container).render(
+          e(Recharts.ResponsiveContainer, { width: "100%", height: "100%" },
+            e(Recharts.BarChart, { data, margin: { top: 8, right: 8, bottom: 28, left: 0 } },
+              e(Recharts.CartesianGrid, { stroke: "var(--border)", vertical: false }),
+              e(Recharts.XAxis, { dataKey: "name", tick: axisStyle, tickLine: false, interval: 0, angle: -18, textAnchor: "end", height: 42 }),
+              e(Recharts.YAxis, { tickFormatter: formatCompactTokens, tick: axisStyle, tickLine: false, width: 44 }),
+              e(Recharts.Tooltip, { formatter: (value, name) => [formatCompactTokens(value), name], contentStyle: { background: "var(--surface)", border: "1px solid var(--border)", color: "var(--fg)", borderRadius: "4px" } }),
+              e(Recharts.Bar, { dataKey: "input", stackId: "tokens", fill: "var(--accent)", name: t("usageInput") }),
+              e(Recharts.Bar, { dataKey: "output", stackId: "tokens", fill: "color-mix(in srgb, var(--accent) 52%, var(--fg))", name: t("usageOutput") }),
+            ),
+          ),
+        )
+      }
+
+      function renderRechartsPie(runtime, container, data) {
+        if (!container) return
+        if (!data.length) { renderChartEmpty(container); return }
+        const { React, Recharts } = runtime
+        const e = React.createElement
+        const colors = ["#458588", "#b16286", "#98971a", "#d79921", "#689d6a", "#cc241d", "#7c6f64", "#076678"]
+        chartRoot(runtime, container).render(
+          e(Recharts.ResponsiveContainer, { width: "100%", height: "100%" },
+            e(Recharts.PieChart, null,
+              e(Recharts.Pie, { data, dataKey: "tokens", nameKey: "name", innerRadius: 48, outerRadius: 78, paddingAngle: 2 },
+                ...data.map((entry, index) => e(Recharts.Cell, { key: entry.name, fill: colors[index % colors.length] })),
+              ),
+              e(Recharts.Tooltip, { formatter: (value) => formatCompactTokens(value), contentStyle: { background: "var(--surface)", border: "1px solid var(--border)", color: "var(--fg)", borderRadius: "4px" } }),
+              e(Recharts.Legend, { verticalAlign: "bottom", height: 32, wrapperStyle: { color: "var(--muted)", fontSize: "11px", fontFamily: "var(--font-mono)" } }),
+            ),
+          ),
+        )
+      }
+
+      function renderFallbackBars(container, data) {
+        if (!container) return
+        if (!data.length) { renderChartEmpty(container); return }
+        disposeChartRoot(container)
+        const max = Math.max(...data.map((entry) => entry.tokens), 1)
+        const rows = data.slice(0, 6).map((entry) => {
+          const label = entry.name.length > 18 ? entry.name.slice(0, 17) + "…" : entry.name
+          const width = Math.max(2, Math.round((entry.tokens / max) * 100))
+          return '<div class="fallback-bar-row"><span>' + escapeHtml(label) + '</span><span class="fallback-bar-track"><span class="fallback-bar-fill" style="width:' + width + '%"></span></span><span>' + formatCompactTokens(entry.tokens) + '</span></div>'
+        }).join("")
+        container.innerHTML = '<div class="fallback-bars">' + rows + '</div>'
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]))
       }
 
       function renderUsageBucketList(container, buckets, type) {
@@ -1008,7 +1265,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("saving") + " models..."
         const saveKey = apiKey ? postJson("/api/provider-api-key", { provider: model.provider, apiKey }) : Promise.resolve(null)
         const auth = await saveKey
-        if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+        if (auth) setAuthStatusData(auth)
         const nextModels = currentModels.models.map((candidate) => candidate.id === previousId ? model : candidate)
         currentModels = await putJson("/api/models", { ...currentModels, models: nextModels })
         if (previousId !== model.id) {
@@ -1253,7 +1510,7 @@ export const configWebHtml = `<!doctype html>
             renderOAuthLoginSession(session)
             if (session.status === "completed" || session.status === "failed" || session.status === "cancelled") {
               stopOAuthPolling()
-              authStatus.textContent = JSON.stringify(await getJson("/api/auth/status"), null, 2)
+              setAuthStatusData(await getJson("/api/auth/status"))
             }
           } catch (error) {
             stopOAuthPolling()
@@ -1278,7 +1535,7 @@ export const configWebHtml = `<!doctype html>
             status.textContent = t("oauthPending")
           }
           if (session.status === "completed") {
-            authStatus.textContent = JSON.stringify(await getJson("/api/auth/status"), null, 2)
+            setAuthStatusData(await getJson("/api/auth/status"))
           }
         } catch (error) {
           closeOAuthPopup()
@@ -1314,7 +1571,7 @@ export const configWebHtml = `<!doctype html>
         currentTools = toolsData
         currentUsageStats = usageStatsData
         oauthProviders = oauthProvidersData.providers || []
-        authStatus.textContent = JSON.stringify(authStatusData, null, 2)
+        setAuthStatusData(authStatusData)
         renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders()
         status.textContent = t("loaded")
         loadCatalog().catch(showCatalogError)
@@ -1470,10 +1727,14 @@ export const configWebHtml = `<!doctype html>
       }
 
       refresh.addEventListener("click", () => loadAll().catch(showError))
-      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
+      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders(); renderSubscriptionProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
+      for (const button of tabButtons) {
+        button.addEventListener("click", () => setActiveTab(button.dataset.tab))
+      }
       usageShowAll.addEventListener("click", () => selectUsageFilter(null, null, null))
       savedProviderSelect.addEventListener("change", applySavedProvider)
       loadProviderModelsButton.addEventListener("click", () => loadProviderModels().catch(showError))
+      useSubscriptionProviderButton.addEventListener("click", applySubscriptionProvider)
       testManualModelButton.addEventListener("click", () => testManualModel().catch(showError))
       startOAuthLoginButton.addEventListener("click", () => startOAuthLogin().catch(showError))
       submitOAuthCodeButton.addEventListener("click", () => submitOAuthCode().catch(showError))
@@ -1502,7 +1763,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("saving") + " models..."
         const saveKey = catalogApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: catalogApiKeyInput.value.trim() }) : Promise.resolve(null)
         saveKey.then((auth) => {
-          if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+          if (auth) setAuthStatusData(auth)
           return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
         }).then((savedModels) => { currentModels = savedModels; catalogApiKeyInput.value = ""; renderSavedProviders(); renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
       })
@@ -1514,7 +1775,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("saving") + " models..."
         const saveKey = manualApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: manualApiKeyInput.value.trim() }) : Promise.resolve(null)
         saveKey.then((auth) => {
-          if (auth) authStatus.textContent = JSON.stringify(auth, null, 2)
+          if (auth) setAuthStatusData(auth)
           return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
         }).then((savedModels) => { currentModels = savedModels; manualModelForm.reset(); manualContextWindowInput.value = "128000"; manualThinkingInput.value = "medium"; renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
       })
@@ -1546,7 +1807,7 @@ export const configWebHtml = `<!doctype html>
 
       function showCatalogError(error) { status.textContent = t("catalogFailed"); authStatus.textContent = String(error) }
       function showError(error) { status.textContent = t("failed"); authStatus.textContent = String(error) }
-      applyLanguage(); enhanceSelects(); loadAll().catch(showError)
+      applyLanguage(); enhanceSelects(); setActiveTab(activeTab, { scroll: false }); loadAll().catch(showError)
     </script>
   </body>
 </html>`

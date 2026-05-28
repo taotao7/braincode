@@ -126,6 +126,7 @@ Early TUI commands:
 Browser UI for configuration.
 
 It should talk to the local server API and should not write `~/.braincode/` directly.
+It shows model, role, and runtime-phase token usage through the server usage-statistics API.
 
 ### `packages/config`
 
@@ -160,6 +161,7 @@ Responsibilities:
 - Load local skill Markdown from `.agents/skill/<skill-id>/SKILL.md` or top-level `.agents/skill/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
+- Aggregate token usage from session JSONL records by model, role, and runtime phase for the local config UI.
 
 ### `packages/server`
 
@@ -170,6 +172,7 @@ Responsibilities:
 - Bind to `127.0.0.1` by default.
 - Serve the config web app.
 - Expose typed API routes for settings, brains, models, tools, auth status, and health checks.
+- Expose usage-statistics API routes backed by session JSONL aggregation.
 - Persist changes through `packages/config`.
 
 ### `packages/brain`
@@ -218,6 +221,7 @@ Responsibilities:
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
+- Record provider token usage per routeBrain, support, primary, and review model call into session JSONL.
 - Run trusted lifecycle hooks at supported runtime points and record hook outcomes in the session log.
 - Emit normalized Braincode events.
 - Persist sessions.
