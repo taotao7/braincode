@@ -12,7 +12,7 @@ A `postinstall` step downloads the platform-specific binary from the matching Gi
 
 ## Release
 
-`0.2.2` ships the TUI transcript folding fix and the bottom-right BrainPet progress footer. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
+`0.2.3` ships Config Web UI tabs and usage charts, subscription-backed model selection, TUI live status animation, tighter transcript folding, concise tool rows, and handoff prompts for provider message-size limits. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
 
 ## Usage
 

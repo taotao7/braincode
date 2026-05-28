@@ -67,6 +67,16 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 ## 发布记录
 
+### v0.2.3
+
+- Config Web UI 改为多 tab 管理，模型 tab 放在最前；usage tab 展示按模型、role、运行阶段聚合的 token 统计，并加入 Recharts 图表和点击详情过滤。
+- 认证过 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot 等 Pi OAuth 订阅后，可以在模型目录里直接选择对应订阅商模型，不需要重复填写 API key。
+- TUI running 状态有独立的一秒计时和轻量动画：前缀符号循环，状态文字逐字高亮，没 token/tool 事件时耗时也会继续更新。
+- TUI transcript 折叠默认启用鼠标捕获，只点击带 `▸` / `▾` 的可见主行才切换展开；工具调用默认保持短行，参数和结果摘要放到折叠详情里。可设置 `BRAINCODE_TUI_MOUSE=false` 关闭鼠标捕获。
+- provider 返回 message size 超限时，会作为 Braincode handoff 边界提示 `/handoff`，让用户从紧凑的 `@@session` packet 继续，而不是静默压缩当前 transcript。
+- read-only evidence cache 在 write/execute 工具后会清理缓存和重复计数，减少文件或命令输出变化后的 stale duplicate-read 提醒。
+- npm wrapper 和发布元数据同步到 `0.2.3`，用于匹配同版本 GitHub release 资产。
+
 ### v0.2.2
 
 - TUI transcript 折叠现在只在点击 `▸` / `▾` 标记时切换，并且命中计算会考虑内部可见 viewport 和详情行换行。

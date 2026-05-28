@@ -62,6 +62,16 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 
 ## Notes de version
 
+### v0.2.3
+
+- L'interface Config Web est organisée en onglets, avec Models en premier. L'onglet usage affiche les statistiques de tokens par modèle, rôle et phase d'exécution, avec graphiques Recharts et filtres de détail au clic.
+- Les fournisseurs d'abonnement authentifiés via Pi OAuth, dont Claude Pro/Max, ChatGPT Plus/Pro Codex et GitHub Copilot, peuvent être sélectionnés dans le catalogue de modèles sans ressaisir de clé API.
+- La ligne d'état running de la TUI a maintenant sa propre horloge à une seconde et une animation légère : le préfixe tourne et le libellé met en surbrillance un caractère à la fois.
+- Le pliage du transcript de la TUI capture la souris par défaut et ne bascule que sur les lignes principales visibles avec `▸` ou `▾`. Les appels d'outils restent courts par défaut, avec arguments et résumé de résultat dans le détail replié. Définissez `BRAINCODE_TUI_MOUSE=false` pour désactiver la capture souris.
+- Les erreurs provider de taille de message sont présentées comme une frontière de handoff Braincode. La TUI propose `/handoff` pour continuer depuis un paquet `@@session` compact au lieu de compresser silencieusement le transcript actif.
+- Le cache d'évidence read-only réinitialise maintenant les entrées et compteurs de doublons après les outils write/execute, ce qui réduit les alertes stale duplicate-read.
+- Le wrapper npm et les métadonnées de release sont en `0.2.3` pour correspondre aux assets GitHub de même version.
+
 ### v0.2.2
 
 - Le pliage du transcript dans la TUI ne bascule plus que lors d'un clic sur `▸` / `▾`, avec un hit testing qui tient compte du viewport visible et des lignes de détails repliées.

@@ -72,15 +72,16 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Release Notes
 
-### Unreleased
+### v0.2.3
 
 - Config Web UI is organized into tabs with the Models tab first. The usage tab shows token statistics by model, role, and runtime phase, including Recharts charts and click-through detail filters.
 - Authenticated subscription providers from Pi OAuth, including Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot, can be selected from the model catalog without re-entering an API key.
 - TUI running status has its own one-second clock, so elapsed time keeps moving even when no token or tool event arrives.
 - TUI running status now has a lightweight text animation: the activity prefix cycles and the active status label highlights one character at a time.
-- TUI transcript folding uses mouse capture by default; click any visible row of an item with a `▸` or `▾` marker to expand or collapse it. Set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture.
+- TUI transcript folding uses mouse capture by default; click any visible main row of an item with a `▸` or `▾` marker to expand or collapse it. Tool calls now stay concise by default and move args/result details behind the folded row. Set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture.
 - Provider message-size failures are surfaced as a Braincode handoff boundary. The TUI prompts `/handoff` so the user can continue from a compact `@@session` packet instead of silently compressing the active transcript.
 - The read-only evidence cache now resets cached entries and duplicate counters after write/execute tools, reducing stale duplicate-read warnings after files or command output change.
+- The npm wrapper and release metadata are versioned as `0.2.3` for the matching GitHub release assets.
 
 ### v0.2.2
 
