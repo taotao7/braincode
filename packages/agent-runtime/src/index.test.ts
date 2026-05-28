@@ -158,6 +158,14 @@ test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", asy
     reused: true,
     callCount: 2,
   })
+
+  let repeated = second
+  for (let index = 3; index <= 8; index++) {
+    repeated = await tool.execute(`read-${index}`, { path: "README.md" } as never)
+  }
+  const repeatedText = repeated.content[0]?.type === "text" ? repeated.content[0].text : ""
+  expect(repeatedText).toContain("No new tool output is included")
+  expect(repeatedText).not.toContain("read call 1")
 })
 
 test("createBraincodeAgentRuntime invalidates evidence cache after shell calls", async () => {

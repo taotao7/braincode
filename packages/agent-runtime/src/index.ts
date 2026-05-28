@@ -645,6 +645,7 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
 }
 
 const CACHEABLE_EVIDENCE_TOOLS = new Set(["list_files", "read_file", "search_files", "git_diff", "get_changed_files"])
+const EVIDENCE_CACHE_SUPPRESS_CONTENT_AFTER_CONSECUTIVE = 8
 
 export function createToolEvidenceCache(): ToolEvidenceCache {
   return {
@@ -752,6 +753,18 @@ function annotateToolEvidenceResult<TDetails>(
   const warning = formatEvidenceCacheReminder(evidence)
   const details = addEvidenceCacheDetails(result.details, { ...evidence, warning })
   if (!warning) return { ...result, details }
+  if (evidence.reused && evidence.consecutiveCount >= EVIDENCE_CACHE_SUPPRESS_CONTENT_AFTER_CONSECUTIVE) {
+    return {
+      ...result,
+      details,
+      content: [
+        {
+          type: "text",
+          text: `${warning}\n\nNo new tool output is included because this duplicate read-only call has already been answered in this turn.`,
+        },
+      ],
+    }
+  }
 
   const [first, ...rest] = result.content
   if (first && first.type === "text" && typeof first.text === "string") {

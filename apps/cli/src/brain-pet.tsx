@@ -22,6 +22,7 @@ export type BrainPetProps = {
   status?: string
   lines?: ReadonlyArray<string>
   width?: number
+  animate?: boolean
   activeColor?: string
   activeStatusColor?: string
   idleColor?: string
@@ -42,6 +43,7 @@ export function BrainPet({
   status,
   lines,
   width = DEFAULT_WIDTH,
+  animate = false,
   activeColor = "magenta",
   activeStatusColor = "yellow",
   idleColor = "gray",
@@ -49,11 +51,15 @@ export function BrainPet({
   const [frame, setFrame] = useState(0)
 
   useEffect(() => {
+    if (!animate) {
+      setFrame(0)
+      return
+    }
     const handle = setInterval(() => {
       setFrame((value) => value + 1)
     }, thinking ? 900 : 1800)
     return () => clearInterval(handle)
-  }, [thinking])
+  }, [animate, thinking])
 
   const frames = thinking ? ACTIVE_FRAMES : IDLE_FRAMES
   const body = frames[frame % frames.length] ?? frames[0]!

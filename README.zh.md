@@ -70,8 +70,8 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 ### v0.2.2
 
 - TUI transcript 折叠现在只在点击 `▸` / `▾` 标记时切换，并且命中计算会考虑内部可见 viewport 和详情行换行。
-- TUI transcript 渲染改为内部 viewport，支持 PageUp/PageDown 和鼠标滚轮浏览历史，流式输出时不再强制重绘整段终端 scrollback。
-- BrainPet 固定到右下角 footer，运行时带轻量动画，会根据当前工具、worker、队列和最近事件汇报进度或简短吐槽。
+- TUI transcript 渲染改为内部 viewport，输入框为空时支持 Up/Down 滚动内容，也支持 PageUp/PageDown、Ctrl+Up/Ctrl+Down 和鼠标滚轮浏览历史，流式输出时不再强制重绘整段终端 scrollback；prompt 历史使用 Ctrl+P/Ctrl+N 切换。
+- BrainPet 固定到右下角 footer，默认使用稳定低刷新渲染，会根据当前工具、worker、队列和最近事件汇报进度或简短吐槽；如需动画可设置 `BRAINCODE_TUI_ANIMATIONS=true`。
 - npm wrapper 和发布元数据同步到 `0.2.2`，用于匹配同版本 GitHub release 资产。
 
 ## 核心理念

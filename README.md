@@ -75,8 +75,8 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 ### v0.2.2
 
 - TUI transcript folding now only toggles when the `▸` / `▾` marker is clicked, and hit testing accounts for the visible viewport and wrapped detail rows.
-- TUI transcript rendering now uses an internal viewport with PageUp/PageDown and mouse-wheel history scrolling, so streaming output no longer forces the whole terminal scrollback to repaint.
-- BrainPet now lives in the bottom-right footer, animates while work is running, and reports context-aware progress with short dry asides when available.
+- TUI transcript rendering now uses an internal viewport with Up/Down when input is empty, PageUp/PageDown, Ctrl+Up/Ctrl+Down, and mouse-wheel history scrolling, so streaming output no longer forces the whole terminal scrollback to repaint. Prompt history is available with Ctrl+P/Ctrl+N.
+- BrainPet now lives in the bottom-right footer with stable low-refresh rendering by default, and reports context-aware progress with short dry asides when available. Set `BRAINCODE_TUI_ANIMATIONS=true` to re-enable its animation.
 - The npm wrapper and release metadata are versioned as `0.2.2` for the matching GitHub release assets.
 
 ## Current Status

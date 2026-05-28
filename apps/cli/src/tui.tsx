@@ -341,6 +341,7 @@ const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
 const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
+const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
 
 type UiColor =
   | "blue"
@@ -543,6 +544,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const lastEscapeAt = useRef(0);
   const DOUBLE_ESC_MS = 500;
   const queueRef = useRef<QueuedTask[]>([]);
+  const promptHistory = useRef<string[]>([]);
+  const promptHistoryIndex = useRef<number | null>(null);
+  const draftBeforePromptHistory = useRef("");
   const pendingDecisionResolve = useRef<
     ((decision: ToolApprovalDecision) => void) | null
   >(null);
@@ -784,12 +788,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function updateRunStatus(label: string) {
     setRunStatus((previous) =>
       previous
-        ? {
-            ...previous,
-            label,
-            tokens: runUsage.current,
-            frame: previous.frame + 1,
-          }
+        ? previous.label === label &&
+          sameTokenUsage(previous.tokens, runUsage.current)
+          ? previous
+          : {
+              ...previous,
+              label,
+              tokens: runUsage.current,
+              frame:
+                previous.label === label ? previous.frame : previous.frame + 1,
+            }
         : { startedAt: Date.now(), label, tokens: runUsage.current, frame: 0 },
     );
   }
@@ -828,7 +836,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     usageByTurn.current.set(key, usage);
     runUsage.current = sumTokenUsage(Array.from(usageByTurn.current.values()));
     setRunStatus((previous) =>
-      previous ? { ...previous, tokens: runUsage.current } : previous,
+      previous && !sameTokenUsage(previous.tokens, runUsage.current)
+        ? { ...previous, tokens: runUsage.current }
+        : previous,
     );
   }
 
@@ -1342,11 +1352,23 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   async function applyResume(target: SessionSummary) {
     const context = await readSessionContext(target.sessionId, undefined, 1000);
     const restoredItems = restoreSessionTranscriptItems(context, target);
+    clearTerminalFrame();
     setSessionId(target.sessionId);
     setItems(restoredItems);
     scrollTranscriptTo("bottom");
     setSessionPanel(null);
+    setOverlay(null);
+    setMcpPanel(null);
+    setHookPanel(null);
+    setBrainPanel(null);
+    setIntentPanel(null);
+    setRuntimeErrorPanel(null);
+    setDecisionPanel(null);
     flash(`Now writing to session ${target.sessionId.slice(0, 8)}`);
+  }
+
+  function clearTerminalFrame() {
+    stdout?.write("\x1b[2J\x1b[H");
   }
 
   function resetSurfaces() {
@@ -1900,6 +1922,20 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
+  function editMostRecentQueuedTask(): boolean {
+    if (queueRef.current.length === 0) return false;
+    const queue = queueRef.current;
+    const last = queue[queue.length - 1]!;
+    queueRef.current = queue.slice(0, -1);
+    bumpQueue();
+    setItems((previous) => previous.filter((item) => item.id !== last.itemId));
+    applyDraftChange(
+      last.displayText.startsWith("/") ? last.displayText : last.prompt,
+    );
+    flash(`Editing queued task (${queueRef.current.length} still pending)`);
+    return true;
+  }
+
   async function submitPrompt(
     prompt: string,
     options: {
@@ -1953,17 +1989,24 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         startedAt: number;
         argsObject: Record<string, unknown> | undefined;
         argsCount: number;
+        argsKey: string;
         editArgs?: EditArgs;
         editBeforePromise?: Promise<string | null>;
       }
     >();
+    const repeatedReadToolItems = new Map<string, { itemId: string }>();
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
-      setItems((previous) =>
-        previous.map((item) =>
-          item.id === itemId ? { ...item, ...patch } : item,
-        ),
-      );
+      setItems((previous) => {
+        let changed = false;
+        const next = previous.map((item) => {
+          if (item.id !== itemId) return item;
+          if (!transcriptPatchChangesItem(item, patch)) return item;
+          changed = true;
+          return { ...item, ...patch };
+        });
+        return changed ? next : previous;
+      });
     };
     const appendItemRaw = (item: TranscriptItem) => {
       setItems((previous) => [...previous, item]);
@@ -1977,7 +2020,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     // The window is small enough to still feel real-time but large enough to
     // batch the bursts that come from fast models.
     const STREAM_FLUSH_MS =
-      Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 64;
+      Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 128;
     let streamFlushHandle: ReturnType<typeof setTimeout> | null = null;
     let streamPendingId: string | null = null;
     const flushStream = () => {
@@ -2086,7 +2129,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           const itemId = crypto.randomUUID();
           const argsObject = toolArgsObject(event.args);
           const argsCount = toolArgsCount(argsObject);
+          const argsKey = toolCallDisplayKey(event.toolName, argsObject);
           const toolCategory = classifyToolCall(event.toolName, event.args);
+          if (toolCategory !== "read") repeatedReadToolItems.clear();
           const editArgs =
             toolCategory === "write"
               ? (extractEditArgs(event.toolName, event.args) ?? undefined)
@@ -2103,6 +2148,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             startedAt: Date.now(),
             argsObject,
             argsCount,
+            argsKey,
             editArgs,
             editBeforePromise,
           };
@@ -2136,6 +2182,46 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           if (!tracked) return;
           toolItems.delete(event.toolCallId);
           const elapsed = Date.now() - tracked.startedAt;
+          const evidence = getToolEvidenceCacheInfo(event.result);
+          if (
+            tracked.toolCategory === "read" &&
+            evidence?.reused &&
+            (evidence.callCount ?? 0) > 1
+          ) {
+            const existing = repeatedReadToolItems.get(tracked.argsKey);
+            const duplicateCount = Math.max(1, (evidence.callCount ?? 2) - 1);
+            const text = formatRepeatedReadToolText(
+              event.toolName,
+              tracked.argsCount,
+              duplicateCount,
+              evidence,
+            );
+            if (existing && existing.itemId !== tracked.itemId) {
+              setItems((previous) =>
+                previous.filter((item) => item.id !== tracked.itemId),
+              );
+              updateItem(existing.itemId, {
+                toolStatus: event.isError ? "failed" : "ok",
+                toolCategory: tracked.toolCategory,
+                finishedAt: Date.now(),
+                text,
+              });
+            } else {
+              repeatedReadToolItems.set(tracked.argsKey, {
+                itemId: tracked.itemId,
+              });
+              updateItem(tracked.itemId, {
+                toolStatus: event.isError ? "failed" : "ok",
+                toolCategory: tracked.toolCategory,
+                finishedAt: Date.now(),
+                text,
+              });
+            }
+            updateStatus(
+              `Tool Call · Read · reused cached ${event.toolName} (${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"})`,
+            );
+            return;
+          }
           updateItem(tracked.itemId, {
             toolStatus: event.isError ? "failed" : "ok",
             toolCategory: tracked.toolCategory,
@@ -2512,7 +2598,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
-  function applyDraftChange(next: string, nextCursor?: number) {
+  function applyDraftChange(
+    next: string,
+    nextCursor?: number,
+    options: { fromPromptHistory?: boolean } = {},
+  ) {
+    if (!options.fromPromptHistory) {
+      promptHistoryIndex.current = null;
+      draftBeforePromptHistory.current = "";
+    }
     const cursorPosition = clamp(nextCursor ?? next.length, 0, next.length);
     verticalCursorColumn.current = null;
     setDraft(next);
@@ -2561,6 +2655,52 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (!result.moved) return false;
     verticalCursorColumn.current = result.desiredColumn;
     setCursor(result.cursor);
+    return true;
+  }
+
+  function recordPromptHistory(prompt: string) {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    const previous = promptHistory.current;
+    const next =
+      previous[previous.length - 1] === trimmed
+        ? previous
+        : [...previous, trimmed].slice(-100);
+    promptHistory.current = next;
+    promptHistoryIndex.current = null;
+    draftBeforePromptHistory.current = "";
+  }
+
+  function navigatePromptHistory(delta: -1 | 1): boolean {
+    const history = promptHistory.current;
+    if (history.length === 0) return false;
+
+    const currentIndex = promptHistoryIndex.current;
+    if (currentIndex === null) {
+      if (delta > 0) return false;
+      draftBeforePromptHistory.current = draft;
+      const nextIndex = history.length - 1;
+      promptHistoryIndex.current = nextIndex;
+      applyDraftChange(history[nextIndex]!, undefined, {
+        fromPromptHistory: true,
+      });
+      return true;
+    }
+
+    const nextIndex = currentIndex + delta;
+    if (nextIndex >= history.length) {
+      promptHistoryIndex.current = null;
+      applyDraftChange(draftBeforePromptHistory.current, undefined, {
+        fromPromptHistory: true,
+      });
+      draftBeforePromptHistory.current = "";
+      return true;
+    }
+    if (nextIndex < 0) return true;
+    promptHistoryIndex.current = nextIndex;
+    applyDraftChange(history[nextIndex]!, undefined, {
+      fromPromptHistory: true,
+    });
     return true;
   }
 
@@ -2738,6 +2878,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       scrollTranscriptTo(scrollKey.home ? "top" : "bottom");
       return;
     }
+    if (
+      !overlay &&
+      (key.ctrl || key.meta) &&
+      (key.upArrow || key.downArrow)
+    ) {
+      scrollTranscriptBy(key.downArrow ? 1 : -1);
+      return;
+    }
 
     if (decisionPanel) {
       const nextMove = key.downArrow || (key.ctrl && input === "n");
@@ -2912,6 +3060,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     if (sessionPanel) {
       if (key.escape) {
+        clearTerminalFrame();
         setSessionPanel(null);
         return;
       }
@@ -2976,29 +3125,41 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (acceptOverlay()) return;
     }
 
+    if (!overlay && key.ctrl && input === "y") {
+      if (editMostRecentQueuedTask()) return;
+    }
+
+    if (!overlay && key.ctrl && (input === "p" || input === "n")) {
+      if (navigatePromptHistory(input === "n" ? 1 : -1)) return;
+    }
+
     if (key.return) {
       if (overlay && acceptOverlay()) return;
+      recordPromptHistory(draft);
       void submitPrompt(draft);
       return;
     }
 
     if (!overlay && (key.upArrow || key.downArrow)) {
-      const moved = moveCursorVertical(key.downArrow ? 1 : -1);
-      if (moved || key.downArrow) return;
-    }
-
-    if (key.upArrow && !overlay && queueRef.current.length > 0) {
-      const queue = queueRef.current;
-      const last = queue[queue.length - 1]!;
-      queueRef.current = queue.slice(0, -1);
-      bumpQueue();
-      setItems((previous) =>
-        previous.filter((item) => item.id !== last.itemId),
-      );
-      applyDraftChange(
-        last.displayText.startsWith("/") ? last.displayText : last.prompt,
-      );
-      flash(`Editing queued task (${queueRef.current.length} still pending)`);
+      const direction = key.downArrow ? 1 : -1;
+      const moved = draft.length > 0 ? moveCursorVertical(direction) : false;
+      if (moved) return;
+      if (
+        transcriptViewportState.current.maxScrollTop > 0 &&
+        (draft.trim().length === 0 || transcriptScrollTop !== null)
+      ) {
+        scrollTranscriptBy(direction);
+        return;
+      }
+      if (
+        key.upArrow &&
+        draft.trim().length === 0 &&
+        editMostRecentQueuedTask()
+      )
+        return;
+      if (navigatePromptHistory(direction)) return;
+      if (key.downArrow) return;
+      if (key.upArrow && editMostRecentQueuedTask()) return;
       return;
     }
 
@@ -3095,7 +3256,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   );
   const footerTextWidth = Math.max(8, contentWidth - petPanelWidth - 1);
   const helpText =
-    "Enter submits · / commands · PageUp/PageDown/wheel scroll history · End bottom · Ctrl+O intent · @ files · @@ sessions · ↑↓ move input · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
+    "Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · PageUp/PageDown/wheel/Ctrl+↑↓ scroll · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
   const nonTranscriptRows = estimateNonTranscriptRows({
     hasTranscript: items.length > 0,
     emptyLogoRows: BRAIN_LOGO.length + 2,
@@ -3121,8 +3282,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     queueLength: queueRef.current.length,
     toast,
   });
+  const availableTranscriptRows = Math.max(1, terminalRows - nonTranscriptRows);
   const transcriptViewportRows =
-    items.length > 0 ? Math.max(1, terminalRows - nonTranscriptRows) : 0;
+    items.length > 0
+      ? Math.min(
+          availableTranscriptRows,
+          Math.max(1, transcriptLayout.totalRows),
+        )
+      : 0;
   const transcriptViewport = viewportTranscriptLayout(
     transcriptLayout,
     transcriptViewportRows,
@@ -3138,7 +3305,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   transcriptClickViewportOffset.current = 0;
   transcriptClickBounds.current = transcriptViewport.bounds;
   const transcriptScrollSummary =
-    transcriptViewport.maxScrollTop > 0
+    transcriptScrollTop !== null && transcriptViewport.maxScrollTop > 0
       ? `${Math.round(transcriptViewport.scrollTop + transcriptViewport.viewportRows)}/${transcriptLayout.totalRows} rows`
       : "";
 
@@ -3734,8 +3901,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             {queueRef.current.length > 0 ? (
               <Text color={colors.yellow} wrap="truncate-end">
                 {queueRef.current.length} task
-                {queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit
-                the most recent
+                {queueRef.current.length === 1 ? "" : "s"} queued · Ctrl+Y
+                edits the most recent
               </Text>
             ) : null}
             {toast ? <ToastView toast={toast} /> : null}
@@ -3745,6 +3912,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             status={petState.status}
             lines={petState.lines}
             width={petPanelWidth}
+            animate={TUI_ANIMATIONS_ENABLED}
             activeColor={colors.magenta}
             activeStatusColor={colors.yellow}
             idleColor={colors.gray}
@@ -3841,6 +4009,28 @@ function normalizeTranscriptItem(item: TranscriptItem): TranscriptItem {
   return isTranscriptItemAutoCollapsed(next)
     ? { ...next, collapsed: true }
     : next;
+}
+
+function transcriptPatchChangesItem(
+  item: TranscriptItem,
+  patch: Partial<TranscriptItem>,
+): boolean {
+  return Object.entries(patch).some(
+    ([key, value]) => !Object.is(item[key as keyof TranscriptItem], value),
+  );
+}
+
+function sameTokenUsage(
+  left: TokenUsageSnapshot,
+  right: TokenUsageSnapshot,
+): boolean {
+  return (
+    left.input === right.input &&
+    left.output === right.output &&
+    left.cacheRead === right.cacheRead &&
+    left.cacheWrite === right.cacheWrite &&
+    left.total === right.total
+  );
 }
 
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
@@ -5458,6 +5648,9 @@ function formatHelp(): string {
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
+    "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown, wheel, or Ctrl+↑/Ctrl+↓ also scroll it.",
+    "  • Press Ctrl+P/Ctrl+N for prompt history; ↑/↓ still moves within multi-line input.",
+    "  • Press Ctrl+Y to edit the most recent queued prompt.",
     "  • Click ▸/▾ on long transcript items to expand or collapse that item.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
@@ -5737,6 +5930,14 @@ function toolApprovalAllowedByConfig(
   return false;
 }
 
+type ToolEvidenceCacheInfo = {
+  reused?: boolean;
+  callCount?: number;
+  consecutiveCount?: number;
+  cacheAgeMs?: number;
+  warning?: string;
+};
+
 function formatToolStartText(toolName: string, argsCount: number): string {
   return `${toolName}${argsCount > 0 ? ` · ${argsCount} ${argsCount === 1 ? "arg" : "args"}` : ""}`;
 }
@@ -5755,6 +5956,25 @@ function formatToolEndText(
   return `${toolName} · ${status} (${elapsedMs}ms)${args}${result}`;
 }
 
+function formatRepeatedReadToolText(
+  toolName: string,
+  argsCount: number,
+  duplicateCount: number,
+  evidence: ToolEvidenceCacheInfo,
+): string {
+  const args =
+    argsCount > 0 ? ` · ${argsCount} ${argsCount === 1 ? "arg" : "args"}` : "";
+  const repeated =
+    evidence.consecutiveCount && evidence.consecutiveCount >= 3
+      ? ` · repeated ${evidence.consecutiveCount}x in a row`
+      : "";
+  const age =
+    evidence.cacheAgeMs === undefined
+      ? ""
+      : ` · cache ${formatElapsed(evidence.cacheAgeMs)} old`;
+  return `${toolName} · cached duplicate x${duplicateCount}${args}${repeated}${age}`;
+}
+
 function toolArgsObject(args: unknown): Record<string, unknown> | undefined {
   if (!args || typeof args !== "object" || Array.isArray(args))
     return undefined;
@@ -5764,6 +5984,71 @@ function toolArgsObject(args: unknown): Record<string, unknown> | undefined {
 
 function toolArgsCount(args: Record<string, unknown> | undefined): number {
   return args ? Object.keys(args).length : 0;
+}
+
+function toolCallDisplayKey(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string {
+  return `${toolName.toLowerCase()}:${stableToolValue(args ?? {})}`;
+}
+
+function stableToolValue(value: unknown): string {
+  try {
+    return JSON.stringify(toStableToolValue(value, new WeakSet())) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+
+function toStableToolValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
+    return value;
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value))
+    return value.map((item) => toStableToolValue(item, seen));
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  const output: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    output[key] = toStableToolValue(
+      (value as Record<string, unknown>)[key],
+      seen,
+    );
+  }
+  seen.delete(value);
+  return output;
+}
+
+function getToolEvidenceCacheInfo(
+  result: unknown,
+): ToolEvidenceCacheInfo | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const details = (result as { details?: unknown }).details;
+  if (!details || typeof details !== "object" || Array.isArray(details))
+    return undefined;
+  const evidence = (details as { evidenceCache?: unknown }).evidenceCache;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence))
+    return undefined;
+  const record = evidence as Record<string, unknown>;
+  return {
+    reused: typeof record.reused === "boolean" ? record.reused : undefined,
+    callCount:
+      typeof record.callCount === "number" ? record.callCount : undefined,
+    consecutiveCount:
+      typeof record.consecutiveCount === "number"
+        ? record.consecutiveCount
+        : undefined,
+    cacheAgeMs:
+      typeof record.cacheAgeMs === "number" ? record.cacheAgeMs : undefined,
+    warning: typeof record.warning === "string" ? record.warning : undefined,
+  };
 }
 
 function formatToolArgLine(key: string, value: unknown): string {

@@ -65,8 +65,8 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 ### v0.2.2
 
 - Le pliage du transcript dans la TUI ne bascule plus que lors d'un clic sur `▸` / `▾`, avec un hit testing qui tient compte du viewport visible et des lignes de détails repliées.
-- Le rendu du transcript de la TUI utilise maintenant un viewport interne avec PageUp/PageDown et molette souris, afin que le streaming ne force plus le repaint de tout le scrollback du terminal.
-- BrainPet est maintenant ancré en bas à droite, animé pendant l'exécution, et affiche une progression contextuelle avec de courts apartés secs quand le contexte le permet.
+- Le rendu du transcript de la TUI utilise maintenant un viewport interne avec Up/Down quand la saisie est vide, PageUp/PageDown, Ctrl+Up/Ctrl+Down et molette souris, afin que le streaming ne force plus le repaint de tout le scrollback du terminal. L'historique des prompts est disponible avec Ctrl+P/Ctrl+N.
+- BrainPet est maintenant ancré en bas à droite avec un rendu stable et peu rafraîchi par défaut, et affiche une progression contextuelle avec de courts apartés secs quand le contexte le permet. Définissez `BRAINCODE_TUI_ANIMATIONS=true` pour réactiver son animation.
 - Le wrapper npm et les métadonnées de release sont en `0.2.2` pour correspondre aux assets GitHub de même version.
 
 ## Philosophie centrale
