@@ -163,7 +163,7 @@ type PlanCommandArgument = {
   displayText: string
 }
 
-type DecisionOptionId = "approve" | "block"
+type DecisionOptionId = "approve" | "approve_session" | "block"
 
 type DecisionOption = {
   id: DecisionOptionId
@@ -175,6 +175,7 @@ type DecisionOption = {
 type DecisionPanelState = {
   id: string
   itemId: string
+  sessionId: string
   toolName: string
   toolCategory: ToolCategory
   argsSummary: string
@@ -187,14 +188,20 @@ type BraincodeTuiProps = {
 }
 
 export async function runTui(initialPrompt?: string): Promise<void> {
+  const restoreDebugSink = await configureTuiDebugSink()
   const instance = render(<BraincodeTui initialPrompt={initialPrompt} />)
-  await instance.waitUntilExit()
+  try {
+    await instance.waitUntilExit()
+  } finally {
+    restoreDebugSink()
+  }
 }
 
 const INPUT_MAX_LINES = 6
 const INPUT_PROMPT_PREFIX = "› "
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
 const RUN_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
+const THINKING_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const
 
 const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
@@ -204,6 +211,25 @@ const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╔╝██║  ██║██║  ██║██║██║ ╚████║",
   "   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝",
 ]
+
+async function configureTuiDebugSink(): Promise<() => void> {
+  if (process.env.BRAINCODE_DEBUG !== "true" || process.env.BRAINCODE_DEBUG_FILE?.trim()) {
+    return () => {}
+  }
+  const previous = process.env.BRAINCODE_DEBUG_FILE
+  const debugDir = join(homedir(), ".braincode")
+  const debugFile = join(debugDir, "debug.log")
+  try {
+    await mkdir(debugDir, { recursive: true })
+    process.env.BRAINCODE_DEBUG_FILE = debugFile
+    return () => {
+      if (previous === undefined) delete process.env.BRAINCODE_DEBUG_FILE
+      else process.env.BRAINCODE_DEBUG_FILE = previous
+    }
+  } catch {
+    return () => {}
+  }
+}
 
 function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const { exit } = useApp()
@@ -244,6 +270,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const DOUBLE_ESC_MS = 500
   const queueRef = useRef<QueuedTask[]>([])
   const pendingDecisionResolve = useRef<((decision: ToolApprovalDecision) => void) | null>(null)
+  const sessionApprovedToolPrompts = useRef<Set<string>>(new Set())
   const usageByTurn = useRef<Map<string, TokenUsageSnapshot>>(new Map())
   const activeUsageKey = useRef<string | null>(null)
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage())
@@ -1151,8 +1178,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     startRunStatus("Routing through Braincode...")
     setRunning(true)
 
+    let approvalMode: BraincodeMode = mode
     const currentAssistant = { id: null as string | null, text: "" }
-    const currentThinking = { id: null as string | null, text: "" }
+    const currentThinking = { id: null as string | null }
     const toolItems = new Map<string, { itemId: string; toolName: string; toolCategory: ToolCategory; startedAt: number; argsSummary: string; editArgs?: EditArgs; editBeforePromise?: Promise<string | null> }>()
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
@@ -1172,12 +1200,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }
       currentAssistant.id = null
       currentAssistant.text = ""
-      if (currentThinking.id && currentThinking.text.length === 0) {
+      if (currentThinking.id) {
         const id = currentThinking.id
         setItems((previous) => previous.filter((item) => item.id !== id))
       }
       currentThinking.id = null
-      currentThinking.text = ""
     }
     const ensureAssistantItem = () => {
       if (currentAssistant.id) return currentAssistant.id
@@ -1191,8 +1218,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (currentThinking.id) return currentThinking.id
       const id = crypto.randomUUID()
       currentThinking.id = id
-      currentThinking.text = ""
       appendItemRaw({ id, kind: "thinking", text: "" })
+      updateStatus("Thinking…")
       return id
     }
 
@@ -1220,9 +1247,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             currentAssistant.text += update.delta
             updateItem(id, { text: currentAssistant.text })
           } else if (update.type === "thinking_delta") {
-            const id = ensureThinkingItem()
-            currentThinking.text += update.delta
-            updateItem(id, { text: truncateForStatus(currentThinking.text) })
+            ensureThinkingItem()
           } else if (update.type === "toolcall_start") {
             updateStatus("Tool Call · preparing arguments…")
           } else if (update.type === "toolcall_end") {
@@ -1337,6 +1362,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       })
     }
     const onPlan = (plan: RuntimePlan) => {
+      approvalMode = plan.mode
       rememberIntentPlan(plan)
       if (plan.todos.length === 0) return
       finalizeStreamingBuffers()
@@ -1404,6 +1430,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const onToolApproval = async (request: ToolApprovalRequest, signal?: AbortSignal): Promise<ToolApprovalDecision> => {
       const toolCategory = classifyToolCall(request.toolName, request.args)
       if (!requiresToolDecision(toolCategory, request.toolName, request.args)) return { approved: true }
+      if (approvalMode === "radical") {
+        return { approved: true, reason: "auto-approved in radical mode" }
+      }
+      if (sessionApprovedToolPrompts.current.has(sessionId)) {
+        return { approved: true, reason: `auto-approved for current session ${sessionId.slice(0, 8)}` }
+      }
       try {
         const configuredTools = await readTools()
         if (toolApprovalAllowedByConfig(request.toolName, toolCategory, configuredTools)) {
@@ -1452,6 +1484,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         setDecisionPanel({
           id: request.toolCallId,
           itemId,
+          sessionId,
           toolName: request.toolName,
           toolCategory,
           argsSummary,
@@ -1462,6 +1495,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
               label: "Approve once",
               description: "Run this tool call now.",
               checked: true,
+            },
+            {
+              id: "approve_session",
+              label: "Current session",
+              description: "Run this and stop asking in this session.",
+              checked: false,
             },
             {
               id: "block",
@@ -1658,14 +1697,21 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ? decisionPanel.options.find((option) => option.id === optionId)
       : decisionPanel.options.find((option) => option.checked) ?? decisionPanel.options[decisionPanel.selected]
     if (!selected) return
-    const approved = selected.id === "approve"
+    const approved = selected.id === "approve" || selected.id === "approve_session"
+    const approvedForSession = selected.id === "approve_session"
+    if (approvedForSession) {
+      sessionApprovedToolPrompts.current.add(decisionPanel.sessionId)
+    }
     setItems((previous) => previous.map((item) => item.id === decisionPanel.itemId
       ? {
         ...item,
         decisionStatus: approved ? "approved" : "blocked",
-        text: `${toolCategoryTitle(decisionPanel.toolCategory)} · ${decisionPanel.toolName} · ${approved ? "approved once" : "blocked"}`,
+        text: `${toolCategoryTitle(decisionPanel.toolCategory)} · ${decisionPanel.toolName} · ${approvedForSession ? "approved for current session" : approved ? "approved once" : "blocked"}`,
       }
       : item))
+    if (approvedForSession) {
+      flash(`Tool prompts disabled for session ${decisionPanel.sessionId.slice(0, 8)}`)
+    }
     setDecisionPanel(null)
     const resolve = pendingDecisionResolve.current
     pendingDecisionResolve.current = null
@@ -1695,6 +1741,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (input === "y") {
         checkDecisionSelection("approve")
         finishDecision("approve")
+        return
+      }
+      if (input === "s") {
+        checkDecisionSelection("approve_session")
+        finishDecision("approve_session")
         return
       }
       if (input === "n" || key.escape) {
@@ -1956,21 +2007,26 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const projectSkillCount = projectSupport?.skills.length ?? 0
   const userSkillCount = userSupport?.skills.length ?? 0
   const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS)
+  const contentWidth = Math.max(20, terminalCols - 4)
   const draftWindow = clipDraftToWindow(draft, cursor, inputWidth, INPUT_MAX_LINES)
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
-        <Box flexDirection="column">
-          <Text color="cyan" bold>BRAIN / CODE</Text>
-          <Text color="gray">
-            session {sessionId.slice(0, 8)} · mode {mode} · {relative(homedir(), projectRoot) || projectRoot}
+      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1} flexDirection="column">
+        <Text>
+          <Badge label="BRAIN / CODE" backgroundColor="cyan" />
+          <Text color="gray"> session {sessionId.slice(0, 8)} · </Text>
+          <Badge label={mode} backgroundColor={mode === "radical" ? "magenta" : "green"} />
+          <Text color="gray"> {relative(homedir(), projectRoot) || projectRoot}</Text>
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text>
+            <Badge label="PROJECT" backgroundColor="blue" />
+            <Text color="gray"> {projectSupport ? `AGENTS.md ${projectSupport.agents ? "✓" : "·"} · mcp ${projectMcpCount} · skills ${projectSkillCount}` : "loading…"}</Text>
           </Text>
-          <Text color="gray">
-            project: {projectSupport ? `AGENTS.md ${projectSupport.agents ? "✓" : "·"}  mcp:${projectMcpCount}  skills:${projectSkillCount}` : "loading…"}
-          </Text>
-          <Text color="gray">
-            user: {userSupport ? `mcp:${userMcpCount}  skills:${userSkillCount}` : "loading…"}
+          <Text>
+            <Badge label="USER" backgroundColor="magenta" />
+            <Text color="gray"> {userSupport ? `mcp ${userMcpCount} · skills ${userSkillCount}` : "loading…"}</Text>
           </Text>
         </Box>
       </Box>
@@ -1986,9 +2042,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : (
         <Box flexDirection="column">
-          {items.map((item) => (
+          <SectionDivider label="TRANSCRIPT" color="cyan" width={contentWidth} />
+          {items.map((item, index) => (
             <Box key={item.id} flexDirection="column" marginBottom={1}>
-              <TranscriptLine item={item} />
+              {index > 0 ? <ThinDivider width={contentWidth} /> : null}
+              <TranscriptLine item={item} width={contentWidth} />
               {item.plan ? (
                 <>
                   <Text color="gray">{formatPlanMetadataLine(item.plan)}</Text>
@@ -2153,7 +2211,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
               {index === decisionPanel.selected ? "› " : "  "}{option.checked ? "[x]" : "[ ]"} {option.label} — {option.description}
             </Text>
           ))}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Space checks · Enter confirms · y approves · n/Esc blocks</Text>
+          <Text color="gray">↑↓ / Ctrl+P/N navigate · Space checks · Enter confirms · y once · s session · n/Esc blocks</Text>
         </Box>
       ) : null}
 
@@ -2169,9 +2227,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         </Box>
       ) : null}
 
-      <Box justifyContent="flex-end">
+      <Box justifyContent="flex-end" marginTop={items.length > 0 ? 0 : 1}>
         <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
       </Box>
+      <SectionDivider label={running ? "RUNNING" : "INPUT"} color={running ? "yellow" : "green"} width={contentWidth} />
       <Box borderStyle="single" borderColor={running ? "yellow" : "green"} paddingX={1} flexDirection="column">
         {running ? <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current }} /> : null}
         {draftWindow.hiddenAbove > 0 ? <Text color="gray">↑ {draftWindow.hiddenAbove} more line{draftWindow.hiddenAbove === 1 ? "" : "s"}</Text> : null}
@@ -2330,6 +2389,28 @@ function wrapByVisualWidth(text: string, width: number): string[] {
   return lines
 }
 
+function visualWidth(text: string): number {
+  let width = 0
+  for (const char of text) {
+    width += isWideChar(char) ? 2 : 1
+  }
+  return width
+}
+
+function rightAlignTranscriptRows(text: string, width: number, firstLinePrefixWidth: number): Array<{ padding: string; line: string; first: boolean }> {
+  const lineWidth = Math.max(20, width)
+  const available = Math.max(8, lineWidth - firstLinePrefixWidth)
+  const bubbleWidth = Math.max(8, Math.min(available, Math.floor(lineWidth * 0.72)))
+  return wrapByVisualWidth(text, bubbleWidth).map((line, index) => {
+    const occupied = visualWidth(line) + (index === 0 ? firstLinePrefixWidth : 0)
+    return {
+      padding: " ".repeat(Math.max(0, lineWidth - occupied)),
+      line,
+      first: index === 0,
+    }
+  })
+}
+
 function locateCursorRow(text: string, cursor: number, width: number): number {
   if (width <= 0) return 0
   let row = 0
@@ -2357,6 +2438,27 @@ type DraftWindow = {
   lines: string[]
   hiddenAbove: number
   hiddenBelow: number
+}
+
+type UiColor = "blue" | "cyan" | "green" | "yellow" | "magenta" | "red" | "gray"
+
+function Badge({ label, backgroundColor }: { label: string; backgroundColor: UiColor }) {
+  const foreground = backgroundColor === "yellow" || backgroundColor === "green" || backgroundColor === "cyan" ? "black" : "white"
+  return <Text backgroundColor={backgroundColor} color={foreground} bold> {label} </Text>
+}
+
+function SectionDivider({ label, color, width }: { label: string; color: UiColor; width: number }) {
+  const line = "─".repeat(Math.max(1, width - label.length - 4))
+  return (
+    <Text>
+      <Badge label={label} backgroundColor={color} />
+      <Text color={color}> {line}</Text>
+    </Text>
+  )
+}
+
+function ThinDivider({ width }: { width: number }) {
+  return <Text color="gray">{"·".repeat(Math.max(8, Math.min(width, 120)))}</Text>
 }
 
 function clipDraftToWindow(draft: string, cursor: number, width: number, maxLines: number): DraftWindow {
@@ -2389,12 +2491,34 @@ function clipDraftToWindow(draft: string, cursor: number, width: number, maxLine
   }
 }
 
-function TranscriptLine({ item }: { item: TranscriptItem }) {
+function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }) {
+  if (item.kind === "user") {
+    const rows = rightAlignTranscriptRows(item.text, width, 6)
+    return (
+      <Box flexDirection="column">
+        {rows.map((row, index) => (
+          <Text key={index}>
+            <Text>{row.padding}</Text>
+            {row.first ? (
+              <>
+                <Badge label="YOU" backgroundColor="blue" />
+                <Text> </Text>
+              </>
+            ) : null}
+            <Text color={colorFor(item)}>{row.line || " "}</Text>
+          </Text>
+        ))}
+      </Box>
+    )
+  }
+  if (item.kind === "thinking") {
+    return <ThinkingTranscriptLine />
+  }
   if (item.kind === "tool") {
     const category = item.toolCategory ?? "tool"
     return (
       <Text>
-        <Text color="yellow" bold>Tool Call</Text>
+        <Badge label="TOOL" backgroundColor="yellow" />
         <Text color="gray"> · </Text>
         <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
         <Text color={colorFor(item)}> {item.text}</Text>
@@ -2407,7 +2531,7 @@ function TranscriptLine({ item }: { item: TranscriptItem }) {
     const statusColor = status === "approved" ? "green" : status === "blocked" ? "red" : "yellow"
     return (
       <Text>
-        <Text color="yellow" bold>Ask User</Text>
+        <Badge label="ASK" backgroundColor="yellow" />
         <Text color="gray"> · </Text>
         <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
         <Text color="gray"> · </Text>
@@ -2416,7 +2540,46 @@ function TranscriptLine({ item }: { item: TranscriptItem }) {
       </Text>
     )
   }
-  return <Text color={colorFor(item)}>{labelFor(item)} {item.text}</Text>
+  const badge = transcriptBadge(item)
+  return (
+    <Text>
+      <Badge label={badge.label} backgroundColor={badge.color} />
+      <Text color={colorFor(item)}> {item.text}</Text>
+    </Text>
+  )
+}
+
+function ThinkingTranscriptLine() {
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 240)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <Text>
+      <Badge label="THINKING" backgroundColor="yellow" />
+      <Text color="gray"> working</Text>
+      <Text color="yellow"> {THINKING_FRAMES[frame % THINKING_FRAMES.length]}</Text>
+    </Text>
+  )
+}
+
+function transcriptBadge(item: TranscriptItem): { label: string; color: UiColor } {
+  switch (item.kind) {
+    case "assistant": return { label: "BRAIN", color: "green" }
+    case "error": return { label: "ERROR", color: "red" }
+    case "status": return { label: "STATUS", color: "cyan" }
+    case "help": return { label: "HELP", color: "yellow" }
+    case "panel": return { label: "PANEL", color: "magenta" }
+    case "worker": return { label: "AGENT", color: item.workerStatus === "failed" ? "red" : item.workerStatus === "blocked" ? "yellow" : "magenta" }
+    case "todo": return { label: "TODO", color: item.todoStatus === "failed" || item.todoStatus === "blocked" ? "red" : item.todoStatus === "completed" ? "green" : "yellow" }
+    case "queued": return { label: "QUEUE", color: "yellow" }
+    case "user": return { label: "YOU", color: "blue" }
+    case "thinking": return { label: "THINKING", color: "yellow" }
+    case "tool": return { label: "TOOL", color: "yellow" }
+    case "decision": return { label: "ASK", color: "yellow" }
+  }
 }
 
 function padLineNum(value: number | null, width: number): string {
@@ -2490,7 +2653,7 @@ function ToastView({ toast }: { toast: ToastState }) {
 function RuntimeStatusLine({ status }: { status: RunStatusState }) {
   const [frame, setFrame] = useState(0)
   useEffect(() => {
-    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 120)
+    const interval = setInterval(() => setFrame((value) => (value + 1) % 1024), 240)
     return () => clearInterval(interval)
   }, [])
 
@@ -2506,36 +2669,6 @@ function RuntimeStatusLine({ status }: { status: RunStatusState }) {
       <Text color="gray"> ({elapsed}{tokens ? ` · ${tokens}` : " · tokens pending"})</Text>
     </Text>
   )
-}
-
-function labelFor(item: TranscriptItem): string {
-  switch (item.kind) {
-    case "user": return "You:"
-    case "assistant": return "Braincode:"
-    case "error": return "Error:"
-    case "status": return "Status:"
-    case "help": return "Help:"
-    case "panel": return ""
-    case "thinking": return "Thinking:"
-    case "tool": {
-      switch (item.toolStatus) {
-        case "ok": return "Tool Call:"
-        case "failed": return "Tool Call:"
-        default: return "Tool Call:"
-      }
-    }
-    case "worker": {
-      switch (item.workerStatus) {
-        case "completed": return "◉"
-        case "blocked": return "◌"
-        case "failed": return "◌"
-        default: return "◎"
-      }
-    }
-    case "todo": return todoGlyph(item.todoStatus ?? "pending")
-    case "queued": return "»"
-    case "decision": return "Ask User:"
-  }
 }
 
 const INTENT_BIT_UP = 1
@@ -2929,11 +3062,6 @@ function truncate(text: string, limit: number): string {
 
 function isLikelySessionId(token: string): boolean {
   return /^[0-9a-fA-F-]{8,}$/.test(token)
-}
-
-function truncateForStatus(text: string): string {
-  const collapsed = text.replace(/\s+/g, " ").trim()
-  return truncate(collapsed, 80)
 }
 
 function emptyTokenUsage(): TokenUsageSnapshot {

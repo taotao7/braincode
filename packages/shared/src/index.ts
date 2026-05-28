@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs"
+import { dirname } from "node:path"
+
 export const BRAINCODE_HOME_DIR_NAME = ".braincode"
 export const DEFAULT_CONFIG_HOST = "127.0.0.1"
 export const DEFAULT_CONFIG_PORT = 14580
@@ -26,7 +29,18 @@ export function debugLog(scope: string, message: string, details?: Record<string
   if (!isDebugEnabled()) return
 
   const suffix = details ? ` ${JSON.stringify(redactDebugDetails(details))}` : ""
-  console.error(`[braincode:debug:${scope}] ${message}${suffix}`)
+  const line = `[braincode:debug:${scope}] ${message}${suffix}`
+  const debugFile = process.env.BRAINCODE_DEBUG_FILE?.trim()
+  if (debugFile) {
+    try {
+      mkdirSync(dirname(debugFile), { recursive: true })
+      appendFileSync(debugFile, `${line}\n`)
+      return
+    } catch {
+      // Fall back to stderr so debug output is not silently lost.
+    }
+  }
+  console.error(line)
 }
 
 function redactDebugDetails(value: unknown): unknown {
