@@ -130,6 +130,9 @@ type TranscriptRenderEntry = {
   continuation: boolean;
   showDivider: boolean;
   collapsible: boolean;
+  rowStart: number;
+  contentRow: number;
+  rowEnd: number;
 };
 
 type CommandDefinition = {
@@ -337,6 +340,7 @@ const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const;
 const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
 const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400;
+const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
 
 type UiColor =
   | "blue"
@@ -532,6 +536,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   );
   const [runStatus, setRunStatus] = useState<RunStatusState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [transcriptScrollTop, setTranscriptScrollTop] = useState<
+    number | null
+  >(null);
   const initialRan = useRef(false);
   const lastEscapeAt = useRef(0);
   const DOUBLE_ESC_MS = 500;
@@ -546,6 +553,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const verticalCursorColumn = useRef<number | null>(null);
   const transcriptClickBounds = useRef<TranscriptClickBound[]>([]);
   const transcriptClickViewportOffset = useRef(0);
+  const transcriptViewportState = useRef({
+    totalRows: 0,
+    viewportRows: 0,
+    scrollTop: 0,
+    maxScrollTop: 0,
+  });
   const mouseInputBuffer = useRef("");
   const [queueVersion, setQueueVersion] = useState(0);
   const bumpQueue = () => setQueueVersion((value) => value + 1);
@@ -678,8 +691,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     stdout.write(enableMouse);
     const onData = (chunk: Buffer | string) => {
       mouseInputBuffer.current = `${mouseInputBuffer.current}${String(chunk)}`;
-      const parsed = consumeMouseClicks(mouseInputBuffer.current);
+      const parsed = consumeMouseInput(mouseInputBuffer.current);
       mouseInputBuffer.current = parsed.rest;
+      for (const scroll of parsed.scrolls) {
+        scrollTranscriptBy(scroll * TRANSCRIPT_MOUSE_WHEEL_ROWS);
+      }
       for (const click of parsed.clicks) {
         handleTranscriptClick(click);
       }
@@ -723,6 +739,25 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return { ...item, collapsed: !(normalized.collapsed ?? false) };
       }),
     );
+  }
+
+  function scrollTranscriptBy(deltaRows: number) {
+    const { maxScrollTop } = transcriptViewportState.current;
+    if (maxScrollTop <= 0 || !Number.isFinite(deltaRows) || deltaRows === 0)
+      return;
+    setTranscriptScrollTop((current) => {
+      const currentTop =
+        current === null
+          ? maxScrollTop
+          : transcriptViewportState.current.scrollTop;
+      const next = clamp(Math.round(currentTop + deltaRows), 0, maxScrollTop);
+      return next >= maxScrollTop ? null : next;
+    });
+  }
+
+  function scrollTranscriptTo(position: "top" | "bottom") {
+    const { maxScrollTop } = transcriptViewportState.current;
+    setTranscriptScrollTop(position === "top" && maxScrollTop > 0 ? 0 : null);
   }
 
   function flash(text: string, tone: ToastTone = "info", durationMs = 2500) {
@@ -859,6 +894,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true;
       case "clear":
         setItems([]);
+        scrollTranscriptTo("bottom");
         return true;
       case "exit":
       case "quit":
@@ -1308,6 +1344,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const restoredItems = restoreSessionTranscriptItems(context, target);
     setSessionId(target.sessionId);
     setItems(restoredItems);
+    scrollTranscriptTo("bottom");
     setSessionPanel(null);
     flash(`Now writing to session ${target.sessionId.slice(0, 8)}`);
   }
@@ -1335,6 +1372,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const newId = crypto.randomUUID();
     setSessionId(newId);
     resetSurfaces();
+    scrollTranscriptTo("bottom");
     setItems([
       {
         id: crypto.randomUUID(),
@@ -1397,6 +1435,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     const previousId = targetSessionId;
     const statusId = crypto.randomUUID();
+    scrollTranscriptTo("bottom");
     setItems((previous) => [
       ...previous,
       {
@@ -1773,6 +1812,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const statusText = parsed.useRouterBrain
       ? "Planning route with routeBrain..."
       : "Planning heuristic route...";
+    scrollTranscriptTo("bottom");
     setItems((previous) => [
       ...previous,
       { id: crypto.randomUUID(), kind: "user", text: parsed.displayText },
@@ -1884,6 +1924,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     const displayText = options.displayText ?? trimmed;
+    scrollTranscriptTo("bottom");
     const userItem: TranscriptItem = {
       id: crypto.randomUUID(),
       kind: "user",
@@ -1936,7 +1977,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     // The window is small enough to still feel real-time but large enough to
     // batch the bursts that come from fast models.
     const STREAM_FLUSH_MS =
-      Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 32;
+      Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 64;
     let streamFlushHandle: ReturnType<typeof setTimeout> | null = null;
     let streamPendingId: string | null = null;
     const flushStream = () => {
@@ -2679,6 +2720,25 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return;
     }
 
+    const scrollKey = key as typeof key & {
+      pageUp?: boolean;
+      pageDown?: boolean;
+      home?: boolean;
+      end?: boolean;
+    };
+    if (scrollKey.pageUp || scrollKey.pageDown) {
+      const pageRows = Math.max(
+        1,
+        transcriptViewportState.current.viewportRows - 1,
+      );
+      scrollTranscriptBy(scrollKey.pageDown ? pageRows : -pageRows);
+      return;
+    }
+    if (scrollKey.home || scrollKey.end) {
+      scrollTranscriptTo(scrollKey.home ? "top" : "bottom");
+      return;
+    }
+
     if (decisionPanel) {
       const nextMove = key.downArrow || (key.ctrl && input === "n");
       const prevMove = key.upArrow || (key.ctrl && input === "p");
@@ -3035,10 +3095,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   );
   const footerTextWidth = Math.max(8, contentWidth - petPanelWidth - 1);
   const helpText =
-    "Enter submits · / commands · /mode auto|radical · /theme · @ files · @@ sessions · Ctrl+O intent · click ▸/▾ toggles · ↑↓ move input · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
-  const estimatedRows = estimateTuiRows({
+    "Enter submits · / commands · PageUp/PageDown/wheel scroll history · End bottom · Ctrl+O intent · @ files · @@ sessions · ↑↓ move input · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
+  const nonTranscriptRows = estimateNonTranscriptRows({
     hasTranscript: items.length > 0,
-    transcriptNextRow: transcriptLayout.nextRow,
     emptyLogoRows: BRAIN_LOGO.length + 2,
     brainPanel,
     intentPanel,
@@ -3062,11 +3121,26 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     queueLength: queueRef.current.length,
     toast,
   });
-  transcriptClickViewportOffset.current = Math.max(
-    0,
-    estimatedRows - terminalRows,
+  const transcriptViewportRows =
+    items.length > 0 ? Math.max(1, terminalRows - nonTranscriptRows) : 0;
+  const transcriptViewport = viewportTranscriptLayout(
+    transcriptLayout,
+    transcriptViewportRows,
+    transcriptScrollTop,
+    transcriptFirstItemRow(items.length > 0),
   );
-  transcriptClickBounds.current = transcriptLayout.bounds;
+  transcriptViewportState.current = {
+    totalRows: transcriptLayout.totalRows,
+    viewportRows: transcriptViewport.viewportRows,
+    scrollTop: transcriptViewport.scrollTop,
+    maxScrollTop: transcriptViewport.maxScrollTop,
+  };
+  transcriptClickViewportOffset.current = 0;
+  transcriptClickBounds.current = transcriptViewport.bounds;
+  const transcriptScrollSummary =
+    transcriptViewport.maxScrollTop > 0
+      ? `${Math.round(transcriptViewport.scrollTop + transcriptViewport.viewportRows)}/${transcriptLayout.totalRows} rows`
+      : "";
 
   return (
     <TuiThemeContext.Provider value={tuiTheme}>
@@ -3133,70 +3207,85 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         ) : (
           <Box flexDirection="column">
             <SectionDivider
-              label="TRANSCRIPT"
+              label={
+                transcriptScrollSummary
+                  ? `TRANSCRIPT ${transcriptScrollSummary}`
+                  : "TRANSCRIPT"
+              }
               color="cyan"
               width={contentWidth}
             />
-            {transcriptLayout.entries.map(
-              ({ item, index, continuation, showDivider, collapsible }) => (
-                <Box key={item.id} flexDirection="column" marginBottom={1}>
-                  {showDivider ? <ThinDivider width={contentWidth} /> : null}
-                  <TranscriptLine
-                    item={item}
-                    width={contentWidth}
-                    continuation={continuation}
-                    collapsible={collapsible}
-                  />
-                  {item.kind === "tool" && !item.collapsed && item.toolArgs ? (
-                    <Box flexDirection="column" marginLeft={2}>
-                      {Object.entries(item.toolArgs).map(([key, value]) => (
-                        <Text key={key} color={colors.gray}>
-                          ↳ {formatToolArgLine(key, value)}
-                        </Text>
-                      ))}
-                    </Box>
-                  ) : null}
-                  {item.plan ? (
-                    <>
-                      <Text color={colors.gray}>
-                        {formatPlanMetadataLine(item.plan)}
-                      </Text>
-                      {item.plan.routing.reason ? (
+            <Box
+              flexDirection="column"
+              height={transcriptViewport.viewportRows}
+              overflow="hidden"
+            >
+              {transcriptViewport.entries.map(
+                ({ item, index, continuation, showDivider, collapsible }) => (
+                  <Box key={item.id} flexDirection="column" marginBottom={1}>
+                    {showDivider ? <ThinDivider width={contentWidth} /> : null}
+                    <TranscriptLine
+                      item={item}
+                      width={contentWidth}
+                      continuation={continuation}
+                      collapsible={collapsible}
+                    />
+                    {item.kind === "tool" &&
+                    !item.collapsed &&
+                    item.toolArgs ? (
+                      <Box flexDirection="column" marginLeft={2}>
+                        {Object.entries(item.toolArgs).map(([key, value]) => (
+                          <Text key={key} color={colors.gray}>
+                            ↳ {formatToolArgLine(key, value)}
+                          </Text>
+                        ))}
+                      </Box>
+                    ) : null}
+                    {item.plan ? (
+                      <>
                         <Text color={colors.gray}>
-                          reason:{" "}
-                          {truncate(cleanInline(item.plan.routing.reason), 140)}
+                          {formatPlanMetadataLine(item.plan)}
                         </Text>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {item.plan?.todos.length ? (
-                    <Box flexDirection="column" marginLeft={2}>
-                      {item.plan.todos.map((todo) => (
-                        <Text
-                          key={todo.id}
-                          color={tone(
-                            tuiTheme,
-                            todo.status === "completed"
-                              ? "green"
-                              : todo.status === "failed" ||
-                                  todo.status === "blocked"
-                                ? "red"
-                                : todo.status === "running"
-                                  ? "yellow"
-                                  : "gray",
-                          )}
-                        >
-                          {todoGlyph(todo.status)} {todo.role} · {todo.title}
-                        </Text>
-                      ))}
-                    </Box>
-                  ) : null}
-                  {item.editPreview ? (
-                    <EditPreviewView preview={item.editPreview} />
-                  ) : null}
-                </Box>
-              ),
-            )}
+                        {item.plan.routing.reason ? (
+                          <Text color={colors.gray}>
+                            reason:{" "}
+                            {truncate(
+                              cleanInline(item.plan.routing.reason),
+                              140,
+                            )}
+                          </Text>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {item.plan?.todos.length ? (
+                      <Box flexDirection="column" marginLeft={2}>
+                        {item.plan.todos.map((todo) => (
+                          <Text
+                            key={todo.id}
+                            color={tone(
+                              tuiTheme,
+                              todo.status === "completed"
+                                ? "green"
+                                : todo.status === "failed" ||
+                                    todo.status === "blocked"
+                                  ? "red"
+                                  : todo.status === "running"
+                                    ? "yellow"
+                                    : "gray",
+                            )}
+                          >
+                            {todoGlyph(todo.status)} {todo.role} · {todo.title}
+                          </Text>
+                        ))}
+                      </Box>
+                    ) : null}
+                    {item.editPreview ? (
+                      <EditPreviewView preview={item.editPreview} />
+                    ) : null}
+                  </Box>
+                ),
+              )}
+            </Box>
           </Box>
         )}
 
@@ -3780,11 +3869,11 @@ function layoutTranscriptItems(
 ): {
   entries: TranscriptRenderEntry[];
   bounds: TranscriptClickBound[];
-  nextRow: number;
+  totalRows: number;
 } {
   const entries: TranscriptRenderEntry[] = [];
   const bounds: TranscriptClickBound[] = [];
-  let row = transcriptFirstItemRow(items.length > 0);
+  let row = 0;
 
   for (let index = 0; index < items.length; index++) {
     const previous =
@@ -3802,7 +3891,9 @@ function layoutTranscriptItems(
       ? isTranscriptContinuation(previous, item)
       : false;
     const showDivider = index > 0 && !continuation;
+    const rowStart = row;
     if (showDivider) row += 1;
+    const contentRow = row;
     const itemRows =
       estimateTranscriptItemRows(item, width, continuation, collapsible) +
       estimateTranscriptSupplementRows(item, width);
@@ -3814,16 +3905,25 @@ function layoutTranscriptItems(
       );
       bounds.push({
         itemId: normalized.id,
-        row,
+        row: contentRow,
         foldLeft: foldHitBox.foldLeft,
         foldRight: foldHitBox.foldRight,
       });
     }
-    entries.push({ item, index, continuation, showDivider, collapsible });
     row += itemRows + 1;
+    entries.push({
+      item,
+      index,
+      continuation,
+      showDivider,
+      collapsible,
+      rowStart,
+      contentRow,
+      rowEnd: row,
+    });
   }
 
-  return { entries, bounds, nextRow: row };
+  return { entries, bounds, totalRows: row };
 }
 
 function transcriptFirstItemRow(hasTranscript: boolean): number {
@@ -3832,9 +3932,52 @@ function transcriptFirstItemRow(hasTranscript: boolean): number {
   return 7;
 }
 
-function estimateTuiRows({
+function viewportTranscriptLayout(
+  layout: {
+    entries: TranscriptRenderEntry[];
+    bounds: TranscriptClickBound[];
+    totalRows: number;
+  },
+  viewportRows: number,
+  requestedScrollTop: number | null,
+  firstTerminalRow: number,
+): {
+  entries: TranscriptRenderEntry[];
+  bounds: TranscriptClickBound[];
+  scrollTop: number;
+  maxScrollTop: number;
+  viewportRows: number;
+} {
+  const height = Math.max(1, viewportRows);
+  const maxScrollTop = Math.max(0, layout.totalRows - height);
+  const requested = requestedScrollTop ?? maxScrollTop;
+  const rawScrollTop = clamp(requested, 0, maxScrollTop);
+  const first = layout.entries.find((entry) => entry.rowEnd > rawScrollTop);
+  const scrollTop = first
+    ? clamp(first.rowStart, 0, maxScrollTop)
+    : rawScrollTop;
+  const viewportEnd = scrollTop + height;
+  const entries = layout.entries.filter(
+    (entry) => entry.rowEnd > scrollTop && entry.rowStart < viewportEnd,
+  );
+  const visibleIds = new Set(entries.map((entry) => entry.item.id));
+  const bounds = layout.bounds
+    .filter((bound) => visibleIds.has(bound.itemId))
+    .map((bound) => ({
+      ...bound,
+      row: firstTerminalRow + bound.row - scrollTop,
+    }))
+    .filter(
+      (bound) =>
+        bound.row >= firstTerminalRow &&
+        bound.row < firstTerminalRow + height,
+    );
+
+  return { entries, bounds, scrollTop, maxScrollTop, viewportRows: height };
+}
+
+function estimateNonTranscriptRows({
   hasTranscript,
-  transcriptNextRow,
   emptyLogoRows,
   brainPanel,
   intentPanel,
@@ -3853,7 +3996,6 @@ function estimateTuiRows({
   toast,
 }: {
   hasTranscript: boolean;
-  transcriptNextRow: number;
   emptyLogoRows: number;
   brainPanel: BrainPanelState | null;
   intentPanel: IntentPanelState | null;
@@ -3871,7 +4013,11 @@ function estimateTuiRows({
   queueLength: number;
   toast: ToastState | null;
 }): number {
-  let rows = hasTranscript ? Math.max(0, transcriptNextRow - 1) : 5 + emptyLogoRows;
+  // Header border with two metadata rows plus the bottom margin.
+  let rows = 5;
+
+  if (hasTranscript) rows += 1;
+  else rows += emptyLogoRows;
 
   if (brainPanel) rows += borderedPanelRows(2 + brainPanel.brains.length * 2 + (brainPanel.message ? 1 : 0));
   if (intentPanel) rows += borderedPanelRows(8);
@@ -4167,11 +4313,13 @@ function sliceJsonObject(text: string): string | null {
   return text.slice(start, end + 1);
 }
 
-function consumeMouseClicks(input: string): {
+function consumeMouseInput(input: string): {
   clicks: Array<{ x: number; y: number }>;
+  scrolls: number[];
   rest: string;
 } {
   const clicks: Array<{ x: number; y: number }> = [];
+  const scrolls: number[] = [];
   const regex = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
   let match: RegExpExecArray | null;
   let consumedUntil = 0;
@@ -4183,6 +4331,11 @@ function consumeMouseClicks(input: string): {
     const action = match[4];
     const button = code & 3;
     const isWheel = (code & 64) === 64;
+    if (action === "M" && isWheel) {
+      if (button === 0) scrolls.push(-1);
+      if (button === 1) scrolls.push(1);
+      continue;
+    }
     if (
       action === "M" &&
       button === 0 &&
@@ -4197,7 +4350,7 @@ function consumeMouseClicks(input: string): {
     consumedUntil > 0
       ? input.slice(consumedUntil)
       : input.slice(Math.max(0, input.length - 32));
-  return { clicks, rest };
+  return { clicks, scrolls, rest };
 }
 
 function isMouseInput(input: string): boolean {
