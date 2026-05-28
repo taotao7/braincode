@@ -252,7 +252,7 @@ Owns tool definitions, permissions, and first-party local coding tool implementa
 
 Responsibilities:
 
-- Register coding tools such as read, write, edit, shell, search, patch application, git diff, changed-file inspection, and check/script execution.
+- Register coding tools such as read, write, edit, shell/exec, stdin polling, search, patch application, git diff, changed-file inspection, and check/script execution.
 - Provide first-party local implementations for the default coding toolset.
 - Detect JS package managers from lockfiles for package-script execution (`bun`, `pnpm`, `yarn`, or `npm`).
 - Coordinate with `packages/agent-runtime` for project/user MCP tools declared through `.mcp.json` and user MCP config.
@@ -345,7 +345,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Done: review worker execution for risky tasks.
 - Done: user confirmation flows for risky tool calls in the TUI.
-- Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
+- Done: first-party `list_files`, `read_file`, `search_files`, `edit_file`, `apply_patch`, `exec_command`, `write_stdin`, `shell`, `git_diff`, `get_changed_files`, and `run_script` tools wired into primary runtime execution.
 - Done: read-only tool access for `librarian`, `qa`, `security`, and review workers.
 - Done: non-interactive run permission modes: read-only default, `--allow-edits` for local reads/file edits, and `--yes`.
 - Done: minimal patch ledger record with changed files and git diff stats.

@@ -81,6 +81,22 @@ export const builtInToolDefinitions: ToolDefinition[] = [
     approvalPolicy: "confirm-dangerous",
   },
   {
+    name: "exec_command",
+    description: "Run a shell command and return output or a session id for ongoing interaction.",
+    permissions: ["execute"],
+    risk: "high",
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
+  },
+  {
+    name: "write_stdin",
+    description: "Write input to, or poll output from, an ongoing exec_command session.",
+    permissions: ["execute"],
+    risk: "high",
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
+  },
+  {
     name: "shell",
     description: "Run shell commands in the current project workspace.",
     permissions: ["execute"],

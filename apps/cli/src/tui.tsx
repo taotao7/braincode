@@ -3016,7 +3016,7 @@ function formatWorkerPhase(phase: WorkerLifecycleEvent["phase"]): string {
 function classifyToolCall(toolName: string, args: unknown): ToolCategory {
   const name = toolName.toLowerCase()
   if (/(web.?search|search_query|search-query|brave|tavily|serp|firecrawl|browser_search|web_fetch|fetch_url)/.test(name)) return "websearch"
-  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess)/.test(name)) return "execute"
+  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|write_stdin)/.test(name)) return "execute"
   if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return "write"
   if (/(read|grep|rg|search_files|search-files|list|find|get_file|get-code|snippet|open_file)/.test(name)) return "read"
   const serialized = summarizeToolArgs(args).toLowerCase()

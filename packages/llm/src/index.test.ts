@@ -283,6 +283,8 @@ test("OpenAI-compatible catalog models default to text-only input", () => {
 
   const { piModel } = resolvePiModel(model)
 
+  expect(model.api).toBe("openai-completions")
+  expect(piModel.api).toBe("openai-completions")
   expect(model.supportsVision).toBe(false)
   expect(piModel.input).toEqual(["text"])
 })
@@ -368,6 +370,7 @@ test("listOpenAICompatibleModels normalizes base URL and maps valid model entrie
     ["proxy/alpha", "Alpha", "https://proxy.example/v1"],
     ["proxy/beta", "beta", "https://proxy.example/v1"],
   ])
+  expect(models.map((model) => model.api)).toEqual(["openai-completions", "openai-completions"])
 })
 
 test("listOpenAICompatibleModels rejects invalid inputs and malformed responses", async () => {

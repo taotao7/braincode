@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve, dirname } from "node:path"
 import { Type } from "typebox"
@@ -29,6 +29,7 @@ type LocalToolContext = {
   maxReadBytes: number
   maxOutputBytes: number
   commandTimeoutMs: number
+  execSessions: ExecSessionManager
 }
 
 type JsonRecord = Record<string, unknown>
@@ -45,6 +46,8 @@ export const localCodingToolNames = [
   "search_files",
   "edit_file",
   "apply_patch",
+  "exec_command",
+  "write_stdin",
   "shell",
   "git_diff",
   "get_changed_files",
@@ -64,6 +67,7 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
     maxReadBytes: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
     maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
     commandTimeoutMs: options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+    execSessions: new ExecSessionManager(),
   }
   const enabled = new Map((options.tools ?? []).map((tool) => [tool.name, tool.enabled]))
   const mode = options.mode ?? "all"
@@ -113,6 +117,20 @@ const localToolSpecs: LocalToolSpec[] = [
     description: "Apply a unified diff to files inside the current project workspace using git apply.",
     permissions: ["write"],
     create: createApplyPatchTool,
+  },
+  {
+    name: "exec_command",
+    label: "Exec Command",
+    description: "Run a shell command and return output or a session id for ongoing interaction.",
+    permissions: ["execute"],
+    create: createExecCommandTool,
+  },
+  {
+    name: "write_stdin",
+    label: "Write Stdin",
+    description: "Write input to, or poll output from, an ongoing exec_command session.",
+    permissions: ["execute"],
+    create: createWriteStdinTool,
   },
   {
     name: "shell",
@@ -343,6 +361,94 @@ function createApplyPatchTool(context: LocalToolContext): AgentTool {
   }
 }
 
+function createExecCommandTool(context: LocalToolContext): AgentTool {
+  const parameters = Type.Object({
+    cmd: Type.String(),
+    workdir: Type.Optional(Type.String()),
+    shell: Type.Optional(Type.String()),
+    yieldTimeMs: Type.Optional(Type.Number()),
+    yield_time_ms: Type.Optional(Type.Number()),
+    timeoutMs: Type.Optional(Type.Number()),
+    timeout_ms: Type.Optional(Type.Number()),
+    maxOutputBytes: Type.Optional(Type.Number()),
+    max_output_tokens: Type.Optional(Type.Number()),
+  })
+  return {
+    name: "exec_command",
+    label: "Exec Command",
+    description: "Run a shell command in the current project workspace. Returns a session id when the command is still running.",
+    parameters,
+    prepareArguments: (args) => {
+      const record = asRecord(args)
+      const maxOutputTokens = pickNumber(record, ["max_output_tokens", "maxOutputTokens"])
+      return {
+        cmd: pickRequiredString(record, ["cmd", "command"]),
+        workdir: pickString(record, ["workdir", "cwd"]),
+        shell: pickString(record, ["shell"]),
+        yieldTimeMs: pickNumber(record, ["yieldTimeMs", "yield_time_ms"]),
+        timeoutMs: pickNumber(record, ["timeoutMs", "timeout_ms", "timeout"]),
+        maxOutputBytes: pickNumber(record, ["maxOutputBytes", "max_output_bytes"]) ?? (maxOutputTokens === undefined ? undefined : maxOutputTokens * 4),
+      }
+    },
+    execute: async (_toolCallId, params, signal) => {
+      const input = params as { cmd: string; workdir?: string; shell?: string; yieldTimeMs?: number; timeoutMs?: number; maxOutputBytes?: number }
+      const cwd = await resolveCommandCwd(context.projectRoot, input.workdir)
+      const result = await context.execSessions.exec({
+        command: input.cmd,
+        cwd,
+        shell: input.shell,
+        signal,
+        yieldTimeMs: clampInteger(input.yieldTimeMs, 0, 30_000, 1_000),
+        timeoutMs: clampInteger(input.timeoutMs, 1_000, 900_000, context.commandTimeoutMs),
+        maxOutputBytes: clampInteger(input.maxOutputBytes, 1_000, 512_000, context.maxOutputBytes),
+      })
+      return textResult(formatExecSessionResult(result), { tool: "exec_command", ...result })
+    },
+    executionMode: "sequential",
+  }
+}
+
+function createWriteStdinTool(context: LocalToolContext): AgentTool {
+  const parameters = Type.Object({
+    sessionId: Type.Optional(Type.Number()),
+    session_id: Type.Optional(Type.Number()),
+    chars: Type.Optional(Type.String()),
+    yieldTimeMs: Type.Optional(Type.Number()),
+    yield_time_ms: Type.Optional(Type.Number()),
+    maxOutputBytes: Type.Optional(Type.Number()),
+    max_output_tokens: Type.Optional(Type.Number()),
+  })
+  return {
+    name: "write_stdin",
+    label: "Write Stdin",
+    description: "Write characters to an existing exec_command session, or poll it with empty chars.",
+    parameters,
+    prepareArguments: (args) => {
+      const record = asRecord(args)
+      const maxOutputTokens = pickNumber(record, ["max_output_tokens", "maxOutputTokens"])
+      return {
+        sessionId: pickNumber(record, ["sessionId", "session_id"]),
+        chars: pickString(record, ["chars", "input"]) ?? "",
+        yieldTimeMs: pickNumber(record, ["yieldTimeMs", "yield_time_ms"]),
+        maxOutputBytes: pickNumber(record, ["maxOutputBytes", "max_output_bytes"]) ?? (maxOutputTokens === undefined ? undefined : maxOutputTokens * 4),
+      }
+    },
+    execute: async (_toolCallId, params) => {
+      const input = params as { sessionId?: number; chars?: string; yieldTimeMs?: number; maxOutputBytes?: number }
+      const sessionId = input.sessionId
+      if (typeof sessionId !== "number" || !Number.isInteger(sessionId)) throw new Error("write_stdin requires a numeric sessionId")
+      const result = await context.execSessions.writeStdin({
+        sessionId,
+        chars: input.chars ?? "",
+        yieldTimeMs: clampInteger(input.yieldTimeMs, 0, 30_000, 1_000),
+        maxOutputBytes: clampInteger(input.maxOutputBytes, 1_000, 512_000, context.maxOutputBytes),
+      })
+      return textResult(formatExecSessionResult(result), { tool: "write_stdin", ...result })
+    },
+    executionMode: "sequential",
+  }
+}
+
 function createShellTool(context: LocalToolContext): AgentTool {
   const parameters = Type.Object({
     command: Type.String(),
@@ -520,6 +626,13 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+async function resolveCommandCwd(projectRoot: string, workdir: string | undefined): Promise<string> {
+  const target = workdir ? await resolveProjectPath(projectRoot, workdir) : await resolveProjectPath(projectRoot, ".")
+  const info = await stat(target.absolutePath)
+  if (!info.isDirectory()) throw new Error(`Command workdir is not a directory: ${target.relativePath}`)
+  return target.absolutePath
+}
+
 async function resolveProjectPath(projectRoot: string, inputPath: string, options: { allowMissing?: boolean } = {}) {
   if (!inputPath || inputPath.includes("\0")) throw new Error("Invalid project path")
   const rootReal = await realpath(projectRoot)
@@ -650,6 +763,213 @@ type ProcessResult = {
   timedOut: boolean
 }
 
+type ExecCommandRequest = {
+  command: string
+  cwd: string
+  shell?: string
+  signal?: AbortSignal
+  yieldTimeMs: number
+  timeoutMs: number
+  maxOutputBytes: number
+}
+
+type WriteStdinRequest = {
+  sessionId: number
+  chars: string
+  yieldTimeMs: number
+  maxOutputBytes: number
+}
+
+type ExecSessionResult = {
+  sessionId: number | null
+  running: boolean
+  command: string
+  cwd: string
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  timedOut: boolean
+  elapsedMs: number
+  output: string
+  truncated: boolean
+}
+
+type ExecSession = {
+  id: number
+  child: ChildProcessWithoutNullStreams
+  command: string
+  cwd: string
+  startedAt: number
+  lastActivityAt: number
+  maxOutputBytes: number
+  outputTail: Buffer
+  pendingOutput: Buffer
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  timedOut: boolean
+  closed: boolean
+  timeout: ReturnType<typeof setTimeout>
+}
+
+const MAX_EXEC_SESSIONS = 16
+const EXEC_SESSION_TTL_MS = 5 * 60_000
+
+class ExecSessionManager {
+  private nextId = 1
+  private sessions = new Map<number, ExecSession>()
+
+  async exec(request: ExecCommandRequest): Promise<ExecSessionResult> {
+    this.cleanup()
+    if (this.runningSessionCount() >= MAX_EXEC_SESSIONS) {
+      throw new Error(`Too many running exec_command sessions (${MAX_EXEC_SESSIONS}); poll or finish an existing session before starting another`)
+    }
+
+    const id = this.nextId++
+    const child = spawn(request.command, [], {
+      cwd: request.cwd,
+      env: process.env,
+      shell: request.shell ?? true,
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    const session: ExecSession = {
+      id,
+      child,
+      command: request.command,
+      cwd: request.cwd,
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+      maxOutputBytes: request.maxOutputBytes,
+      outputTail: Buffer.alloc(0),
+      pendingOutput: Buffer.alloc(0),
+      exitCode: null,
+      signal: null,
+      timedOut: false,
+      closed: false,
+      timeout: setTimeout(() => {
+        session.timedOut = true
+        this.terminate(session)
+      }, request.timeoutMs),
+    }
+    this.sessions.set(id, session)
+
+    child.stdout.on("data", (chunk: Buffer) => this.appendOutput(session, chunk))
+    child.stderr.on("data", (chunk: Buffer) => this.appendOutput(session, Buffer.concat([Buffer.from("[stderr] "), chunk])))
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      clearTimeout(session.timeout)
+      this.appendOutput(session, Buffer.from(`[error] ${error.message}\n`))
+      session.closed = true
+      session.lastActivityAt = Date.now()
+    })
+    child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      clearTimeout(session.timeout)
+      session.exitCode = exitCode
+      session.signal = signal
+      session.closed = true
+      session.lastActivityAt = Date.now()
+    })
+
+    const abort = () => {
+      session.timedOut = true
+      this.terminate(session)
+    }
+    request.signal?.addEventListener("abort", abort, { once: true })
+    await this.waitForSession(session, request.yieldTimeMs)
+    request.signal?.removeEventListener("abort", abort)
+
+    const result = this.snapshot(session, request.maxOutputBytes)
+    if (session.closed) this.sessions.delete(session.id)
+    return result
+  }
+
+  async writeStdin(request: WriteStdinRequest): Promise<ExecSessionResult> {
+    this.cleanup()
+    const session = this.sessions.get(request.sessionId)
+    if (!session) throw new Error(`Unknown exec_command session: ${request.sessionId}`)
+    session.lastActivityAt = Date.now()
+
+    if (request.chars.length > 0) {
+      if (session.closed || session.child.stdin.destroyed || !session.child.stdin.writable) {
+        throw new Error(`exec_command session ${request.sessionId} is not writable`)
+      }
+      await new Promise<void>((resolvePromise, reject) => {
+        session.child.stdin.write(request.chars, (error) => {
+          if (error) reject(error)
+          else resolvePromise()
+        })
+      })
+    }
+
+    await this.waitForSession(session, request.yieldTimeMs)
+    const result = this.snapshot(session, request.maxOutputBytes)
+    if (session.closed) this.sessions.delete(session.id)
+    return result
+  }
+
+  private runningSessionCount(): number {
+    let count = 0
+    for (const session of this.sessions.values()) {
+      if (!session.closed) count++
+    }
+    return count
+  }
+
+  private cleanup() {
+    const now = Date.now()
+    for (const [id, session] of this.sessions) {
+      if (session.closed && now - session.lastActivityAt > EXEC_SESSION_TTL_MS) {
+        this.sessions.delete(id)
+      }
+    }
+  }
+
+  private appendOutput(session: ExecSession, chunk: Buffer) {
+    session.outputTail = appendBoundedBuffer(session.outputTail, chunk, session.maxOutputBytes)
+    session.pendingOutput = appendBoundedBuffer(session.pendingOutput, chunk, session.maxOutputBytes)
+    session.lastActivityAt = Date.now()
+  }
+
+  private async waitForSession(session: ExecSession, yieldTimeMs: number): Promise<void> {
+    if (session.closed) return
+    await new Promise<void>((resolvePromise) => {
+      const onDone = () => {
+        clearTimeout(timer)
+        session.child.off("close", onDone)
+        session.child.off("error", onDone)
+        resolvePromise()
+      }
+      const timer = setTimeout(onDone, yieldTimeMs)
+      session.child.once("close", onDone)
+      session.child.once("error", onDone)
+    })
+  }
+
+  private snapshot(session: ExecSession, maxOutputBytes: number): ExecSessionResult {
+    const output = tailBuffer(session.pendingOutput, maxOutputBytes)
+    const truncated = session.pendingOutput.byteLength > output.byteLength
+    session.pendingOutput = Buffer.alloc(0)
+    return {
+      sessionId: session.closed ? null : session.id,
+      running: !session.closed,
+      command: session.command,
+      cwd: session.cwd,
+      exitCode: session.exitCode,
+      signal: session.signal,
+      timedOut: session.timedOut,
+      elapsedMs: Date.now() - session.startedAt,
+      output: output.toString("utf8"),
+      truncated,
+    }
+  }
+
+  private terminate(session: ExecSession) {
+    try { session.child.kill("SIGTERM") } catch { /* ignore */ }
+    setTimeout(() => {
+      if (!session.closed) {
+        try { session.child.kill("SIGKILL") } catch { /* ignore */ }
+      }
+    }, 1_000)
+  }
+}
+
 async function runProcess(
   command: string,
   args: string[],
@@ -728,11 +1048,37 @@ async function runProcess(
   })
 }
 
+function appendBoundedBuffer(current: Buffer, chunk: Buffer, maxBytes: number): Buffer {
+  const next = Buffer.concat([current, chunk])
+  return tailBuffer(next, maxBytes)
+}
+
+function tailBuffer(buffer: Buffer, maxBytes: number): Buffer {
+  return buffer.byteLength > maxBytes ? buffer.subarray(buffer.byteLength - maxBytes) : buffer
+}
+
 function formatProcessResult(result: ProcessResult): string {
   const commandLine = result.args.length > 0 ? `${result.command} ${result.args.join(" ")}` : result.command
   const parts = [`$ ${commandLine}`, `exit: ${result.exitCode}${result.signal ? ` signal=${result.signal}` : ""}${result.timedOut ? " timed out" : ""}`]
   if (result.stdout.trim()) parts.push(`stdout:\n${result.stdout.trimEnd()}`)
   if (result.stderr.trim()) parts.push(`stderr:\n${result.stderr.trimEnd()}`)
+  return parts.join("\n")
+}
+
+function formatExecSessionResult(result: ExecSessionResult): string {
+  const status = result.running
+    ? `running session=${result.sessionId}`
+    : `completed exit=${result.exitCode}${result.signal ? ` signal=${result.signal}` : ""}`
+  const parts = [
+    `$ ${result.command}`,
+    `status: ${status}${result.timedOut ? " timed out" : ""}`,
+    `elapsed: ${result.elapsedMs}ms`,
+  ]
+  if (result.output.trim()) {
+    parts.push(`${result.truncated ? "output (truncated):" : "output:"}\n${result.output.trimEnd()}`)
+  } else {
+    parts.push("(no new output)")
+  }
   return parts.join("\n")
 }
 

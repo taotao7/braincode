@@ -25,6 +25,8 @@ test("default tool configuration enables the first-party local coding toolset", 
   expect(byName.get("edit_file")?.enabled).toBe(true)
   expect(byName.get("edit_file")?.approvalPolicy).toBe("confirm-dangerous")
   expect(byName.get("apply_patch")?.enabled).toBe(true)
+  expect(byName.get("exec_command")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(byName.get("write_stdin")?.approvalPolicy).toBe("confirm-dangerous")
   expect(byName.get("shell")?.approvalPolicy).toBe("confirm-dangerous")
   expect(byName.get("git_diff")?.enabled).toBe(true)
   expect(byName.get("get_changed_files")?.enabled).toBe(true)
@@ -135,6 +137,8 @@ test("local tool prepareArguments normalizes aliases and primitive coercions", a
     expect(getTool("search_files", projectRoot).prepareArguments?.({ text: "needle", mode: "path", limit: "5" })).toEqual({ query: "needle", mode: "path", glob: undefined, maxResults: 5 })
     expect(getTool("edit_file", projectRoot).prepareArguments?.({ file: "a.txt", old: "x", new: "y", replace_all: "true" })).toEqual({ path: "a.txt", content: undefined, oldString: "x", newString: "y", replaceAll: true })
     expect(getTool("apply_patch", projectRoot).prepareArguments?.({ diff: "patch" })).toEqual({ patch: "patch" })
+    expect(getTool("exec_command", projectRoot).prepareArguments?.({ command: "echo hi", yield_time_ms: "25", max_output_tokens: "10" })).toEqual({ cmd: "echo hi", workdir: undefined, shell: undefined, yieldTimeMs: 25, timeoutMs: undefined, maxOutputBytes: 40 })
+    expect(getTool("write_stdin", projectRoot).prepareArguments?.({ session_id: "2", input: "x", yield_time_ms: "25" })).toEqual({ sessionId: 2, chars: "x", yieldTimeMs: 25, maxOutputBytes: undefined })
     expect(getTool("shell", projectRoot).prepareArguments?.({ cmd: "echo hi", timeout: "1000" })).toEqual({ command: "echo hi", timeoutMs: 1000 })
     expect(getTool("git_diff", projectRoot).prepareArguments?.({ file: "a.txt", cached: "false", summary: true })).toEqual({ path: "a.txt", staged: false, stat: true })
     expect(getTool("get_changed_files", projectRoot).prepareArguments?.({ ignored: true })).toEqual({})
@@ -328,6 +332,38 @@ test("shell and run_script return process results without throwing on nonzero ex
     expect(textContent(shellResult)).toContain("exit: 7")
     expect(textContent(scriptResult)).toContain("bun run echoargs a b")
     expect(textContent(scriptResult)).toContain("stdout:\nb")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("exec_command returns a session id for long commands and write_stdin polls completion", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-exec-session-test-"))
+  try {
+    const tools = createLocalCodingTools({ projectRoot })
+    const execCommand = tools.find((tool) => tool.name === "exec_command")
+    const writeStdin = tools.find((tool) => tool.name === "write_stdin")
+    if (!execCommand || !writeStdin) throw new Error("Missing exec session tools")
+
+    const startResult = await execCommand.execute("exec-1", {
+      cmd: "bun -e \"console.log('start'); setTimeout(() => console.log('done'), 120)\"",
+      yieldTimeMs: 20,
+      timeoutMs: 2000,
+    } as never)
+    const sessionId = (startResult.details as { sessionId?: number | null }).sessionId
+
+    expect(typeof sessionId).toBe("number")
+    expect(textContent(startResult)).toContain("running session=")
+
+    const pollResult = await writeStdin.execute("stdin-1", {
+      sessionId,
+      chars: "",
+      yieldTimeMs: 1000,
+    } as never)
+
+    expect(textContent(pollResult)).toContain("completed exit=0")
+    expect(textContent(pollResult)).toContain("done")
+    expect((pollResult.details as { running?: boolean }).running).toBe(false)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

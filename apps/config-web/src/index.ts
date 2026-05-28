@@ -311,7 +311,7 @@ export const configWebHtml = `<!doctype html>
                 <div class="field"><label for="manual-name" data-i18n="modelName">Name</label><input id="manual-name" autocomplete="off" placeholder="Claude Sonnet 4.5" /></div>
                 <div class="field"><label for="manual-base-url" data-i18n="baseUrl">Base URL</label><input id="manual-base-url" autocomplete="off" placeholder="https://openrouter.ai/api/v1" /></div>
                 <div class="field"><label for="manual-api-key" data-i18n="apiKey">API key</label><input id="manual-api-key" type="password" autocomplete="off" placeholder="Optional token saved for this provider" /></div>
-                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai-responses">openai-responses</option><option value="openai-completions">openai-completions</option><option value="openai-codex-responses">openai-codex-responses</option><option value="azure-openai-responses">azure-openai-responses</option><option value="anthropic-messages">anthropic-messages</option><option value="google-generative-ai">google-generative-ai</option></select></div>
+                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai">openai</option><option value="anthropic">anthropic</option></select></div>
                 <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
                 <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
                 <div class="field checkbox-field"><label for="manual-vision"><input id="manual-vision" type="checkbox" checked /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
@@ -423,7 +423,7 @@ export const configWebHtml = `<!doctype html>
 
       const roles = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
-      const apiTypes = ["openai-responses", "openai-completions", "openai-codex-responses", "azure-openai-responses", "anthropic-messages", "google-generative-ai"]
+      const apiTypes = ["openai", "anthropic"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
       const status = document.querySelector("#status")
@@ -595,23 +595,26 @@ export const configWebHtml = `<!doctype html>
         return model ? { ...model, supportsVision: catalogVisionInput.checked } : undefined
       }
 
-      function isOpenAICompatibleApi(apiType) {
-        return ["openai-responses", "openai-completions", "openai-codex-responses", "azure-openai-responses"].includes(normalizeApiType(apiType))
+      function apiChoice(value) {
+        const normalized = String(value || "").trim()
+        return normalized === "anthropic" || normalized === "anthropic-messages" ? "anthropic" : "openai"
       }
 
-      function normalizeBaseUrl(value, apiType = "openai-responses") {
+      function isOpenAICompatibleApi(apiType) {
+        return normalizeApiType(apiType) === "openai-completions"
+      }
+
+      function normalizeBaseUrl(value, apiType = "openai") {
         const trimmed = value.trim().replace(new RegExp("/+$"), "")
         if (!trimmed) return ""
         const api = normalizeApiType(apiType)
         if (api === "anthropic-messages") return trimmed.endsWith("/v1") ? trimmed.slice(0, -3) : trimmed
-        if (api === "google-generative-ai") return trimmed
         return isOpenAICompatibleApi(api) ? (trimmed.endsWith("/v1") ? trimmed : trimmed + "/v1") : trimmed
       }
 
       function normalizeApiType(value) {
-        if (value === "anthropic") return "anthropic-messages"
-        if (value === "google") return "google-generative-ai"
-        return value || "openai-responses"
+        if (apiChoice(value) === "anthropic") return "anthropic-messages"
+        return "openai-completions"
       }
 
       function manualModelFromForm() {
@@ -673,7 +676,7 @@ export const configWebHtml = `<!doctype html>
       function makeSelectInput(values, value) {
         const select = document.createElement("select")
         select.replaceChildren(...values.map((entry) => option(entry, entry)))
-        const normalized = normalizeApiType(value)
+        const normalized = values === apiTypes ? apiChoice(value) : value
         select.value = values.includes(normalized) ? normalized : values[0]
         return select
       }
@@ -756,7 +759,7 @@ export const configWebHtml = `<!doctype html>
           name: makeTextInput(model.name || model.modelId),
           baseUrl: makeTextInput(model.baseUrl || ""),
           apiKey: makeTextInput(""),
-          api: makeSelectInput(apiTypes, model.api || "openai-responses"),
+          api: makeSelectInput(apiTypes, model.api || "openai"),
           contextWindow: makeNumberInput(model.contextWindow),
           thinking: makeSelectInput(thinkingLevels, model.defaultThinkingLevel || "medium"),
         }

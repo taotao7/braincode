@@ -84,7 +84,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
 - Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
-- First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, git diffs, changed-file inspection, and package scripts.
+- First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, long-running exec sessions with stdin polling, git diffs, changed-file inspection, and package scripts.
 - Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.
 - Tool-call evidence cache for repeated deterministic read-only local tool calls, with duplicate reminders and cache invalidation after write/execute tools.
 - Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.

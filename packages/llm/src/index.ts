@@ -164,7 +164,7 @@ export function toOpenAICompatibleBraincodeModel(input: { provider: string; base
     provider: input.provider,
     modelId: input.modelId,
     name: input.name || input.modelId,
-    api: "openai-responses",
+    api: "openai-completions",
     baseUrl: normalizeOpenAICompatibleBaseUrl(input.baseUrl),
     contextWindow: 128000,
     supportsTools: true,
@@ -205,7 +205,7 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
     }
     const text = typeof result === "string" ? result : extractCompletionText(result)
     if (!text.trim()) {
-      throw new Error("Model generation test returned an empty response: provider returned no visible text content. Check the model API type; for OpenAI-compatible proxies try openai-completions vs openai-responses, and for reasoning models try a lower/off thinking level.")
+      throw new Error("Model generation test returned an empty response: provider returned no visible text content. Check the model API type; for custom proxies use openai for /v1/chat/completions-compatible endpoints or anthropic for Anthropic Messages-compatible endpoints, and for reasoning models try a lower/off thinking level.")
     }
     return connectionSuccess(model, thinkingLevel)
   } catch (error) {
@@ -297,7 +297,7 @@ function providerStaticHeaders(provider: string): Record<string, string> | undef
 
 function defaultApiForProvider(provider: string): Api {
   if (provider === "kimi-coding") return "anthropic-messages"
-  return "openai-responses"
+  return "openai-completions"
 }
 
 function mergeModelHeaders(...headers: Array<Record<string, string> | undefined>): Record<string, string> | undefined {

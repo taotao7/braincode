@@ -160,7 +160,7 @@ const localWriteToolNames = new Set([
 ])
 
 function isExecuteToolName(toolName: string): boolean {
-  return /(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/i.test(toolName)
+  return /(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script|write_stdin)/i.test(toolName)
 }
 
 async function runBenchmark(args: string[]) {

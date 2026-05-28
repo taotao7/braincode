@@ -216,6 +216,8 @@ test("default tool configuration enables local coding tools with approval for wr
     "search_files",
     "edit_file",
     "apply_patch",
+    "exec_command",
+    "write_stdin",
     "shell",
     "git_diff",
     "get_changed_files",
@@ -227,6 +229,8 @@ test("default tool configuration enables local coding tools with approval for wr
   expect(tools.tools.find((tool) => tool.name === "edit_file")?.enabled).toBe(true)
   expect(tools.tools.find((tool) => tool.name === "edit_file")?.approvalPolicy).toBe("confirm-dangerous")
   expect(tools.tools.find((tool) => tool.name === "apply_patch")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(tools.tools.find((tool) => tool.name === "exec_command")?.approvalPolicy).toBe("confirm-dangerous")
+  expect(tools.tools.find((tool) => tool.name === "write_stdin")?.approvalPolicy).toBe("confirm-dangerous")
   expect(tools.tools.find((tool) => tool.name === "shell")?.approvalPolicy).toBe("confirm-dangerous")
   expect(tools.tools.find((tool) => tool.name === "git_diff")?.approvalPolicy).toBe("allow")
   expect(tools.tools.find((tool) => tool.name === "get_changed_files")?.approvalPolicy).toBe("allow")
