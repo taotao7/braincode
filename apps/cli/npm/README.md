@@ -12,7 +12,7 @@ A `postinstall` step downloads the platform-specific binary from the matching Gi
 
 ## Release
 
-`0.2.3` ships Config Web UI tabs and usage charts, subscription-backed model selection, TUI live status animation, tighter transcript folding, concise tool rows, and handoff prompts for provider message-size limits. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
+`0.2.4` reduces excessive `read_file` paging on large files by automatically expanding tiny read windows and returning the next offset in tool metadata. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
 
 ## Usage
 

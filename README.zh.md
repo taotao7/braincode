@@ -67,6 +67,10 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 ## 发布记录
 
+### v0.2.4
+
+- `read_file` 现在会在大文件遇到过小 `limit` 时自动扩大读取窗口，并返回结构化 `nextOffset` metadata，减少一页一页碎片读取导致 transcript 和 provider context 爆炸的问题。
+
 ### v0.2.3
 
 - Config Web UI 改为多 tab 管理，模型 tab 放在最前；usage tab 展示按模型、role、运行阶段聚合的 token 统计，并加入 Recharts 图表和点击详情过滤。

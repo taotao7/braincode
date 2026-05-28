@@ -297,6 +297,27 @@ test("read_file truncates large text and rejects binary content", async () => {
   }
 })
 
+test("read_file expands tiny windows for large files", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-window-test-"))
+  try {
+    await Bun.write(join(projectRoot, "large.txt"), "0123456789".repeat(5000))
+    const readFile = createLocalCodingTools({ projectRoot, maxReadBytes: 40_000 }).find((tool) => tool.name === "read_file")
+    if (!readFile) throw new Error("Missing read_file")
+
+    const result = await readFile.execute("read-large-window", { path: "large.txt", offset: 1000, limit: 1200 } as never)
+    const details = result.details as { chars: number; limit: number; nextOffset: number; limitExpanded: boolean }
+
+    expect(textContent(result)).toContain("requested limit 1200 expanded to 32000")
+    expect(textContent(result)).toContain("next offset 33000")
+    expect(details.chars).toBe(32_000)
+    expect(details.limit).toBe(32_000)
+    expect(details.nextOffset).toBe(33_000)
+    expect(details.limitExpanded).toBe(true)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("edit_file writes new files and replaces all matches", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-write-test-"))
   try {

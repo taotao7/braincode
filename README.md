@@ -72,6 +72,10 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Release Notes
 
+### v0.2.4
+
+- `read_file` now automatically expands tiny `limit` windows for large files and returns structured `nextOffset` metadata, reducing runaway page-by-page reads that bloat the transcript and provider context.
+
 ### v0.2.3
 
 - Config Web UI is organized into tabs with the Models tab first. The usage tab shows token statistics by model, role, and runtime phase, including Recharts charts and click-through detail filters.

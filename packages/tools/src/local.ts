@@ -60,6 +60,8 @@ export type LocalCodingToolName = (typeof localCodingToolNames)[number]
 const DEFAULT_MAX_READ_BYTES = 128_000
 const DEFAULT_MAX_OUTPUT_BYTES = 96_000
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
+const LARGE_FILE_READ_THRESHOLD_CHARS = 24_000
+const MIN_LARGE_FILE_READ_CHARS = 32_000
 const ALL_EXIT_CODES = Array.from({ length: 256 }, (_, code) => code)
 
 export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTool[] {
@@ -201,7 +203,7 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
   return {
     name: "read_file",
     label: "Read File",
-    description: "Read a UTF-8 text file inside the current project workspace.",
+    description: "Read a UTF-8 text file inside the current project workspace. Prefer search_files for locating symbols in large files; very small limits are automatically expanded for large files to avoid excessive paging.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
@@ -214,13 +216,33 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
     execute: async (_toolCallId, params) => {
       const input = params as { path: string; offset?: number; limit?: number }
       const target = await resolveProjectPath(context.projectRoot, input.path)
-      const content = await readTextFile(target.absolutePath, context.maxReadBytes)
+      const content = await readCompleteUtf8TextFile(target.absolutePath)
       const offset = clampInteger(input.offset, 0, content.length, 0)
-      const limit = clampInteger(input.limit, 1, context.maxReadBytes, context.maxReadBytes)
-      const slice = content.slice(offset, offset + limit)
-      const truncated = offset + limit < content.length
-      const header = `# ${target.relativePath}${truncated ? ` (truncated at ${offset + limit}/${content.length} chars)` : ""}`
-      return textResult(`${header}\n${slice}`, { tool: "read_file", path: target.relativePath, chars: slice.length, truncated })
+      const { limit, requestedLimit, expanded } = readFileWindowLimit(input.limit, content.length, context.maxReadBytes)
+      const end = Math.min(content.length, offset + limit)
+      const slice = content.slice(offset, end)
+      const truncated = end < content.length
+      const header = `# ${target.relativePath}${formatReadFileWindowHeader({
+        offset,
+        end,
+        total: content.length,
+        requestedLimit,
+        limit,
+        expanded,
+        truncated,
+      })}`
+      return textResult(`${header}\n${slice}`, {
+        tool: "read_file",
+        path: target.relativePath,
+        chars: slice.length,
+        totalChars: content.length,
+        offset,
+        limit,
+        requestedLimit,
+        limitExpanded: expanded,
+        nextOffset: truncated ? end : undefined,
+        truncated,
+      })
     },
   }
 }
@@ -686,6 +708,14 @@ async function readTextFile(path: string, maxBytes: number): Promise<string> {
   return slice.toString("utf8")
 }
 
+async function readCompleteUtf8TextFile(path: string): Promise<string> {
+  const info = await stat(path)
+  if (!info.isFile()) throw new Error(`Not a file: ${path}`)
+  const bytes = await readFile(path)
+  if (bytes.includes(0)) throw new Error(`File appears to be binary: ${path}`)
+  return bytes.toString("utf8")
+}
+
 async function readCompleteTextFile(path: string, maxBytes: number): Promise<string> {
   const info = await stat(path)
   if (!info.isFile()) throw new Error(`Not a file: ${path}`)
@@ -695,6 +725,42 @@ async function readCompleteTextFile(path: string, maxBytes: number): Promise<str
   const bytes = await readFile(path)
   if (bytes.includes(0)) throw new Error(`File appears to be binary: ${path}`)
   return bytes.toString("utf8")
+}
+
+function readFileWindowLimit(inputLimit: number | undefined, totalChars: number, maxReadBytes: number): { limit: number; requestedLimit: number; expanded: boolean } {
+  const requestedLimit = clampInteger(inputLimit, 1, maxReadBytes, maxReadBytes)
+  const minimumLargeFileLimit = Math.min(maxReadBytes, MIN_LARGE_FILE_READ_CHARS)
+  if (
+    inputLimit !== undefined &&
+    totalChars >= LARGE_FILE_READ_THRESHOLD_CHARS &&
+    requestedLimit < minimumLargeFileLimit
+  ) {
+    return { limit: minimumLargeFileLimit, requestedLimit, expanded: minimumLargeFileLimit > requestedLimit }
+  }
+  return { limit: requestedLimit, requestedLimit, expanded: false }
+}
+
+function formatReadFileWindowHeader(input: {
+  offset: number
+  end: number
+  total: number
+  requestedLimit: number
+  limit: number
+  expanded: boolean
+  truncated: boolean
+}): string {
+  const parts: string[] = []
+  if (input.offset > 0 || input.end < input.total) {
+    parts.push(`chars ${input.offset}-${input.end}/${input.total}`)
+  }
+  if (input.truncated) {
+    parts.push(`truncated at ${input.end}/${input.total} chars`)
+    parts.push(`next offset ${input.end}`)
+  }
+  if (input.expanded) {
+    parts.push(`requested limit ${input.requestedLimit} expanded to ${input.limit}`)
+  }
+  return parts.length > 0 ? ` (${parts.join("; ")})` : ""
 }
 
 async function listProjectFiles(context: LocalToolContext, directory: string, glob: string | undefined, maxFiles: number): Promise<string[]> {

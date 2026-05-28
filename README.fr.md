@@ -62,6 +62,10 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 
 ## Notes de version
 
+### v0.2.4
+
+- `read_file` élargit maintenant automatiquement les fenêtres `limit` trop petites sur les gros fichiers et renvoie un `nextOffset` structuré, ce qui réduit les lectures page par page qui gonflent le transcript et le contexte provider.
+
 ### v0.2.3
 
 - L'interface Config Web est organisée en onglets, avec Models en premier. L'onglet usage affiche les statistiques de tokens par modèle, rôle et phase d'exécution, avec graphiques Recharts et filtres de détail au clic.
