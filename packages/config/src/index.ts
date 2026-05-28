@@ -15,10 +15,12 @@ import {
 } from "@braincode/tools";
 
 export type BraincodeMode = "auto" | "radical";
+export type BraincodeTheme = "dark" | "light";
 
 export type BraincodeSettings = {
   version: 1;
   mode: BraincodeMode;
+  theme: BraincodeTheme;
   configServer: {
     host: string;
     port: number;
@@ -186,6 +188,7 @@ export type BraincodePaths = {
 export const defaultSettings: BraincodeSettings = {
   version: 1,
   mode: "auto",
+  theme: "dark",
   configServer: {
     host: DEFAULT_CONFIG_HOST,
     port: DEFAULT_CONFIG_PORT,
@@ -1183,6 +1186,9 @@ function assertSettings(value: BraincodeSettings) {
   if (value.mode !== "auto" && value.mode !== "radical") {
     throw new Error("settings.mode must be either auto or radical");
   }
+  if (value.theme !== "dark" && value.theme !== "light") {
+    throw new Error("settings.theme must be either dark or light");
+  }
   if (!value.configServer || typeof value.configServer.host !== "string") {
     throw new Error("settings.configServer.host must be a string");
   }
@@ -1228,6 +1234,7 @@ function normalizeSettings(
   return {
     ...defaultSettings,
     ...value,
+    theme: normalizeBraincodeTheme(value.theme),
     configServer: {
       ...defaultSettings.configServer,
       ...value.configServer,
@@ -1237,6 +1244,10 @@ function normalizeSettings(
       ...value.features,
     },
   };
+}
+
+export function normalizeBraincodeTheme(value: unknown): BraincodeTheme {
+  return value === "light" ? "light" : "dark";
 }
 
 async function ensureJsonFile(path: string, value: unknown, mode?: number) {

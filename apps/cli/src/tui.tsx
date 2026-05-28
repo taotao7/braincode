@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react"
 import { Box, render, Text, useApp, useInput, useStdout } from "ink"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative } from "node:path"
 import { ensureSessionHandoff, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, type AgentEvent, type RuntimePlan, type TodoLifecycleEvent, type ToolApprovalDecision, type ToolApprovalRequest, type WorkerLifecycleEvent } from "@braincode/agent-runtime"
-import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
+import { extractMcpServerEntries, listSessions, readBrains, readHookSources, readProjectSupport, readSettings, readTools, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeSettings, type BraincodeMode, type BraincodeTheme, type BraincodeTools, type HookEventName, type HookHandler, type HookSource, type McpServerEntry, type ProjectSupport, type SessionSummary, type UserSupport } from "@braincode/config"
 import type { BrainModel } from "@braincode/brain"
 import { readClipboardImageOrText } from "./clipboard"
 import { checkMcpHealth, type McpHealthResult } from "./mcp-health"
@@ -78,6 +78,7 @@ const COMMANDS: CommandDefinition[] = [
   { name: "handoff", label: "/handoff", hint: "Fork a new session (or pass <session-id> to summarize another)", insert: "/handoff " },
   { name: "brain", label: "/brain", hint: "View Brain catalog and switch default brain" },
   { name: "mode", label: "/mode", hint: "View or switch execution mode: auto/radical", insert: "/mode " },
+  { name: "theme", label: "/theme", hint: "View or switch theme: dark/light", insert: "/theme " },
   { name: "auto", label: "/auto", hint: "Switch execution mode to auto" },
   { name: "radical", label: "/radical", hint: "Switch execution mode to radical" },
   { name: "team-test", label: "/team-test", hint: "Diagnostic: force every role to run the prompt in parallel", insert: "/team-test " },
@@ -203,6 +204,70 @@ const INPUT_PROMPT_PREFIX = "› "
 const INPUT_RESERVED_COLUMNS = 4 // "› " prefix + cursor + a little padding
 const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const
 
+type UiColor = "blue" | "cyan" | "green" | "yellow" | "magenta" | "red" | "gray"
+
+type TuiTheme = {
+  name: BraincodeTheme
+  label: string
+  colors: Record<UiColor, string> & {
+    text: string
+    muted: string
+    border: string
+    focusedBorder: string
+  }
+}
+
+const TUI_THEMES: Record<BraincodeTheme, TuiTheme> = {
+  dark: {
+    name: "dark",
+    label: "Analog Dream: Magnetic Night",
+    colors: {
+      text: "#d4d4d4",
+      muted: "#8a8f96",
+      border: "#3a3f45",
+      focusedBorder: "#ffb86c",
+      blue: "#8be9fd",
+      cyan: "#8be9fd",
+      green: "#50fa7b",
+      yellow: "#ffb86c",
+      magenta: "#bd93f9",
+      red: "#ff5555",
+      gray: "#8a8f96",
+    },
+  },
+  light: {
+    name: "light",
+    label: "Analog Dream: Beige Terminal",
+    colors: {
+      text: "#2d2a27",
+      muted: "#6b6560",
+      border: "#c4b8a8",
+      focusedBorder: "#d65d0e",
+      blue: "#076678",
+      cyan: "#458588",
+      green: "#79740e",
+      yellow: "#d65d0e",
+      magenta: "#b16286",
+      red: "#9d0006",
+      gray: "#6b6560",
+    },
+  },
+}
+
+const TuiThemeContext = React.createContext<TuiTheme>(TUI_THEMES.dark)
+
+function useTuiTheme(): TuiTheme {
+  return useContext(TuiThemeContext)
+}
+
+function isBraincodeTheme(value: string): value is BraincodeTheme {
+  return value === "dark" || value === "light"
+}
+
+function tone(theme: TuiTheme, color: UiColor): string {
+  return theme.colors[color]
+}
+
 const BRAIN_LOGO: ReadonlyArray<string> = [
   "   ██████╗ ██████╗  █████╗ ██╗███╗   ██╗",
   "   ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║",
@@ -250,6 +315,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [running, setRunning] = useState(false)
   const [items, setItems] = useState<TranscriptItem[]>([])
   const [mode, setMode] = useState<BraincodeMode>("auto")
+  const [themeName, setThemeName] = useState<BraincodeTheme>("dark")
   const [projectSupport, setProjectSupport] = useState<ProjectSupport | null>(null)
   const [userSupport, setUserSupport] = useState<UserSupport | null>(null)
   const [projectFiles, setProjectFiles] = useState<string[]>([])
@@ -327,6 +393,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       try {
         const settings = await readSettings()
         setMode(settings.mode)
+        setThemeName(settings.theme)
       } catch (error) {
         appendItem({ kind: "error", text: `Failed to read settings: ${formatError(error)}` })
       }
@@ -500,6 +567,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true
       case "mode":
         void switchMode(argument)
+        return true
+      case "theme":
+        void switchTheme(argument)
         return true
       case "auto":
         void switchMode("auto")
@@ -991,6 +1061,33 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       flash(`Mode → ${next}`)
     } catch (error) {
       appendItem({ kind: "error", text: `Mode switch failed: ${formatError(error)}` })
+    }
+  }
+
+  async function switchTheme(argument: string) {
+    const next = argument.trim().toLowerCase()
+    if (!next) {
+      appendItem({ kind: "panel", text: `Theme: ${themeName}\nUse /theme dark or /theme light to switch. The terminal background stays transparent.` })
+      return
+    }
+    if (!isBraincodeTheme(next)) {
+      appendItem({ kind: "error", text: "Usage: /theme dark|light" })
+      return
+    }
+    try {
+      const current = await readSettings()
+      if (current.theme === next) {
+        setThemeName(next)
+        flash(`Theme already ${next}`)
+        appendItem({ kind: "status", text: `Theme remains ${next}.` })
+        return
+      }
+      await writeSettings({ ...current, theme: next })
+      setThemeName(next)
+      appendItem({ kind: "status", text: `Theme → ${next}. Background remains transparent.` })
+      flash(`Theme → ${next}`)
+    } catch (error) {
+      appendItem({ kind: "error", text: `Theme switch failed: ${formatError(error)}` })
     }
   }
 
@@ -2021,14 +2118,17 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     : "loading…"
   const userSummary = userSupport ? `mcp ${userMcpCount} · skills ${userSkillCount}` : "loading…"
   const draftWindow = clipDraftToWindow(draft, cursor, inputWidth, INPUT_MAX_LINES)
+  const tuiTheme = TUI_THEMES[themeName]
+  const colors = tuiTheme.colors
 
   return (
+    <TuiThemeContext.Provider value={tuiTheme}>
     <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+      <Box borderStyle="round" borderColor={colors.focusedBorder} paddingX={1} marginBottom={1}>
         <Box flexDirection="row" alignItems="center">
           <Box flexDirection="column" marginRight={1}>
             <Text><Badge label="BRAIN / CODE" backgroundColor="cyan" /></Text>
-            <Text><Badge label={mode.toUpperCase().padEnd(12)} backgroundColor={mode === "radical" ? "magenta" : "green"} /></Text>
+            <Text><Badge label={`${mode.toUpperCase()} / ${themeName.toUpperCase()}`.padEnd(12)} backgroundColor={mode === "radical" ? "magenta" : "green"} /></Text>
           </Box>
 
           <HeaderSeparator />
@@ -2048,7 +2148,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           <HeaderSeparator />
 
           <Box marginLeft={2}>
-            <BrainPet thinking={running} status={petState.status} lines={petState.lines} />
+            <BrainPet thinking={running} status={petState.status} lines={petState.lines} activeColor={colors.magenta} activeStatusColor={colors.yellow} idleColor={colors.gray} />
           </Box>
         </Box>
       </Box>
@@ -2056,10 +2156,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       {items.length === 0 ? (
         <Box flexDirection="column" alignItems="center" marginY={1}>
           {BRAIN_LOGO.map((line, index) => (
-            <Text key={`logo-${index}`} color="cyan" bold>{line}</Text>
+            <Text key={`logo-${index}`} color={colors.cyan} bold>{line}</Text>
           ))}
           <Box marginTop={1}>
-            <Text color="gray">type a prompt to begin · / for commands · @ for files · @@ for sessions</Text>
+            <Text color={colors.gray}>type a prompt to begin · / for commands · @ for files · @@ for sessions</Text>
           </Box>
         </Box>
       ) : (
@@ -2071,14 +2171,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
               <TranscriptLine item={item} width={contentWidth} />
               {item.plan ? (
                 <>
-                  <Text color="gray">{formatPlanMetadataLine(item.plan)}</Text>
-                  {item.plan.routing.reason ? <Text color="gray">reason: {truncate(cleanInline(item.plan.routing.reason), 140)}</Text> : null}
+                  <Text color={colors.gray}>{formatPlanMetadataLine(item.plan)}</Text>
+                  {item.plan.routing.reason ? <Text color={colors.gray}>reason: {truncate(cleanInline(item.plan.routing.reason), 140)}</Text> : null}
                 </>
               ) : null}
               {item.plan?.todos.length ? (
                 <Box flexDirection="column" marginLeft={2}>
                   {item.plan.todos.map((todo) => (
-                    <Text key={todo.id} color={todo.status === "completed" ? "green" : todo.status === "failed" || todo.status === "blocked" ? "red" : todo.status === "running" ? "yellow" : "gray"}>
+                    <Text key={todo.id} color={tone(tuiTheme, todo.status === "completed" ? "green" : todo.status === "failed" || todo.status === "blocked" ? "red" : todo.status === "running" ? "yellow" : "gray")}>
                       {todoGlyph(todo.status)} {todo.role} · {todo.title}
                     </Text>
                   ))}
@@ -2091,183 +2191,184 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       )}
 
       {brainPanel ? (
-        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="cyan" bold>Brains</Text>
+        <Box borderStyle="round" borderColor={colors.cyan} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.cyan} bold>Brains</Text>
           {brainPanel.brains.map((brain, index) => (
             <Box key={brain.id} flexDirection="column">
-              <Text color={index === brainPanel.selected ? "green" : undefined}>
+              <Text color={index === brainPanel.selected ? colors.green : undefined}>
                 {index === brainPanel.selected ? "›" : " "} {brain.id === brainPanel.defaultBrainId ? "★" : " "} {brain.id} · planner={brain.planner.modelId} · frontend={brain.roles.frontend.modelId}
               </Text>
-              <Text color="gray">    {truncate(brain.description ?? "", 120)}</Text>
+              <Text color={colors.gray}>    {truncate(brain.description ?? "", 120)}</Text>
             </Box>
           ))}
-          {brainPanel.message ? <Text color="cyan">{brainPanel.message}</Text> : null}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Enter/s set as default · v show roles · Esc close</Text>
+          {brainPanel.message ? <Text color={colors.cyan}>{brainPanel.message}</Text> : null}
+          <Text color={colors.gray}>↑↓ / Ctrl+P/N navigate · Enter/s set as default · v show roles · Esc close</Text>
         </Box>
       ) : null}
 
       {intentPanel ? (
-        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="cyan" bold>Intent Graph</Text>
+        <Box borderStyle="round" borderColor={colors.cyan} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.cyan} bold>Intent Graph</Text>
           {formatIntentGraphLines(intentPanel.plan, Math.max(40, terminalCols - 8)).map((line, index) => (
-            <Text key={index} color={isIntentGraphHeaderLine(line) ? "cyan" : line.startsWith("Notes:") ? "yellow" : "gray"}>
+            <Text key={index} color={tone(tuiTheme, isIntentGraphHeaderLine(line) ? "cyan" : line.startsWith("Notes:") ? "yellow" : "gray")}>
               {line}
             </Text>
           ))}
-          <Text color="gray">Ctrl+O / Esc close · /plan refreshes this graph</Text>
+          <Text color={colors.gray}>Ctrl+O / Esc close · /plan refreshes this graph</Text>
         </Box>
       ) : null}
 
       {sessionPanel ? (
-        <Box borderStyle="round" borderColor="blue" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="blue" bold>Sessions</Text>
+        <Box borderStyle="round" borderColor={colors.blue} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.blue} bold>Sessions</Text>
           {sessionPanel.entries.map((entry, index) => (
             <Box key={entry.sessionId} flexDirection="column">
-              <Text color={index === sessionPanel.selected ? "green" : undefined}>
+              <Text color={index === sessionPanel.selected ? colors.green : undefined}>
                 {index === sessionPanel.selected ? "›" : " "} {sessionStatusGlyph(entry.status)} {entry.sessionId.slice(0, 8)} · {formatTimestamp(entry.updatedAt)}{entry.role ? ` · ${entry.role}` : ""}
               </Text>
-              {entry.prompt ? <Text color="gray">    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 120)}</Text> : null}
+              {entry.prompt ? <Text color={colors.gray}>    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 120)}</Text> : null}
             </Box>
           ))}
-          {sessionPanel.message ? <Text color="cyan">{sessionPanel.message}</Text> : null}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Enter resume · v details · Esc close</Text>
+          {sessionPanel.message ? <Text color={colors.cyan}>{sessionPanel.message}</Text> : null}
+          <Text color={colors.gray}>↑↓ / Ctrl+P/N navigate · Enter resume · v details · Esc close</Text>
         </Box>
       ) : null}
 
       {hookPanel ? (
-        <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="yellow" bold>Hooks</Text>
+        <Box borderStyle="round" borderColor={colors.yellow} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.yellow} bold>Hooks</Text>
           {hookPanel.entries.map((entry, index) => (
             <Box key={`${entry.scope}:${entry.eventName}:${entry.matcherIndex}:${entry.handlerIndex}`} flexDirection="column">
-              <Text color={index === hookPanel.selected ? "green" : undefined}>
+              <Text color={index === hookPanel.selected ? colors.green : undefined}>
                 {index === hookPanel.selected ? "›" : " "} {entry.handler.enabled === false ? "○" : "●"} {entry.scope === "user" ? "user" : "proj"} · {entry.eventName}{entry.matcher ? `[${entry.matcher}]` : ""}{entry.handler.trusted ? " · trusted" : ""}
               </Text>
-              <Text color="gray">    {truncate(entry.handler.command ?? entry.handler.commandWindows ?? entry.handler.command_windows ?? "(no command)", 120)}</Text>
+              <Text color={colors.gray}>    {truncate(entry.handler.command ?? entry.handler.commandWindows ?? entry.handler.command_windows ?? "(no command)", 120)}</Text>
             </Box>
           ))}
-          {hookPanel.message ? <Text color="cyan">{hookPanel.message}</Text> : null}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Enter/v view · Space/e enable·disable · Esc close</Text>
+          {hookPanel.message ? <Text color={colors.cyan}>{hookPanel.message}</Text> : null}
+          <Text color={colors.gray}>↑↓ / Ctrl+P/N navigate · Enter/v view · Space/e enable·disable · Esc close</Text>
         </Box>
       ) : null}
 
       {mcpPanel ? (
-        <Box borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="magenta" bold>MCP servers</Text>
+        <Box borderStyle="round" borderColor={colors.magenta} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.magenta} bold>MCP servers</Text>
           {mcpPanel.entries.map((entry, index) => (
             <Box key={`${entry.scope}:${entry.name}`} flexDirection="column">
-              <Text color={index === mcpPanel.selected ? "green" : undefined}>
+              <Text color={index === mcpPanel.selected ? colors.green : undefined}>
                 {index === mcpPanel.selected ? "›" : " "} {healthGlyph(entry)} {entry.scope === "user" ? "user" : "proj"} · {entry.name}{entry.entry.disabled ? " (disabled)" : ""}
               </Text>
-              <Text color="gray">    {describeMcpEntry(entry.entry)} — {describeHealth(entry)}</Text>
+              <Text color={colors.gray}>    {describeMcpEntry(entry.entry)} — {describeHealth(entry)}</Text>
             </Box>
           ))}
-          {mcpPanel.message ? <Text color="cyan">{mcpPanel.message}</Text> : null}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Enter recheck · Space/e enable·disable · v view config · Esc close</Text>
+          {mcpPanel.message ? <Text color={colors.cyan}>{mcpPanel.message}</Text> : null}
+          <Text color={colors.gray}>↑↓ / Ctrl+P/N navigate · Enter recheck · Space/e enable·disable · v view config · Esc close</Text>
         </Box>
       ) : null}
 
       {overlay?.kind === "command" ? (
-        <Box borderStyle="single" borderColor="magenta" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="magenta">Commands {overlay.filter ? `(/${overlay.filter})` : ""}</Text>
+        <Box borderStyle="single" borderColor={colors.magenta} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.magenta}>Commands {overlay.filter ? `(/${overlay.filter})` : ""}</Text>
           {commandMatches.length === 0 ? (
-            <Text color="gray">No matching command</Text>
+            <Text color={colors.gray}>No matching command</Text>
           ) : (
             commandMatches.map((command, index) => (
-              <Text key={command.name} color={index === overlay.selected ? "green" : undefined}>
+              <Text key={command.name} color={index === overlay.selected ? colors.green : undefined}>
                 {index === overlay.selected ? "› " : "  "}
                 {command.label} — {command.hint}
               </Text>
             ))
           )}
-          <Text color="gray">Tab / Enter to accept · Esc to dismiss</Text>
+          <Text color={colors.gray}>Tab / Enter to accept · Esc to dismiss</Text>
         </Box>
       ) : null}
 
       {overlay?.kind === "file" ? (
-        <Box borderStyle="single" borderColor="yellow" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="yellow">Files {overlay.filter ? `(@${overlay.filter})` : ""}</Text>
+        <Box borderStyle="single" borderColor={colors.yellow} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.yellow}>Files {overlay.filter ? `(@${overlay.filter})` : ""}</Text>
           {fileMatches.length === 0 ? (
-            <Text color="gray">{projectFiles.length === 0 ? "Project index still loading…" : "No matches"}</Text>
+            <Text color={colors.gray}>{projectFiles.length === 0 ? "Project index still loading…" : "No matches"}</Text>
           ) : (
             fileMatches.map((path, index) => (
-              <Text key={path} color={index === overlay.selected ? "green" : undefined}>
+              <Text key={path} color={index === overlay.selected ? colors.green : undefined}>
                 {index === overlay.selected ? "› " : "  "}
                 {path}
               </Text>
             ))
           )}
-          <Text color="gray">Tab / Enter to insert · Esc to dismiss</Text>
+          <Text color={colors.gray}>Tab / Enter to insert · Esc to dismiss</Text>
         </Box>
       ) : null}
 
       {overlay?.kind === "session" ? (
-        <Box borderStyle="single" borderColor="blue" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="blue">Sessions {overlay.filter ? `(@@${overlay.filter})` : ""}</Text>
+        <Box borderStyle="single" borderColor={colors.blue} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.blue}>Sessions {overlay.filter ? `(@@${overlay.filter})` : ""}</Text>
           {sessionMatches.length === 0 ? (
-            <Text color="gray">{sessionSuggestions.length === 0 ? "No sessions indexed yet" : "No matches"}</Text>
+            <Text color={colors.gray}>{sessionSuggestions.length === 0 ? "No sessions indexed yet" : "No matches"}</Text>
           ) : (
             sessionMatches.map((entry, index) => (
               <Box key={entry.sessionId} flexDirection="column">
-                <Text color={index === overlay.selected ? "green" : undefined}>
+                <Text color={index === overlay.selected ? colors.green : undefined}>
                   {index === overlay.selected ? "› " : "  "}
                   {entry.sessionId.slice(0, 8)} · {sessionStatusGlyph(entry.status)} · {formatTimestamp(entry.updatedAt)}{entry.role ? ` · ${entry.role}` : ""}
                 </Text>
-                {entry.prompt ? <Text color="gray">    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 110)}</Text> : null}
+                {entry.prompt ? <Text color={colors.gray}>    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 110)}</Text> : null}
               </Box>
             ))
           )}
-          <Text color="gray">Tab / Enter to insert · Esc to dismiss</Text>
+          <Text color={colors.gray}>Tab / Enter to insert · Esc to dismiss</Text>
         </Box>
       ) : null}
 
       {decisionPanel ? (
-        <Box borderStyle="double" borderColor="yellow" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="yellow" bold>Ask User · Tool Decision</Text>
+        <Box borderStyle="double" borderColor={colors.yellow} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.yellow} bold>Ask User · Tool Decision</Text>
           <Text>
-            <Text color={toolCategoryColor(decisionPanel.toolCategory)} bold>[{toolCategoryTitle(decisionPanel.toolCategory)}]</Text>
-            <Text color="yellow"> {decisionPanel.toolName}</Text>
+            <Text color={tone(tuiTheme, toolCategoryColor(decisionPanel.toolCategory))} bold>[{toolCategoryTitle(decisionPanel.toolCategory)}]</Text>
+            <Text color={colors.yellow}> {decisionPanel.toolName}</Text>
           </Text>
-          {decisionPanel.argsSummary ? <Text color="gray">args: {decisionPanel.argsSummary}</Text> : null}
+          {decisionPanel.argsSummary ? <Text color={colors.gray}>args: {decisionPanel.argsSummary}</Text> : null}
           {decisionPanel.options.map((option, index) => (
-            <Text key={option.id} color={index === decisionPanel.selected ? "green" : option.checked ? "yellow" : "gray"}>
+            <Text key={option.id} color={tone(tuiTheme, index === decisionPanel.selected ? "green" : option.checked ? "yellow" : "gray")}>
               {index === decisionPanel.selected ? "› " : "  "}{option.checked ? "[x]" : "[ ]"} {option.label} — {option.description}
             </Text>
           ))}
-          <Text color="gray">↑↓ / Ctrl+P/N navigate · Space checks · Enter confirms · y once · s session · n/Esc blocks</Text>
+          <Text color={colors.gray}>↑↓ / Ctrl+P/N navigate · Space checks · Enter confirms · y once · s session · n/Esc blocks</Text>
         </Box>
       ) : null}
 
       {runtimeErrorPanel ? (
-        <Box borderStyle="double" borderColor="red" flexDirection="column" paddingX={1} marginBottom={1}>
-          <Text color="red" bold>{runtimeErrorPanel.title}</Text>
+        <Box borderStyle="double" borderColor={colors.red} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Text color={colors.red} bold>{runtimeErrorPanel.title}</Text>
           {runtimeErrorPanel.message.split(/\r?\n/).map((line, index) => (
-            <Text key={index} color={line.startsWith("Hint:") || line.startsWith("Fix:") ? "yellow" : undefined}>
+            <Text key={index} color={line.startsWith("Hint:") || line.startsWith("Fix:") ? colors.yellow : undefined}>
               {line || " "}
             </Text>
           ))}
-          <Text color="gray">Enter / Esc / q closes</Text>
+          <Text color={colors.gray}>Enter / Esc / q closes</Text>
         </Box>
       ) : null}
 
       <SectionDivider label={running ? "RUNNING" : "INPUT"} color={running ? "yellow" : "green"} width={contentWidth} />
-      <Box borderStyle="single" borderColor={running ? "yellow" : "green"} paddingX={1} flexDirection="column">
+      <Box borderStyle="single" borderColor={tone(tuiTheme, running ? "yellow" : "green")} paddingX={1} flexDirection="column">
         {running ? <RuntimeStatusLine status={runStatus ?? { startedAt: Date.now(), label: "Thinking…", tokens: runUsage.current, frame: 0 }} /> : null}
-        {draftWindow.hiddenAbove > 0 ? <Text color="gray">↑ {draftWindow.hiddenAbove} more line{draftWindow.hiddenAbove === 1 ? "" : "s"}</Text> : null}
+        {draftWindow.hiddenAbove > 0 ? <Text color={colors.gray}>↑ {draftWindow.hiddenAbove} more line{draftWindow.hiddenAbove === 1 ? "" : "s"}</Text> : null}
         {draftWindow.lines.map((line, index) => (
-          <Text key={index} color={running ? "yellow" : "green"} wrap="truncate-end">{line || " "}</Text>
+          <Text key={index} color={tone(tuiTheme, running ? "yellow" : "green")} wrap="truncate-end">{line || " "}</Text>
         ))}
-        {draftWindow.hiddenBelow > 0 ? <Text color="gray">↓ {draftWindow.hiddenBelow} more line{draftWindow.hiddenBelow === 1 ? "" : "s"}</Text> : null}
+        {draftWindow.hiddenBelow > 0 ? <Text color={colors.gray}>↓ {draftWindow.hiddenBelow} more line{draftWindow.hiddenBelow === 1 ? "" : "s"}</Text> : null}
       </Box>
-      <Text color="gray">
-        Enter submits · / commands · /mode auto|radical · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
+      <Text color={colors.gray}>
+        Enter submits · / commands · /mode auto|radical · /theme dark|light · @ files · @@ sessions · Ctrl+O intent · ↑↓ move input · top ↑ edits queued · Ctrl+V paste · Esc dismisses · Ctrl+C exits
       </Text>
       {queueRef.current.length > 0 ? (
-        <Text color="yellow">
+        <Text color={colors.yellow}>
           {queueRef.current.length} task{queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit the most recent
         </Text>
       ) : null}
       {toast ? <ToastView toast={toast} /> : null}
     </Box>
+    </TuiThemeContext.Provider>
   )
 }
 
@@ -2459,52 +2560,55 @@ type DraftWindow = {
   hiddenBelow: number
 }
 
-type UiColor = "blue" | "cyan" | "green" | "yellow" | "magenta" | "red" | "gray"
-
 function Badge({ label, backgroundColor }: { label: string; backgroundColor: UiColor }) {
-  const foreground = backgroundColor === "yellow" || backgroundColor === "green" || backgroundColor === "cyan" ? "black" : "white"
-  return <Text backgroundColor={backgroundColor} color={foreground} bold> {label} </Text>
+  const theme = useTuiTheme()
+  return <Text color={tone(theme, backgroundColor)} bold>[{label}]</Text>
 }
 
 function HeaderSeparator() {
+  const theme = useTuiTheme()
   return (
     <Box flexDirection="column" marginRight={1}>
-      <Text color="gray">│</Text>
-      <Text color="gray">│</Text>
+      <Text color={theme.colors.gray}>│</Text>
+      <Text color={theme.colors.gray}>│</Text>
     </Box>
   )
 }
 
 function HeaderMetaLine({ label, value }: { label: string; value: string }) {
+  const theme = useTuiTheme()
   return (
     <Text>
-      <Text color="gray" bold>{label.padEnd(7)}</Text>
-      <Text color="gray"> {value}</Text>
+      <Text color={theme.colors.gray} bold>{label.padEnd(7)}</Text>
+      <Text color={theme.colors.gray}> {value}</Text>
     </Text>
   )
 }
 
 function HeaderInfoLine({ label, backgroundColor, value }: { label: string; backgroundColor: UiColor; value: string }) {
+  const theme = useTuiTheme()
   return (
     <Text>
       <Badge label={label.padEnd(7)} backgroundColor={backgroundColor} />
-      <Text color="gray"> {value}</Text>
+      <Text color={theme.colors.gray}> {value}</Text>
     </Text>
   )
 }
 
 function SectionDivider({ label, color, width }: { label: string; color: UiColor; width: number }) {
+  const theme = useTuiTheme()
   const line = "─".repeat(Math.max(1, width - label.length - 4))
   return (
     <Text>
       <Badge label={label} backgroundColor={color} />
-      <Text color={color}> {line}</Text>
+      <Text color={tone(theme, color)}> {line}</Text>
     </Text>
   )
 }
 
 function ThinDivider({ width }: { width: number }) {
-  return <Text color="gray">{"·".repeat(Math.max(8, Math.min(width, 120)))}</Text>
+  const theme = useTuiTheme()
+  return <Text color={theme.colors.gray}>{"·".repeat(Math.max(8, Math.min(width, 120)))}</Text>
 }
 
 function clipDraftToWindow(draft: string, cursor: number, width: number, maxLines: number): DraftWindow {
@@ -2538,6 +2642,7 @@ function clipDraftToWindow(draft: string, cursor: number, width: number, maxLine
 }
 
 function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }) {
+  const theme = useTuiTheme()
   if (item.kind === "user") {
     const rows = rightAlignTranscriptRows(item.text, width, 6)
     return (
@@ -2551,7 +2656,7 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
                 <Text> </Text>
               </>
             ) : null}
-            <Text color={colorFor(item)}>{row.line || " "}</Text>
+            <Text color={tone(theme, colorFor(item))}>{row.line || " "}</Text>
           </Text>
         ))}
       </Box>
@@ -2565,9 +2670,9 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
     return (
       <Text>
         <Badge label="TOOL" backgroundColor="yellow" />
-        <Text color="gray"> · </Text>
-        <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
-        <Text color={colorFor(item)}> {item.text}</Text>
+        <Text color={theme.colors.gray}> · </Text>
+        <Text color={tone(theme, toolCategoryColor(category))} bold>[{toolCategoryTitle(category)}]</Text>
+        <Text color={tone(theme, colorFor(item))}> {item.text}</Text>
       </Text>
     )
   }
@@ -2578,11 +2683,11 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
     return (
       <Text>
         <Badge label="ASK" backgroundColor="yellow" />
-        <Text color="gray"> · </Text>
-        <Text color={toolCategoryColor(category)} bold>[{toolCategoryTitle(category)}]</Text>
-        <Text color="gray"> · </Text>
-        <Text color={statusColor} bold>{status.toUpperCase()}</Text>
-        <Text color={colorFor(item)}> {item.text}</Text>
+        <Text color={theme.colors.gray}> · </Text>
+        <Text color={tone(theme, toolCategoryColor(category))} bold>[{toolCategoryTitle(category)}]</Text>
+        <Text color={theme.colors.gray}> · </Text>
+        <Text color={tone(theme, statusColor)} bold>{status.toUpperCase()}</Text>
+        <Text color={tone(theme, colorFor(item))}> {item.text}</Text>
       </Text>
     )
   }
@@ -2590,17 +2695,18 @@ function TranscriptLine({ item, width }: { item: TranscriptItem; width: number }
   return (
     <Text>
       <Badge label={badge.label} backgroundColor={badge.color} />
-      <Text color={colorFor(item)}> {item.text}</Text>
+      <Text color={tone(theme, colorFor(item))}> {item.text}</Text>
     </Text>
   )
 }
 
 function ThinkingTranscriptLine() {
+  const theme = useTuiTheme()
   return (
     <Text>
       <Badge label="THINKING" backgroundColor="yellow" />
-      <Text color="gray"> working</Text>
-      <Text color="yellow"> ...</Text>
+      <Text color={theme.colors.gray}> working</Text>
+      <Text color={theme.colors.yellow}> ...</Text>
     </Text>
   )
 }
@@ -2629,6 +2735,7 @@ function padLineNum(value: number | null, width: number): string {
 }
 
 function EditPreviewView({ preview }: { preview: EditPreview }) {
+  const theme = useTuiTheme()
   const headlineColor = preview.success ? "green" : "red"
   const verb = preview.created ? "File created." : preview.deleted ? "File deleted." : "File edited."
   const summary = preview.success
@@ -2638,52 +2745,54 @@ function EditPreviewView({ preview }: { preview: EditPreview }) {
   const widthNew = widthOld
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text color="gray">Edit {preview.filePath}</Text>
-      <Text color={headlineColor}>↳ {summary}</Text>
-      {preview.binary ? <Text color="gray">  (binary or oversized file — diff not rendered)</Text> : null}
+      <Text color={theme.colors.gray}>Edit {preview.filePath}</Text>
+      <Text color={tone(theme, headlineColor)}>↳ {summary}</Text>
+      {preview.binary ? <Text color={theme.colors.gray}>  (binary or oversized file — diff not rendered)</Text> : null}
       {preview.hunks.map((hunk, i) => (
         <Box key={i} flexDirection="column">
           {hunk.unchangedAbove > 0
-            ? <Text color="gray">{"  "}… {hunk.unchangedAbove} unchanged lines …</Text>
+            ? <Text color={theme.colors.gray}>{"  "}… {hunk.unchangedAbove} unchanged lines …</Text>
             : null}
           {hunk.rows.map((row, j) => <EditRowLine key={j} row={row} widthOld={widthOld} widthNew={widthNew} />)}
         </Box>
       ))}
       {preview.truncated
-        ? <Text color="gray">{"  "}… {preview.hiddenLines} more lines …</Text>
+        ? <Text color={theme.colors.gray}>{"  "}… {preview.hiddenLines} more lines …</Text>
         : null}
     </Box>
   )
 }
 
 function EditRowLine({ row, widthOld, widthNew }: { row: EditRow; widthOld: number; widthNew: number }) {
+  const theme = useTuiTheme()
   if (row.kind === "context") {
     return (
-      <Text color="gray">
+      <Text color={theme.colors.gray}>
         {padLineNum(row.oldLine, widthOld)} {padLineNum(row.newLine, widthNew)}   {row.text}
       </Text>
     )
   }
   if (row.kind === "removed") {
     return (
-      <Text backgroundColor="red" color="white">
+      <Text color={theme.colors.red}>
         {padLineNum(row.oldLine, widthOld)} {padLineNum(null, widthNew)} - {row.text}
       </Text>
     )
   }
   return (
-    <Text backgroundColor="green" color="black">
+    <Text color={theme.colors.green}>
       {padLineNum(null, widthOld)} {padLineNum(row.newLine, widthNew)} + {row.text}
     </Text>
   )
 }
 
 function ToastView({ toast }: { toast: ToastState }) {
+  const theme = useTuiTheme()
   const isError = toast.tone === "error"
   const color = isError ? "red" : "cyan"
   return (
-    <Box borderStyle="single" borderColor={color} paddingX={1}>
-      <Text color={color} bold={isError} wrap="truncate-end">
+    <Box borderStyle="single" borderColor={tone(theme, color)} paddingX={1}>
+      <Text color={tone(theme, color)} bold={isError} wrap="truncate-end">
         {isError ? "Error: " : ""}{toast.text}
       </Text>
     </Box>
@@ -2691,6 +2800,7 @@ function ToastView({ toast }: { toast: ToastState }) {
 }
 
 function RuntimeStatusLine({ status }: { status: RunStatusState }) {
+  const theme = useTuiTheme()
   const spinner = RUN_SPINNER_FRAMES[status.frame % RUN_SPINNER_FRAMES.length]
   const label = truncate(status.label.replace(/\s+/g, " ").trim() || "Thinking…", 80)
   const elapsed = formatElapsed(Date.now() - status.startedAt)
@@ -2698,9 +2808,9 @@ function RuntimeStatusLine({ status }: { status: RunStatusState }) {
 
   return (
     <Text>
-      <Text color="yellow" bold>{spinner} </Text>
-      <Text color="yellow">{label}</Text>
-      <Text color="gray"> ({elapsed}{tokens ? ` · ${tokens}` : " · tokens pending"})</Text>
+      <Text color={theme.colors.yellow} bold>{spinner} </Text>
+      <Text color={theme.colors.yellow}>{label}</Text>
+      <Text color={theme.colors.gray}> ({elapsed}{tokens ? ` · ${tokens}` : " · tokens pending"})</Text>
     </Text>
   )
 }
@@ -3036,6 +3146,7 @@ function formatHelp(): string {
     "  • Start typing / to open the command palette.",
     "  • Use /plan <prompt> to preview the configured routeBrain decision.",
     "  • Use /plan --heuristic <prompt> only for no-provider routing diagnostics.",
+    "  • Use /theme dark or /theme light to switch the foreground palette; terminal background stays transparent.",
     "  • Use @<path> to attach project files (Tab to accept).",
     "  • Use @@<session-id> to attach a compact session context (Tab to accept).",
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
