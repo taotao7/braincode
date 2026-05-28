@@ -65,6 +65,14 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 支持的平台：`darwin-arm64`、`darwin-x64`、`linux-x64`、`linux-arm64`。安装完成后，运行 `braincode` 启动 TUI，或运行 `braincode config` 打开本地配置页面。
 
+## 发布记录
+
+### v0.2.2
+
+- TUI transcript 折叠现在只在点击 `▸` / `▾` 标记时切换，并且命中计算会考虑终端可见窗口偏移和详情行换行。
+- BrainPet 固定到右下角 footer，运行时带轻量动画，会根据当前工具、worker、队列和最近事件汇报进度或简短吐槽。
+- npm wrapper 和发布元数据同步到 `0.2.2`，用于匹配同版本 GitHub release 资产。
+
 ## 核心理念
 
 在现阶段的 AI 大模型时代，**合理的编排一定大于单个模型**。没有任何一个 LLM 能在所有维度都做到最好 —— 规划、写代码、审查、总结、快速廉价的回复，各有各的强项。把整个工作流绑死在单一模型上，既浪费能力，也浪费钱。Braincode 坚信：**合理利用每个模型的特性，通过精心编排把它们组合起来，才能最大化提升效率、质量与成本收益**。Brain Model 就是这种理念的具体落地。
@@ -110,6 +118,7 @@ harness 暴露 **14 个角色**，整体以角色（专业人设）为主，并�
 - 提供本地配置服务，用户在浏览器中打开使用。
 - 真实的用户配置存储在 `~/.braincode/` 下。
 - 终端 UI 使用 Ink，由 Braincode 拥有，只展示 Braincode 的 mode、Brain Model 路由、agent 角色、工具权限和会话状态。
+- TUI 的 transcript 折叠命中精准到 `▸` / `▾` 标记，BrainPet 固定在右下角并显示上下文进度。
 - 从一开始就使用 Bun 与 monorepo 布局。
 - 保持包之间的低耦合与高复用。
 

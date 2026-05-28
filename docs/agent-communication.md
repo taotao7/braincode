@@ -246,7 +246,7 @@ If you are debugging a "why didn't this prompt run" mystery — check hooks firs
 
 ## Runtime events for the UI
 
-The TUI (`apps/cli`) drives the BrainPet status panel and live progress display from two event streams:
+The TUI (`apps/cli`) drives the bottom-right BrainPet footer and live progress display from two event streams:
 
 - **`AgentEvent`** from `@earendil-works/pi-agent-core` — token stream, tool calls, tool results, etc. Subscribed via `agent.subscribe(...)`. `BraincodeAgentRuntimeOptions.onEvent` is the hook the TUI uses to forward these to the renderer.
 - **`WorkerLifecycleEvent`** from `agent-runtime` — Braincode-level worker boundaries:
@@ -261,7 +261,7 @@ type WorkerLifecycleEvent =
       todoIds?: string[] }
 ```
 
-Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` after the result is normalized. The CLI uses these to populate the spawn/finish lines under BrainPet and to drive the queued-tasks list.
+Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` after the result is normalized. The CLI uses these to populate BrainPet progress snippets and to drive the queued-tasks list. BrainPet is read-only UI: it can summarize or quip about visible context, but it does not affect routing or execution.
 
 - **`onPlan` / `TodoLifecycleEvent`** from `AgentRunRequest` — Braincode-level todo planning and status updates. `onPlan` gives the UI the initial todo list; `TodoLifecycleEvent` moves each item through pending/running/completed/blocked/failed as the primary, support workers, and review workers finish.
 - **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`, including routing source, confidence, reason, workers, and mode budgets.

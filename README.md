@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-107%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-113%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -70,11 +70,19 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. After install, run `braincode` for the TUI or `braincode config` to open the local configuration page.
 
+## Release Notes
+
+### v0.2.2
+
+- TUI transcript folding now only toggles when the `▸` / `▾` marker is clicked, and hit testing accounts for terminal scrollback and wrapped detail rows.
+- BrainPet now lives in the bottom-right footer, animates while work is running, and reports context-aware progress with short dry asides when available.
+- The npm wrapper and release metadata are versioned as `0.2.2` for the matching GitHub release assets.
+
 ## Current Status
 
 - Bun monorepo with `apps/*` and `packages/*` workspaces.
 - CLI entrypoints for `braincode`, `braincode run`, `braincode run --dry-run`, and `braincode config`.
-- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, and tool approval decisions.
+- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, precise transcript folding, footer BrainPet progress, and tool approval decisions.
 - Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, and auth status.
 - Brain preset inheritance via `extends`, so small Brain Model presets can override only the differing planner, role, routing, or context fields.
 - Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.

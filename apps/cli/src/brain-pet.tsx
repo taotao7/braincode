@@ -1,41 +1,96 @@
+import { useEffect, useState } from "react"
 import { Box, Text } from "ink"
 
-const PET_LINES: ReadonlyArray<string> = [
-  "(( ◉ ◉ ))",
-  " ((---)) ",
+const ACTIVE_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
+  ["(( ◉ ◉ ))", " ((---)) "],
+  ["(( ◉ ◉ ))", " ((___)) "],
+  ["(( ◉ ◉ ))", " ((...)) "],
 ]
+
+const IDLE_FRAMES: ReadonlyArray<ReadonlyArray<string>> = [
+  ["(( - - ))", " ((---)) "],
+  ["(( ◉ - ))", " ((---)) "],
+]
+
+const STATUS_MAX = 24
+const LINE_MAX = 28
+const DEFAULT_WIDTH = 34
+const BODY_WIDTH = 9
 
 export type BrainPetProps = {
   thinking: boolean
   status?: string
   lines?: ReadonlyArray<string>
+  width?: number
   activeColor?: string
   activeStatusColor?: string
   idleColor?: string
 }
-
-const STATUS_MAX = 16
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text
   return `${text.slice(0, max - 1)}…`
 }
 
-export function BrainPet({ thinking, status, activeColor = "magenta", activeStatusColor = "yellow", idleColor = "gray" }: BrainPetProps) {
-  const bodyColor = thinking ? activeColor : idleColor
+function normalizeLines(lines: ReadonlyArray<string> | undefined): string[] {
+  const compact = (lines ?? []).map((line) => line.trim()).filter(Boolean)
+  return [compact[0] ?? "", compact[1] ?? ""]
+}
 
-  const rawStatus = (status ?? "").trim() || (thinking ? "thinking" : "idle")
-  const statusText = truncate(rawStatus, STATUS_MAX)
+export function BrainPet({
+  thinking,
+  status,
+  lines,
+  width = DEFAULT_WIDTH,
+  activeColor = "magenta",
+  activeStatusColor = "yellow",
+  idleColor = "gray",
+}: BrainPetProps) {
+  const [frame, setFrame] = useState(0)
+
+  useEffect(() => {
+    const handle = setInterval(() => {
+      setFrame((value) => value + 1)
+    }, thinking ? 900 : 1800)
+    return () => clearInterval(handle)
+  }, [thinking])
+
+  const frames = thinking ? ACTIVE_FRAMES : IDLE_FRAMES
+  const body = frames[frame % frames.length] ?? frames[0]!
+  const bodyColor = thinking ? activeColor : idleColor
+  const rawStatus = (status ?? "").trim() || (thinking ? "watching run" : "idle")
+  const textWidth = Math.max(1, width - BODY_WIDTH - 1)
+  const statusText = truncate(rawStatus, Math.min(STATUS_MAX, textWidth))
   const statusColor = thinking ? activeStatusColor : idleColor
+  const detailLines = normalizeLines(lines)
 
   return (
-    <Box flexDirection="row" alignItems="center">
-      <Box marginRight={1}>
-        <Text color={statusColor}>{statusText}</Text>
+    <Box
+      width={width}
+      flexDirection="row"
+      justifyContent="flex-end"
+      alignItems="flex-end"
+    >
+      <Box
+        width={textWidth}
+        flexDirection="column"
+        alignItems="flex-end"
+        marginRight={1}
+      >
+        <Text color={statusColor} wrap="truncate-end">
+          {statusText}
+        </Text>
+        {detailLines.map((line, index) => (
+          <Text key={index} color={idleColor} wrap="truncate-end">
+            {truncate(line, Math.min(LINE_MAX, textWidth)) || " "}
+          </Text>
+        ))}
       </Box>
       <Box flexDirection="column" alignItems="flex-end">
-        {PET_LINES.map((line, index) => (
-          <Text key={`brain-${index}`} color={bodyColor}>{line}</Text>
+        {body.map((line, index) => (
+          <Text key={`brain-${index}`} color={bodyColor}>
+            {line}
+          </Text>
         ))}
       </Box>
     </Box>

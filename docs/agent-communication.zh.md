@@ -240,7 +240,7 @@ Hook 输出会进 session JSONL（`hook_session_start`、`hook_user_prompt_submi
 
 ## 给 UI 的运行时事件
 
-TUI（`apps/cli`）从两条事件流驱动 BrainPet 状态面板和实时进度：
+TUI（`apps/cli`）从两条事件流驱动右下角 BrainPet footer 和实时进度：
 
 - **`AgentEvent`**，来自 `@earendil-works/pi-agent-core` —— token 流、工具调用、工具结果等。通过 `agent.subscribe(...)` 订阅。`BraincodeAgentRuntimeOptions.onEvent` 是 TUI 用来把它们转发到渲染器的钩子。
 - **`WorkerLifecycleEvent`**，来自 `agent-runtime` —— Braincode 层的 worker 边界：
@@ -254,7 +254,7 @@ type WorkerLifecycleEvent =
       status: "completed" | "failed"; summary?: string; error?: string }
 ```
 
-Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后发 `worker_end`。CLI 用它们填充 BrainPet 下面的「拉起 / 完成」行，并驱动任务队列列表。
+Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后发 `worker_end`。CLI 用它们填充 BrainPet 进度片段，并驱动任务队列列表。BrainPet 只是只读 UI：可以基于可见上下文总结或吐槽，但不会影响路由或执行。
 
 - **Intent graph 视图** —— `Ctrl+O` 或 `/intent` 会打开最新 `RuntimePlan` 的任务拆解和依赖路径，并显示路由来源、置信度、原因、worker 和 mode 预算。
 - **Router plan 预览** —— `/plan <task>` 默认请求配置的 `routeBrain`；`/plan --heuristic <task>` 只用于确定性、无 provider 调用的诊断。如果 router 不可用，`RuntimePlan.routing` 会把结果标成 heuristic fallback。

@@ -10,6 +10,10 @@ npm i -g @taotao7/braincode
 
 A `postinstall` step downloads the platform-specific binary from the matching GitHub release. Supported platforms: macOS arm64/x64, Linux x64/arm64.
 
+## Release
+
+`0.2.2` ships the TUI transcript folding fix and the bottom-right BrainPet progress footer. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
+
 ## Usage
 
 ```bash

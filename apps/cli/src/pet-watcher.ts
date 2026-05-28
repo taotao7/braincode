@@ -33,6 +33,7 @@ export function usePetWatcher(input: PetWatcherInput): PetWatcherState {
   const inFlight = useRef<AbortController | null>(null)
   const latestRef = useRef(input)
   latestRef.current = input
+  const fallback = buildDefaultPetState(input)
 
   useEffect(() => {
     let cancelled = false
@@ -97,7 +98,9 @@ export function usePetWatcher(input: PetWatcherInput): PetWatcherState {
     }
   }, [input.thinking, runtime, input.pollIntervalMs])
 
-  return state
+  if (input.thinking && state.source === "model") return state
+  if (state.source === "error") return { ...fallback, source: "error" }
+  return fallback
 }
 
 function samePetState(previous: PetWatcherState, next: { status: string; lines: string[] }): boolean {
@@ -125,6 +128,109 @@ function buildSnapshot(input: PetWatcherInput): string {
     ...recent,
   ]
   return lines.join("\n")
+}
+
+function buildDefaultPetState(input: PetWatcherInput): PetWatcherState {
+  if (!input.thinking) {
+    return {
+      source: "default",
+      status: input.queueLength > 0 ? "queue watching" : "idle",
+      lines: input.queueLength > 0
+        ? [`${input.queueLength} queued`, "waiting for Enter"]
+        : ["waiting for prompt", "desk is suspiciously calm"],
+    }
+  }
+
+  const activeTool = lastMatching(
+    input.recentItems,
+    (item) => item.kind === "tool" && item.toolStatus === "running",
+  )
+  if (activeTool) {
+    const toolName = activeTool.toolName ?? "tool"
+    return {
+      source: "default",
+      status: shortPetText(`running ${toolName}`, 24),
+      lines: [shortPetText(activeTool.text || toolName, 28), toolQuip(toolName)],
+    }
+  }
+
+  const activeWorker = lastMatching(
+    input.recentItems,
+    (item) => item.kind === "worker" && item.workerStatus === "running",
+  )
+  if (activeWorker) {
+    return {
+      source: "default",
+      status: "worker running",
+      lines: [shortPetText(activeWorker.text, 28), "handoff in progress"],
+    }
+  }
+
+  const latest = input.recentItems[input.recentItems.length - 1]
+  if (latest?.kind === "tool") {
+    if (latest.toolStatus === "failed") {
+      return {
+        source: "default",
+        status: "tool complained",
+        lines: [shortPetText(latest.toolName ?? "tool", 28), "reading the smoke"],
+      }
+    }
+    if (latest.toolStatus === "ok") {
+      return {
+        source: "default",
+        status: "tool done",
+        lines: [shortPetText(latest.toolName ?? "tool", 28), toolQuip(latest.toolName ?? "")],
+      }
+    }
+  }
+
+  if (latest?.kind === "todo") {
+    return {
+      source: "default",
+      status: "todo moving",
+      lines: [shortPetText(latest.text, 28), "checkbox diplomacy"],
+    }
+  }
+
+  if (latest?.kind === "assistant") {
+    return {
+      source: "default",
+      status: "drafting reply",
+      lines: [shortPetText(latest.text, 28), "words are lining up"],
+    }
+  }
+
+  return {
+    source: "default",
+    status: "watching run",
+    lines: input.queueLength > 0
+      ? [`${input.queueLength} queued`, "queue has opinions"]
+      : ["waiting on events", "terminal looks busy"],
+  }
+}
+
+function lastMatching<T>(items: ReadonlyArray<T>, predicate: (item: T) => boolean): T | undefined {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!
+    if (predicate(item)) return item
+  }
+  return undefined
+}
+
+function shortPetText(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, " ").trim()
+  if (clean.length <= max) return clean
+  return `${clean.slice(0, max - 1)}…`
+}
+
+function toolQuip(toolName: string): string {
+  const lower = toolName.toLowerCase()
+  if (/^(exec_command|shell|run_script|write_stdin)$/.test(lower)) return "terminal is noisy"
+  if (/git|diff|patch/.test(lower)) return "diff has opinions"
+  if (/test|check|tsc|lint/.test(lower)) return "tests negotiating"
+  if (/read|search|grep|rg|list|get/.test(lower)) return "digging through files"
+  if (/write|edit|apply/.test(lower)) return "patch dust settling"
+  return "keeping one eye open"
 }
 
 function formatSnapshotItem(item: PetWatcherSnapshotItem): string {

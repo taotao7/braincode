@@ -236,7 +236,7 @@ Si vous déboguez un mystère « pourquoi ce prompt n'a-t-il pas tourné » — 
 
 ## Événements runtime pour l'UI
 
-La TUI (`apps/cli`) pilote le panneau de statut BrainPet et l'affichage de progression live depuis deux flux d'événements :
+La TUI (`apps/cli`) pilote le footer BrainPet en bas à droite et l'affichage de progression live depuis deux flux d'événements :
 
 - **`AgentEvent`** depuis `@earendil-works/pi-agent-core` — flux de tokens, appels d'outils, résultats d'outils, etc. Abonné via `agent.subscribe(...)`. `BraincodeAgentRuntimeOptions.onEvent` est le hook que la TUI utilise pour les transmettre au rendu.
 - **`WorkerLifecycleEvent`** depuis `agent-runtime` — frontières worker niveau Braincode :
@@ -250,7 +250,7 @@ type WorkerLifecycleEvent =
       status: "completed" | "failed"; summary?: string; error?: string }
 ```
 
-Les workers émettent `worker_start` après que les hooks `SubagentStart` se soient stabilisés et `worker_end` après que le résultat soit normalisé. La CLI les utilise pour peupler les lignes spawn/finish sous BrainPet et piloter la liste des tâches en file.
+Les workers émettent `worker_start` après que les hooks `SubagentStart` se soient stabilisés et `worker_end` après que le résultat soit normalisé. La CLI les utilise pour peupler les fragments de progression BrainPet et piloter la liste des tâches en file. BrainPet reste une UI en lecture seule : il peut résumer le contexte visible ou ajouter un court aparté, mais il ne modifie ni le routage ni l'exécution.
 
 - **Vue Intent graph** dans la TUI — `Ctrl+O` ou `/intent` ouvre la décomposition de tâche et le chemin de dépendances du dernier `RuntimePlan`, avec source de routage, confiance, raison, workers et budgets de mode.
 - **Aperçu router plan** dans la TUI — `/plan <task>` interroge le `routeBrain` configuré par défaut ; `/plan --heuristic <task>` est réservé au diagnostic déterministe sans provider. Les échecs router sont affichés comme fallback heuristic dans `RuntimePlan.routing`.

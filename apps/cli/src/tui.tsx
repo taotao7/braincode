@@ -119,8 +119,9 @@ type QueuedTask = {
 
 type TranscriptClickBound = {
   itemId: string;
-  top: number;
-  bottom: number;
+  row: number;
+  foldLeft: number;
+  foldRight: number;
 };
 
 type TranscriptRenderEntry = {
@@ -329,6 +330,9 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 const INPUT_MAX_LINES = 6;
 const INPUT_PROMPT_PREFIX = "› ";
 const INPUT_RESERVED_COLUMNS = 4; // "› " prefix + cursor + a little padding
+const ROOT_PADDING_X = 1;
+const PET_PANEL_MIN_WIDTH = 28;
+const PET_PANEL_MAX_WIDTH = 42;
 const RUN_SPINNER_FRAMES = [".  ", ".. ", "...", " ..", "  ."] as const;
 const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
@@ -482,9 +486,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [terminalCols, setTerminalCols] = useState<number>(
     stdout?.columns ?? 80,
   );
+  const [terminalRows, setTerminalRows] = useState<number>(stdout?.rows ?? 24);
   useEffect(() => {
     if (!stdout) return;
-    const handler = () => setTerminalCols(stdout.columns ?? 80);
+    const handler = () => {
+      setTerminalCols(stdout.columns ?? 80);
+      setTerminalRows(stdout.rows ?? 24);
+    };
     stdout.on("resize", handler);
     return () => {
       stdout.off("resize", handler);
@@ -537,6 +545,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage());
   const verticalCursorColumn = useRef<number | null>(null);
   const transcriptClickBounds = useRef<TranscriptClickBound[]>([]);
+  const transcriptClickViewportOffset = useRef(0);
   const mouseInputBuffer = useRef("");
   const [queueVersion, setQueueVersion] = useState(0);
   const bumpQueue = () => setQueueVersion((value) => value + 1);
@@ -672,7 +681,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const parsed = consumeMouseClicks(mouseInputBuffer.current);
       mouseInputBuffer.current = parsed.rest;
       for (const click of parsed.clicks) {
-        handleTranscriptClick(click.y);
+        handleTranscriptClick(click);
       }
     };
     process.stdin.on("data", onData);
@@ -697,9 +706,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     ]);
   }
 
-  function handleTranscriptClick(row: number) {
+  function handleTranscriptClick(click: { x: number; y: number }) {
+    const row = click.y + transcriptClickViewportOffset.current;
     const target = transcriptClickBounds.current.find(
-      (bound) => row >= bound.top && row <= bound.bottom,
+      (bound) =>
+        row === bound.row &&
+        click.x >= bound.foldLeft &&
+        click.x <= bound.foldRight,
     );
     if (!target) return;
     setItems((previous) =>
@@ -2994,7 +3007,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS);
   const contentWidth = Math.max(20, terminalCols - 4);
   const transcriptLayout = layoutTranscriptItems(items, contentWidth);
-  transcriptClickBounds.current = transcriptLayout.bounds;
   const projectPath = relative(homedir(), projectRoot) || projectRoot;
   const headerRootLimit = Math.max(18, Math.min(54, terminalCols - 92));
   const headerRoot = truncate(projectPath, headerRootLimit);
@@ -3012,6 +3024,49 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   );
   const tuiTheme = TUI_THEMES[themeName];
   const colors = tuiTheme.colors;
+  const desiredPetPanelWidth = Math.max(
+    PET_PANEL_MIN_WIDTH,
+    Math.floor(contentWidth * 0.34),
+  );
+  const petPanelWidth = Math.min(
+    PET_PANEL_MAX_WIDTH,
+    desiredPetPanelWidth,
+    Math.max(12, contentWidth - 12),
+  );
+  const footerTextWidth = Math.max(8, contentWidth - petPanelWidth - 1);
+  const helpText =
+    "Enter submits · / commands · /mode auto|radical · /theme · @ files · @@ sessions · Ctrl+O intent · click ▸/▾ toggles · ↑↓ move input · Ctrl+V paste · Esc dismisses · Ctrl+C exits";
+  const estimatedRows = estimateTuiRows({
+    hasTranscript: items.length > 0,
+    transcriptNextRow: transcriptLayout.nextRow,
+    emptyLogoRows: BRAIN_LOGO.length + 2,
+    brainPanel,
+    intentPanel,
+    sessionPanel,
+    hookPanel,
+    mcpPanel,
+    overlay,
+    commandMatchRows: Math.max(1, commandMatches.length),
+    fileMatchRows: Math.max(1, fileMatches.length),
+    sessionMatchRows:
+      sessionMatches.length === 0
+        ? 1
+        : sessionMatches.reduce(
+            (sum, entry) => sum + (entry.prompt ? 2 : 1),
+            0,
+          ),
+    decisionPanel,
+    runtimeErrorPanel,
+    draftWindow,
+    running,
+    queueLength: queueRef.current.length,
+    toast,
+  });
+  transcriptClickViewportOffset.current = Math.max(
+    0,
+    estimatedRows - terminalRows,
+  );
+  transcriptClickBounds.current = transcriptLayout.bounds;
 
   return (
     <TuiThemeContext.Provider value={tuiTheme}>
@@ -3056,19 +3111,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                 label="USER"
                 backgroundColor="magenta"
                 value={userSummary}
-              />
-            </Box>
-
-            <HeaderSeparator />
-
-            <Box marginLeft={2}>
-              <BrainPet
-                thinking={running}
-                status={petState.status}
-                lines={petState.lines}
-                activeColor={colors.magenta}
-                activeStatusColor={colors.yellow}
-                idleColor={colors.gray}
               />
             </Box>
           </Box>
@@ -3590,19 +3632,35 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             </Text>
           ) : null}
         </Box>
-        <Text color={colors.gray}>
-          Enter submits · / commands · /mode auto|radical · /theme · @ files ·
-          @@ sessions · Ctrl+O intent · click ▸ /▾ toggles long output · ↑↓ move
-          input · Ctrl+V paste · Esc dismisses · Ctrl+C exits
-        </Text>
-        {queueRef.current.length > 0 ? (
-          <Text color={colors.yellow}>
-            {queueRef.current.length} task
-            {queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit the
-            most recent
-          </Text>
-        ) : null}
-        {toast ? <ToastView toast={toast} /> : null}
+        <Box
+          width={contentWidth}
+          flexDirection="row"
+          justifyContent="space-between"
+          alignItems="flex-end"
+        >
+          <Box flexDirection="column" width={footerTextWidth}>
+            <Text color={colors.gray} wrap="truncate-end">
+              {helpText}
+            </Text>
+            {queueRef.current.length > 0 ? (
+              <Text color={colors.yellow} wrap="truncate-end">
+                {queueRef.current.length} task
+                {queueRef.current.length === 1 ? "" : "s"} queued · ↑ to edit
+                the most recent
+              </Text>
+            ) : null}
+            {toast ? <ToastView toast={toast} /> : null}
+          </Box>
+          <BrainPet
+            thinking={running}
+            status={petState.status}
+            lines={petState.lines}
+            width={petPanelWidth}
+            activeColor={colors.magenta}
+            activeStatusColor={colors.yellow}
+            idleColor={colors.gray}
+          />
+        </Box>
       </Box>
     </TuiThemeContext.Provider>
   );
@@ -3719,7 +3777,11 @@ function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
 function layoutTranscriptItems(
   items: TranscriptItem[],
   width: number,
-): { entries: TranscriptRenderEntry[]; bounds: TranscriptClickBound[] } {
+): {
+  entries: TranscriptRenderEntry[];
+  bounds: TranscriptClickBound[];
+  nextRow: number;
+} {
   const entries: TranscriptRenderEntry[] = [];
   const bounds: TranscriptClickBound[] = [];
   let row = transcriptFirstItemRow(items.length > 0);
@@ -3743,25 +3805,136 @@ function layoutTranscriptItems(
     if (showDivider) row += 1;
     const itemRows =
       estimateTranscriptItemRows(item, width, continuation, collapsible) +
-      estimateTranscriptSupplementRows(item);
+      estimateTranscriptSupplementRows(item, width);
     if (collapsible) {
+      const foldHitBox = transcriptFoldHitBox(
+        normalized,
+        continuation,
+        collapsible,
+      );
       bounds.push({
         itemId: normalized.id,
-        top: row,
-        bottom: Math.max(row, row + itemRows - 1),
+        row,
+        foldLeft: foldHitBox.foldLeft,
+        foldRight: foldHitBox.foldRight,
       });
     }
     entries.push({ item, index, continuation, showDivider, collapsible });
     row += itemRows + 1;
   }
 
-  return { entries, bounds };
+  return { entries, bounds, nextRow: row };
 }
 
 function transcriptFirstItemRow(hasTranscript: boolean): number {
   if (!hasTranscript) return 0;
   // Header: 4 rows, margin: 1 row, transcript divider: 1 row. Mouse rows are 1-based.
   return 7;
+}
+
+function estimateTuiRows({
+  hasTranscript,
+  transcriptNextRow,
+  emptyLogoRows,
+  brainPanel,
+  intentPanel,
+  sessionPanel,
+  hookPanel,
+  mcpPanel,
+  overlay,
+  commandMatchRows,
+  fileMatchRows,
+  sessionMatchRows,
+  decisionPanel,
+  runtimeErrorPanel,
+  draftWindow,
+  running,
+  queueLength,
+  toast,
+}: {
+  hasTranscript: boolean;
+  transcriptNextRow: number;
+  emptyLogoRows: number;
+  brainPanel: BrainPanelState | null;
+  intentPanel: IntentPanelState | null;
+  sessionPanel: SessionPanelState | null;
+  hookPanel: HookPanelState | null;
+  mcpPanel: McpPanelState | null;
+  overlay: Overlay;
+  commandMatchRows: number;
+  fileMatchRows: number;
+  sessionMatchRows: number;
+  decisionPanel: DecisionPanelState | null;
+  runtimeErrorPanel: RuntimeErrorPanelState | null;
+  draftWindow: DraftWindow;
+  running: boolean;
+  queueLength: number;
+  toast: ToastState | null;
+}): number {
+  let rows = hasTranscript ? Math.max(0, transcriptNextRow - 1) : 5 + emptyLogoRows;
+
+  if (brainPanel) rows += borderedPanelRows(2 + brainPanel.brains.length * 2 + (brainPanel.message ? 1 : 0));
+  if (intentPanel) rows += borderedPanelRows(8);
+  if (sessionPanel) rows += borderedPanelRows(2 + sessionPanel.entries.length * 2 + (sessionPanel.message ? 1 : 0));
+  if (hookPanel) rows += borderedPanelRows(2 + hookPanel.entries.length * 2 + (hookPanel.message ? 1 : 0));
+  if (mcpPanel) rows += borderedPanelRows(2 + mcpPanel.entries.length * 2 + (mcpPanel.message ? 1 : 0));
+
+  if (overlay?.kind === "command") rows += borderedPanelRows(commandMatchRows + 2);
+  if (overlay?.kind === "file") rows += borderedPanelRows(fileMatchRows + 2);
+  if (overlay?.kind === "session") rows += borderedPanelRows(sessionMatchRows + 2);
+
+  if (decisionPanel) {
+    rows += borderedPanelRows(
+      3 + decisionPanel.options.length + (decisionPanel.argsSummary ? 1 : 0),
+    );
+  }
+  if (runtimeErrorPanel) {
+    rows += borderedPanelRows(2 + runtimeErrorPanel.message.split(/\r?\n/).length);
+  }
+
+  rows += 1;
+  rows += 2;
+  if (running) rows += 1;
+  if (draftWindow.hiddenAbove > 0) rows += 1;
+  rows += draftWindow.lines.length;
+  if (draftWindow.hiddenBelow > 0) rows += 1;
+
+  const footerLeftRows = 1 + (queueLength > 0 ? 1 : 0) + (toast ? 3 : 0);
+  rows += Math.max(3, footerLeftRows);
+
+  return rows;
+}
+
+function borderedPanelRows(contentRows: number): number {
+  return contentRows + 3;
+}
+
+function transcriptFoldHitBox(
+  item: TranscriptItem,
+  continuation: boolean,
+  collapsible: boolean,
+): { foldLeft: number; foldRight: number } {
+  if (!collapsible) return { foldLeft: 0, foldRight: 0 };
+  const foldColumn = transcriptFoldColumn(item, continuation);
+  return {
+    foldLeft: Math.max(1, foldColumn + ROOT_PADDING_X - 1),
+    foldRight: foldColumn + ROOT_PADDING_X + 2,
+  };
+}
+
+function transcriptFoldColumn(
+  item: TranscriptItem,
+  continuation: boolean,
+): number {
+  if (item.kind === "tool") {
+    const category = item.toolCategory ?? "tool";
+    const categoryLabel = `[${toolCategoryTitle(category)}]`;
+    const prefix = continuation
+      ? ` ↳ ${categoryLabel} `
+      : `[TOOL] · ${categoryLabel} `;
+    return visualWidth(prefix) + 1;
+  }
+  return 1;
 }
 
 function isTranscriptContinuation(
@@ -3787,22 +3960,59 @@ function estimateTranscriptItemRows(
   return wrapByVisualWidth(line, Math.max(20, width)).length;
 }
 
-function estimateTranscriptSupplementRows(item: TranscriptItem): number {
+function estimateTranscriptSupplementRows(
+  item: TranscriptItem,
+  width: number,
+): number {
   let rows = 0;
   if (item.kind === "tool" && !item.collapsed && item.toolArgs) {
-    rows += Object.keys(item.toolArgs).length;
+    for (const [key, value] of Object.entries(item.toolArgs)) {
+      rows += countWrappedRows(
+        `↳ ${formatToolArgLine(key, value)}`,
+        Math.max(10, width - 2),
+      );
+    }
   }
   if (item.plan) {
-    rows += 1;
-    if (item.plan.routing.reason) rows += 1;
-    rows += item.plan.todos.length;
+    rows += countWrappedRows(formatPlanMetadataLine(item.plan), width);
+    if (item.plan.routing.reason) {
+      rows += countWrappedRows(
+        `reason: ${truncate(cleanInline(item.plan.routing.reason), 140)}`,
+        width,
+      );
+    }
+    for (const todo of item.plan.todos) {
+      rows += countWrappedRows(
+        `${todoGlyph(todo.status)} ${todo.role} · ${todo.title}`,
+        Math.max(10, width - 2),
+      );
+    }
   }
   if (item.editPreview) {
-    rows += 2;
-    if (item.editPreview.binary) rows += 1;
+    rows += countWrappedRows(`Edit ${item.editPreview.filePath}`, Math.max(10, width - 2));
+    const verb = item.editPreview.created
+      ? "File created."
+      : item.editPreview.deleted
+        ? "File deleted."
+        : "File edited.";
+    const summary = item.editPreview.success
+      ? `↳ Succeeded. ${verb} (+${item.editPreview.added} added, -${item.editPreview.removed} removed)`
+      : `↳ Failed. (+${item.editPreview.added} would have been added, -${item.editPreview.removed} would have been removed)`;
+    rows += countWrappedRows(summary, Math.max(10, width - 2));
+    if (item.editPreview.binary) {
+      rows += countWrappedRows(
+        " (binary or oversized file — diff not rendered)",
+        Math.max(10, width - 2),
+      );
+    }
     for (const hunk of item.editPreview.hunks) {
       if (hunk.unchangedAbove > 0) rows += 1;
-      rows += hunk.rows.length;
+      rows += hunk.rows.reduce(
+        (sum, row) =>
+          sum +
+          countWrappedRows(editPreviewRowEstimateText(row), Math.max(10, width - 2)),
+        0,
+      );
     }
     if (item.editPreview.truncated) rows += 1;
   }
@@ -3818,7 +4028,7 @@ function transcriptPlainLine(
   if (item.kind === "tool") {
     const category = item.toolCategory ?? "tool";
     const prefix = continuation
-      ? `  ↳ [${toolCategoryTitle(category)}]`
+      ? ` ↳ [${toolCategoryTitle(category)}]`
       : `[TOOL] · [${toolCategoryTitle(category)}]`;
     return `${prefix} ${fold}${item.text}`;
   }
@@ -4159,6 +4369,16 @@ function wrapByVisualWidth(text: string, width: number): string[] {
   }
   lines.push(current);
   return lines;
+}
+
+function countWrappedRows(text: string, width: number): number {
+  return wrapByVisualWidth(text, Math.max(1, width)).length;
+}
+
+function editPreviewRowEstimateText(row: EditRow): string {
+  const marker =
+    row.kind === "removed" ? "-" : row.kind === "added" ? "+" : " ";
+  return `000 000 ${marker} ${row.text}`;
 }
 
 function visualWidth(text: string): number {

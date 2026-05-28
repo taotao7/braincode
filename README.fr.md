@@ -60,6 +60,14 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Après installation, lancez `braincode` pour la TUI ou `braincode config` pour ouvrir la page de configuration locale.
 
+## Notes de version
+
+### v0.2.2
+
+- Le pliage du transcript dans la TUI ne bascule plus que lors d'un clic sur `▸` / `▾`, avec un hit testing qui tient compte du scrollback visible et des lignes de détails repliées.
+- BrainPet est maintenant ancré en bas à droite, animé pendant l'exécution, et affiche une progression contextuelle avec de courts apartés secs quand le contexte le permet.
+- Le wrapper npm et les métadonnées de release sont en `0.2.2` pour correspondre aux assets GitHub de même version.
+
 ## Philosophie centrale
 
 À l'étape actuelle de l'IA, **une orchestration intelligente des modèles compte plus que n'importe quel modèle pris isolément**. Aucun LLM ne domine sur toutes les dimensions — planification, écriture de code, revue, résumé, réponses rapides et peu coûteuses — et verrouiller un workflow sur un seul modèle gaspille à la fois les capacités et l'argent. Braincode repose sur cette conviction : **exploiter les forces propres à chaque modèle via une orchestration réfléchie est ce qui maximise l'efficacité, la qualité et le rapport coût/bénéfice**. Le Brain Model est l'incarnation concrète de cette philosophie.
@@ -105,6 +113,7 @@ Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs u
 - Fournir un service de configuration local que l'utilisateur ouvre dans son navigateur.
 - Stocker la configuration utilisateur réelle sous `~/.braincode/`.
 - Utiliser une TUI Ink appartenant à Braincode, centrée sur le mode, le routage Brain Model, les rôles d'agent, les permissions d'outils et l'état de session.
+- Garder le pliage du transcript précis sur les marqueurs `▸` / `▾`, avec BrainPet ancré en bas à droite pour la progression contextuelle.
 - Utiliser Bun et une architecture monorepo dès le départ.
 - Garder les paquets faiblement couplés et réutilisables.
 
