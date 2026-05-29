@@ -62,6 +62,7 @@ export type ImageGenerationOptions = {
   quality?: "low" | "medium" | "high" | "auto"
   outputFormat?: "png" | "jpeg" | "webp"
   timeoutMs?: number
+  signal?: AbortSignal
 }
 
 export type ImageGenerationResult = {
@@ -285,6 +286,12 @@ export async function generateImage(model: BraincodeModel, apiKey: string, optio
   const baseUrl = normalizeImageGenerationBaseUrl(model.baseUrl)
   const controller = new AbortController()
   const timeoutHandle = setTimeout(() => controller.abort(), options.timeoutMs ?? 120000)
+  const linkedSignal = options.signal
+  const onAbort = () => controller.abort()
+  if (linkedSignal) {
+    if (linkedSignal.aborted) controller.abort()
+    else linkedSignal.addEventListener("abort", onAbort, { once: true })
+  }
   const prompt = options.prompt?.trim() || "A simple abstract technical poster image. No text, no watermark."
   const requestBody: Record<string, unknown> = {
     model: model.modelId,
@@ -318,7 +325,7 @@ export async function generateImage(model: BraincodeModel, apiKey: string, optio
     const base64 = typeof first?.b64_json === "string" && first.b64_json.trim()
       ? first.b64_json
       : sourceUrl
-        ? await fetchImageUrlAsBase64(sourceUrl)
+        ? await fetchImageUrlAsBase64(sourceUrl, controller.signal)
         : ""
     if (!base64.trim()) {
       throw new Error("Image generation returned no base64 image data or fetchable image URL")
@@ -338,11 +345,12 @@ export async function generateImage(model: BraincodeModel, apiKey: string, optio
     }
   } finally {
     clearTimeout(timeoutHandle)
+    linkedSignal?.removeEventListener("abort", onAbort)
   }
 }
 
-async function fetchImageUrlAsBase64(url: string): Promise<string> {
-  const response = await fetch(url)
+async function fetchImageUrlAsBase64(url: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(url, { signal })
   if (!response.ok) throw new Error(`Image generation returned a URL, but image download failed: HTTP ${response.status}`)
   const bytes = Buffer.from(await response.arrayBuffer())
   return bytes.toString("base64")

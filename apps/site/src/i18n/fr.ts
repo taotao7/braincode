@@ -8,6 +8,7 @@ export const fr = {
   nav_github: "GitHub",
   nav_docs: "Docs",
   nav_home: "Accueil",
+  slogan: "Le courage est l'hymne de l'humanité. Oser défier la difficulté, c'est là que naît le plaisir.",
   release_label: "VERSION",
   hero_title_1: "Braincode",
   hero_title_2: "Un orchestrateur d'agents de code multi-modèles.",
@@ -92,12 +93,46 @@ export const fr = {
   radical_body:
     "Appels d'outils en parallèle. Liberté de routage maximale, un peu de stabilité contre la vitesse brute. Pour les devs qui connaissent leur code.",
   radical_meta: "-> à manier avec soin",
-  section_roles_eyebrow: "14 RÔLES · ROLE-FIRST",
+  section_roles_eyebrow: "15 RÔLES · ROLE-FIRST",
   section_roles_title: "Un moteur de workflow, pas un CLI à modèle unique.",
   section_roles_lead:
     "Il n'y a pas de rôle « coding » générique. Le travail de code est découpé par domaine pour que chaque rôle puisse être routé vers un modèle réellement fort sur ce domaine. Le routeBrain piloté par LLM choisit le spécialiste.",
   section_roles_removed:
     "v0.2.0 a supprimé : coding, fastReply, research — fusionnés dans les spécialistes de domaine, rush, et librarian.",
+  roles_carousel_label: "Carrousel du guide d'appel des rôles Braincode",
+  role_prev: "Rôle précédent",
+  role_next: "Rôle suivant",
+  role_call_label: "Appeler quand",
+  role_call_routeBrain:
+    "Pour classifier l'intention, choisir les rôles, planifier le graphe de workers, attribuer les todos et poser les dépendances. Il route le travail sans résoudre la tâche.",
+  role_call_frontend:
+    "Pour le comportement navigateur : composants, état, accessibilité, responsive, ajustement du texte et vérification visuelle.",
+  role_call_backend:
+    "Pour APIs, services, validation, points d'autorisation, limites de persistance, erreurs et comportement serveur durable.",
+  role_call_designer:
+    "Pour les parcours UX, l'architecture d'information, les interactions, les états, la hiérarchie visuelle et la priorité du texte produit.",
+  role_call_imageMaker:
+    "Quand l'utilisateur a besoin d'un asset bitmap, portrait de rôle, prompt image, visuel généré ou édition via l'Images API configurée.",
+  role_call_dba:
+    "Pour schémas, migrations, index, plans de requête, contraintes, intégrité des données, rétention, backfills et risque de rollback.",
+  role_call_devops:
+    "Pour build, CI, packaging, déploiement, environnement local, câblage des secrets, observabilité et runbooks opérationnels.",
+  role_call_security:
+    "Pour auth, permissions, secrets, injection, exposition des dépendances, frontières de confiance, abus possibles et valeurs sûres par défaut.",
+  role_call_qa:
+    "Pour critères d'acceptation, bugs reproductibles, cas limites, régressions, stratégie de test, fixtures et lacunes de couverture.",
+  role_call_review:
+    "Après un plan, diff ou résultat, pour une recherche indépendante de défauts, de risques de régression ou de tests manquants.",
+  role_call_summarize:
+    "Pour compresser un long contexte en état de handoff : objectifs, décisions, artefacts, validation, réserves et blocages.",
+  role_call_oracle:
+    "Pour choix d'architecture difficiles, debugging ambigu, arbitrages complexes, raisonnement profond et décisions sous incertitude.",
+  role_call_librarian:
+    "Pour orientation repo, recherche de symboles, traçage d'architecture, cartes de dépendances, faits vérifiés et références précises.",
+  role_call_rush:
+    "Pour les toutes petites tâches à faible risque et les réponses courtes quand aucun spécialiste n'est plus adapté.",
+  role_call_pet:
+    "Uniquement comme reporter d'état TUI en lecture seule. Il observe les snapshots d'exécution et produit de courtes lignes de progrès; il ne route jamais.",
   section_cta_title: "Prêt à choisir votre cerveau ?",
   section_cta_lead: "Disponible pour macOS, Linux et npm.",
   cta_docs: "Lire la documentation",
@@ -163,7 +198,7 @@ export const fr = {
   docs_brain_example_title: "Exemple brains.json",
   docs_brain_roles_title: "Rôles intégrés",
   docs_brain_roles_body:
-    "Braincode v0.2.0 est livré avec 14 emplacements de rôles. coding, fastReply, et research ont été supprimés et absorbés dans les spécialistes de domaine, rush, et librarian.",
+    "Braincode v0.2.0 est livré avec 15 emplacements de rôles. coding, fastReply, et research ont été supprimés et absorbés dans les spécialistes de domaine, rush, et librarian.",
 
   docs_modes_title: "4. Modes d'exécution",
   docs_modes_intro:

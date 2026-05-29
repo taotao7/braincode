@@ -394,7 +394,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   }
 }
 
-const INPUT_MAX_LINES = 1;
+const INPUT_MAX_LINES = 6;
 const INPUT_PROMPT_PREFIX = "› ";
 const FRAME_RESERVED_COLUMNS = 4;
 const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
@@ -422,7 +422,8 @@ const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
-const RUN_STATUS_TICK_MS = 5000;
+const RUN_STATUS_ANIMATION_MS = 140;
+const RUN_STATUS_HIGHLIGHT_COLOR = "#ffffff";
 const DEFAULT_STREAM_FLUSH_MS = 1000;
 const STREAM_FLUSH_MIN_CHARS = 600;
 const STREAM_FLUSH_MAX_WAIT_MS = 2500;
@@ -595,6 +596,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const initialDraft = initialPrompt ?? "";
   const initialCursor = initialDraft.length;
   const [running, setRunning] = useState(false);
+  const activeRunAbort = useRef<AbortController | null>(null);
   const inputStore = useStableTuiStore<InputState>({
     draft: initialDraft,
     cursor: initialCursor,
@@ -957,6 +959,32 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function stopRunStatus() {
     activeUsageKey.current = null;
     runStatusStore.setSnapshot(null);
+  }
+
+  function interruptRun(): boolean {
+    const controller = activeRunAbort.current;
+    if (!running || !controller || controller.signal.aborted) return false;
+    const resolveDecision = pendingDecisionResolve.current;
+    pendingDecisionResolve.current = null;
+    if (decisionPanel) {
+      setItems((previous) =>
+        previous.map((item) =>
+          item.id === decisionPanel.itemId
+            ? {
+                ...item,
+                decisionStatus: "blocked",
+                text: `${toolCategoryTitle(decisionPanel.toolCategory)} · ${decisionPanel.toolName} · interrupted`,
+              }
+            : item,
+        ),
+      );
+    }
+    setDecisionPanel(null);
+    resolveDecision?.({ approved: false, reason: "Run interrupted by Esc." });
+    controller.abort();
+    updateRunStatus("Interrupted by Esc...");
+    flash("Run interrupted");
+    return true;
   }
 
   function showRuntimeErrorPanel(
@@ -2145,6 +2173,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     applyDraftChange("");
     startRunStatus("Routing through Braincode...");
     setRunning(true);
+    const runAbort = new AbortController();
+    activeRunAbort.current = runAbort;
 
     let approvalMode: BraincodeMode = mode;
     const currentAssistant = { id: null as string | null, text: "" };
@@ -2732,6 +2762,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         onWorkerEvent,
         forceRoles: options.forceRoles as never,
         ignoreDisabledLocalTools: approvalMode === "radical",
+        signal: runAbort.signal,
       });
       rememberIntentPlan(result.plan);
       finalizeStreamingBuffers();
@@ -2776,6 +2807,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       });
     } catch (error) {
       finalizeStreamingBuffers();
+      if (runAbort.signal.aborted || isAbortLikeError(error)) {
+        setRuntimeErrorPanel(null);
+        setItems((previous) => [
+          ...previous.filter((item) => item.id !== statusId),
+          {
+            id: crypto.randomUUID(),
+            kind: "status",
+            text: "Run interrupted by Esc.",
+          },
+        ]);
+        return;
+      }
       const message = showRuntimeErrorPanel(error, "Run Failed");
       if (
         isHandoffRequiredError(error) ||
@@ -2793,6 +2836,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         { id: crypto.randomUUID(), kind: "error", text: message },
       ]);
     } finally {
+      if (activeRunAbort.current === runAbort) activeRunAbort.current = null;
       setRunning(false);
       stopRunStatus();
     }
@@ -3116,6 +3160,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
 
     if (decisionPanel) {
+      if (key.escape && interruptRun()) return;
       const nextMove = key.downArrow || (key.ctrl && input === "n");
       const prevMove = key.upArrow || (key.ctrl && input === "p");
       if (nextMove || prevMove) {
@@ -3190,6 +3235,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         lastEscapeAt.current = now;
         return;
       }
+      if (interruptRun()) return;
       if (draft.length > 0 && now - lastEscapeAt.current <= DOUBLE_ESC_MS) {
         applyDraftChange("");
         lastEscapeAt.current = 0;
@@ -3369,6 +3415,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
     if (!overlay && key.ctrl && (input === "p" || input === "n")) {
       if (navigatePromptHistory(input === "n" ? 1 : -1)) return;
+    }
+
+    if (!overlay && ((key.return && key.shift) || input === "\n")) {
+      insertAtCursor("\n");
+      return;
     }
 
     if (key.return) {
@@ -4261,7 +4312,7 @@ const InputSurface = React.memo(function InputSurface({
   );
 
   useEffect(() => {
-    const syncInput = (mode: "paint" | "measure") => {
+    const syncInput = (mode: "paint" | "measure" | "status") => {
       const current = inputStore.getSnapshot();
       const currentWindow = clipDraftToWindow(
         current.draft,
@@ -4289,9 +4340,31 @@ const InputSurface = React.memo(function InputSurface({
           draftWindow: currentWindow,
         });
       }
+      if (mode === "status" && stdout && running) {
+        paintRunStatusLine({
+          stdout,
+          theme,
+          contentWidth,
+          footerRows: footerRowsStore.getSnapshot(),
+          runStatus: runStatusStore.getSnapshot(),
+          draftWindow: currentWindow,
+        });
+      }
     };
     syncInput("measure");
-    return inputStore.subscribe(() => syncInput("paint"));
+    const unsubscribe = inputStore.subscribe(() => syncInput("paint"));
+    let animationTimer: ReturnType<typeof setInterval> | null = null;
+    if (running) {
+      syncInput("paint");
+      animationTimer = setInterval(
+        () => syncInput("status"),
+        RUN_STATUS_ANIMATION_MS,
+      );
+    }
+    return () => {
+      unsubscribe();
+      if (animationTimer) clearInterval(animationTimer);
+    };
   }, [
     contentWidth,
     draftMetricsStore,
@@ -4311,6 +4384,19 @@ const InputSurface = React.memo(function InputSurface({
         color={running ? "yellow" : "green"}
         width={contentWidth}
       />
+      {running ? (
+        <RuntimeStatusLine
+          status={
+            runStatus ?? {
+              startedAt: Date.now(),
+              label: "Thinking…",
+              tokens: emptyTokenUsage(),
+              frame: 0,
+            }
+          }
+          width={contentWidth}
+        />
+      ) : null}
       <Box
         borderStyle="single"
         borderColor={tone(theme, running ? "yellow" : "green")}
@@ -4319,18 +4405,6 @@ const InputSurface = React.memo(function InputSurface({
         width={contentWidth}
         overflow="hidden"
       >
-        {running ? (
-          <RuntimeStatusLine
-            status={
-              runStatus ?? {
-                startedAt: Date.now(),
-                label: "Thinking…",
-                tokens: emptyTokenUsage(),
-                frame: 0,
-              }
-            }
-          />
-        ) : null}
         {draftWindow.hiddenAbove > 0 ? (
           <Text color={colors.gray}>
             ↑ {draftWindow.hiddenAbove} more line
@@ -4338,13 +4412,11 @@ const InputSurface = React.memo(function InputSurface({
           </Text>
         ) : null}
         {draftWindowDisplayLines(draftWindow).map((line, index) => (
-          <Text
+          <DraftInputLine
             key={index}
+            line={line}
             color={tone(theme, running ? "yellow" : "green")}
-            wrap="truncate-end"
-          >
-            {line || " "}
-          </Text>
+          />
         ))}
         {draftWindow.hiddenBelow > 0 ? (
           <Text color={colors.gray}>
@@ -4444,6 +4516,7 @@ function paintInputSurface({
 }) {
   const color = tone(theme, running ? "yellow" : "green");
   const rows = renderInputSurfaceRows({
+    theme,
     color,
     running,
     contentWidth,
@@ -4462,13 +4535,52 @@ function paintInputSurface({
   stdout.write(output);
 }
 
+function paintRunStatusLine({
+  stdout,
+  theme,
+  contentWidth,
+  footerRows,
+  runStatus,
+  draftWindow,
+}: {
+  stdout: { write: (chunk: string) => unknown };
+  theme: TuiTheme;
+  contentWidth: number;
+  footerRows: number;
+  runStatus: RunStatusState | null;
+  draftWindow: DraftWindow;
+}) {
+  const rows = renderInputSurfaceRows({
+    theme,
+    color: tone(theme, "yellow"),
+    running: true,
+    contentWidth,
+    runStatus,
+    draftWindow,
+  });
+  const statusRowIndex = 1;
+  const statusRow = rows[statusRowIndex];
+  if (!statusRow) return;
+  const moveUp = Math.max(0, footerRows + rows.length - statusRowIndex);
+  stdout.write(
+    [
+      "\x1b7",
+      moveUp > 0 ? `\x1b[${moveUp}A` : "",
+      `\r\x1b[2K${statusRow}`,
+      "\x1b8",
+    ].join(""),
+  );
+}
+
 function renderInputSurfaceRows({
+  theme,
   color,
   running,
   contentWidth,
   runStatus,
   draftWindow,
 }: {
+  theme: TuiTheme;
   color: string;
   running: boolean;
   contentWidth: number;
@@ -4482,7 +4594,11 @@ function renderInputSurfaceRows({
   const bottom = `${ansiColor(color)}└${"─".repeat(Math.max(1, contentWidth - 2))}┘${ANSI_RESET}`;
   const rows = [` ${divider}`, ` ${top}`];
   if (running) {
-    rows.push(renderInputBoxRow(formatRunStatusText(runStatus), inputWidth, color));
+    rows.splice(
+      1,
+      0,
+      ` ${renderRunStatusAnsiLine(runStatus, contentWidth, theme)}`,
+    );
   }
   if (draftWindow.hiddenAbove > 0) {
     rows.push(
@@ -4494,7 +4610,7 @@ function renderInputSurfaceRows({
     );
   }
   for (const line of draftWindowDisplayLines(draftWindow)) {
-    rows.push(renderInputBoxRow(line || " ", inputWidth, color));
+    rows.push(renderInputBoxDraftRow(line, inputWidth, color));
   }
   if (draftWindow.hiddenBelow > 0) {
     rows.push(
@@ -4514,30 +4630,157 @@ function renderInputBoxRow(text: string, width: number, color: string): string {
   return ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${fitted}${padVisual(fitted, width)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`;
 }
 
-function formatRunStatusText(status: RunStatusState | null): string {
+function renderInputBoxDraftRow(
+  line: DraftWindowLine,
+  width: number,
+  color: string,
+): string {
+  const rendered = renderDraftLineAnsi(line, width, color);
+  return ` ${ansiColor(color)}│${ANSI_RESET} ${rendered.text}${padVisual(rendered.plain, width)} ${ansiColor(color)}│${ANSI_RESET}`;
+}
+
+function renderDraftLineAnsi(
+  line: DraftWindowLine,
+  width: number,
+  color: string,
+): { text: string; plain: string } {
+  const fitted = fitDraftWindowLine(line, width);
+  if (fitted.cursorOffset === null) {
+    const text = fitted.text || " ";
+    return { text: `${ansiColor(color)}${text}${ANSI_RESET}`, plain: text };
+  }
+
+  const chars = Array.from(fitted.text);
+  const cursorOffset = clamp(fitted.cursorOffset, 0, chars.length);
+  const before = chars.slice(0, cursorOffset).join("");
+  const cursorChar = chars[cursorOffset] ?? " ";
+  const after =
+    cursorOffset < chars.length ? chars.slice(cursorOffset + 1).join("") : "";
+  return {
+    text: `${ansiColor(color)}${before}${ANSI_INVERSE}${cursorChar}${ANSI_INVERSE_OFF}${ansiColor(color)}${after}${ANSI_RESET}`,
+    plain: `${before}${cursorChar}${after}`,
+  };
+}
+
+type RunStatusTextChar = {
+  char: string;
+  color: UiColor;
+  bold?: boolean;
+};
+
+function renderRunStatusAnsiLine(
+  status: RunStatusState | null,
+  width: number,
+  theme: TuiTheme,
+  now = Date.now(),
+): string {
+  const chars = buildRunStatusChars(status, now, width);
+  const activeIndex = runStatusActiveIndex(chars, now);
+  const plain = runStatusCharsText(chars);
+  const rendered = chars
+    .map((cell, index) => {
+      const color = runStatusCharColor(theme, cell, index, activeIndex);
+      return `${ansiColor(color)}${cell.char}`;
+    })
+    .join("");
+  return `${rendered}${ANSI_RESET}${padVisual(plain, width)}`;
+}
+
+function buildRunStatusChars(
+  status: RunStatusState | null,
+  now: number,
+  width: number,
+): RunStatusTextChar[] {
   const effective =
     status ??
     ({
-      startedAt: Date.now(),
+      startedAt: now,
       label: "Thinking…",
       tokens: emptyTokenUsage(),
       frame: 0,
     } satisfies RunStatusState);
-  const elapsedMs = Date.now() - effective.startedAt;
+  const elapsedMs = Math.max(0, now - effective.startedAt);
+  const animationFrame = Math.floor(now / RUN_STATUS_ANIMATION_MS);
   const spinner =
-    RUN_SPINNER_FRAMES[
-      Math.floor(elapsedMs / RUN_STATUS_TICK_MS) % RUN_SPINNER_FRAMES.length
-    ];
+    RUN_SPINNER_FRAMES[animationFrame % RUN_SPINNER_FRAMES.length];
   const label = truncate(
     effective.label.replace(/\s+/g, " ").trim() || "Thinking…",
     80,
   );
   const elapsed = formatElapsed(elapsedMs);
   const tokens = formatRunStatusTokens(effective.tokens);
-  return `${spinner} ${label} (${elapsed}${tokens ? ` · ${tokens}` : " · tokens pending"})`;
+  const chars: RunStatusTextChar[] = [];
+  appendRunStatusChars(chars, spinner, "yellow", true);
+  appendRunStatusChars(chars, " ", "yellow", true);
+  appendRunStatusChars(chars, label, "yellow");
+  appendRunStatusChars(
+    chars,
+    ` (${elapsed}${tokens ? ` · ${tokens}` : " · tokens pending"})`,
+    "gray",
+  );
+  return fitRunStatusChars(chars, width);
+}
+
+function appendRunStatusChars(
+  target: RunStatusTextChar[],
+  text: string,
+  color: UiColor,
+  bold = false,
+) {
+  for (const char of text) target.push({ char, color, bold });
+}
+
+function fitRunStatusChars(
+  chars: RunStatusTextChar[],
+  width: number,
+): RunStatusTextChar[] {
+  if (visualWidth(runStatusCharsText(chars)) <= width) return chars;
+  const limit = Math.max(1, width - 1);
+  const fitted: RunStatusTextChar[] = [];
+  let used = 0;
+  for (const cell of chars) {
+    const cellWidth = isWideChar(cell.char) ? 2 : 1;
+    if (used + cellWidth > limit) break;
+    fitted.push(cell);
+    used += cellWidth;
+  }
+  fitted.push({ char: "…", color: "gray" });
+  return fitted;
+}
+
+function runStatusActiveIndex(
+  chars: RunStatusTextChar[],
+  now: number,
+): number {
+  const highlightable = chars
+    .map((cell, index) => (/\S/u.test(cell.char) ? index : -1))
+    .filter((index) => index >= 0);
+  if (highlightable.length === 0) return -1;
+  return (
+    highlightable[
+      Math.floor(now / RUN_STATUS_ANIMATION_MS) % highlightable.length
+    ] ?? -1
+  );
+}
+
+function runStatusCharColor(
+  theme: TuiTheme,
+  cell: RunStatusTextChar,
+  index: number,
+  activeIndex: number,
+): string {
+  return index === activeIndex
+    ? RUN_STATUS_HIGHLIGHT_COLOR
+    : tone(theme, cell.color);
+}
+
+function runStatusCharsText(chars: RunStatusTextChar[]): string {
+  return chars.map((cell) => cell.char).join("");
 }
 
 const ANSI_RESET = "\x1b[39m";
+const ANSI_INVERSE = "\x1b[7m";
+const ANSI_INVERSE_OFF = "\x1b[27m";
 
 function ansiColor(hex: string): string {
   const match = hex.match(/^#?([0-9a-f]{6})$/i);
@@ -4561,41 +4804,6 @@ function fitVisualWidth(text: string, width: number): string {
     used += charWidth;
   }
   return `${output}…`;
-}
-
-function clipVisualAroundIndex(
-  text: string,
-  focusIndex: number,
-  width: number,
-): string {
-  if (visualWidth(text) <= width) return text;
-  const chars = Array.from(text);
-  const focus = clamp(
-    Array.from(text.slice(0, focusIndex)).length,
-    0,
-    chars.length - 1,
-  );
-  let start = 0;
-  let end = chars.length;
-
-  const render = () =>
-    `${start > 0 ? "…" : ""}${chars.slice(start, end).join("")}${end < chars.length ? "…" : ""}`;
-
-  while (visualWidth(render()) > width && start < end) {
-    const leftDistance = focus - start;
-    const rightDistance = end - focus - 1;
-    if (rightDistance > leftDistance && end > focus + 1) {
-      end--;
-    } else if (start < focus) {
-      start++;
-    } else if (end > focus + 1) {
-      end--;
-    } else {
-      break;
-    }
-  }
-
-  return fitVisualWidth(render(), width);
 }
 
 function padVisual(text: string, width: number): string {
@@ -5502,11 +5710,8 @@ function inputTextWidth(terminalCols: number): number {
   );
 }
 
-function composeDraftLine(draft: string, cursor: number): string {
-  const position = clamp(cursor, 0, draft.length);
-  const head = draft.slice(0, position);
-  const tail = draft.slice(position);
-  return `${INPUT_PROMPT_PREFIX}${head}|${tail}`;
+function composeDraftLine(draft: string): string {
+  return `${INPUT_PROMPT_PREFIX}${draft}`;
 }
 
 function wrapByVisualWidth(text: string, width: number): string[] {
@@ -5597,16 +5802,110 @@ function locateCursorRow(text: string, cursor: number, width: number): number {
   return row;
 }
 
+type DraftWindowLine = {
+  text: string;
+  cursorOffset: number | null;
+};
+
 type DraftWindow = {
-  lines: string[];
+  lines: DraftWindowLine[];
   hiddenAbove: number;
   hiddenBelow: number;
 };
 
-function draftWindowDisplayLines(draftWindow: DraftWindow): string[] {
+type DraftWrapResult = {
+  lines: DraftWindowLine[];
+  cursorRow: number;
+};
+
+function draftWindowDisplayLines(draftWindow: DraftWindow): DraftWindowLine[] {
   const lines = draftWindow.lines.slice(0, INPUT_MAX_LINES);
-  while (lines.length < INPUT_MAX_LINES) lines.push("");
+  while (lines.length < INPUT_MAX_LINES)
+    lines.push({ text: "", cursorOffset: null });
   return lines;
+}
+
+function fitDraftWindowLine(
+  line: DraftWindowLine,
+  width: number,
+): DraftWindowLine {
+  if (line.cursorOffset === null) {
+    return { ...line, text: fitVisualWidth(line.text, width) };
+  }
+  if (draftWindowLineWidth(line) <= width) return line;
+
+  const chars = Array.from(line.text);
+  const cursorOffset = clamp(line.cursorOffset, 0, chars.length);
+  const limit = Math.max(1, width - 1);
+  const fitted: string[] = [];
+  let used = 0;
+  for (let index = 0; index < chars.length; index++) {
+    if (index === cursorOffset) break;
+    const char = chars[index]!;
+    const charWidth = isWideChar(char) ? 2 : 1;
+    if (used + charWidth > limit) break;
+    fitted.push(char);
+    used += charWidth;
+  }
+  fitted.push("…");
+  return { text: fitted.join(""), cursorOffset: fitted.length - 1 };
+}
+
+function draftWindowLineWidth(line: DraftWindowLine): number {
+  if (line.cursorOffset === null) return visualWidth(line.text || " ");
+  const chars = Array.from(line.text);
+  const cursorOffset = clamp(line.cursorOffset, 0, chars.length);
+  return visualWidth(line.text) + (cursorOffset >= chars.length ? 1 : 0);
+}
+
+function wrapDraftWindowLines(
+  text: string,
+  cursorOffset: number,
+  width: number,
+): DraftWrapResult {
+  const safeWidth = Math.max(1, width);
+  const lines: DraftWindowLine[] = [{ text: "", cursorOffset: null }];
+  let row = 0;
+  let col = 0;
+  let index = 0;
+  let cursorRow = 0;
+  let cursorMarked = false;
+
+  const currentLine = () => lines[row]!;
+  const markCursor = () => {
+    if (cursorMarked) return;
+    if (col >= safeWidth && currentLine().text.length > 0) startNewLine();
+    currentLine().cursorOffset = Array.from(currentLine().text).length;
+    cursorRow = row;
+    cursorMarked = true;
+  };
+  const startNewLine = () => {
+    row += 1;
+    col = 0;
+    lines.push({ text: "", cursorOffset: null });
+  };
+
+  for (const char of text) {
+    if (!cursorMarked && index >= cursorOffset) markCursor();
+    if (char === "\n") {
+      index += char.length;
+      startNewLine();
+      if (!cursorMarked && index >= cursorOffset) markCursor();
+      continue;
+    }
+
+    const charWidth = isWideChar(char) ? 2 : 1;
+    if (col + charWidth > safeWidth && currentLine().text.length > 0) {
+      startNewLine();
+      if (!cursorMarked && index >= cursorOffset) markCursor();
+    }
+    currentLine().text += char;
+    col += charWidth;
+    index += char.length;
+  }
+
+  if (!cursorMarked) markCursor();
+  return { lines, cursorRow };
 }
 
 function Badge({
@@ -5664,6 +5963,40 @@ function HeaderInfoLine({
   );
 }
 
+function DraftInputLine({
+  line,
+  color,
+}: {
+  line: DraftWindowLine;
+  color: string;
+}) {
+  if (line.cursorOffset === null) {
+    return (
+      <Text color={color} wrap="truncate-end">
+        {line.text || " "}
+      </Text>
+    );
+  }
+
+  const fitted = fitDraftWindowLine(line, Number.MAX_SAFE_INTEGER);
+  const chars = Array.from(fitted.text);
+  const cursorOffset = clamp(fitted.cursorOffset ?? 0, 0, chars.length);
+  const before = chars.slice(0, cursorOffset).join("");
+  const cursorChar = chars[cursorOffset] ?? " ";
+  const after =
+    cursorOffset < chars.length ? chars.slice(cursorOffset + 1).join("") : "";
+
+  return (
+    <Text wrap="truncate-end">
+      <Text color={color}>{before}</Text>
+      <Text color={color} inverse>
+        {cursorChar}
+      </Text>
+      <Text color={color}>{after}</Text>
+    </Text>
+  );
+}
+
 function SectionDivider({
   label,
   color,
@@ -5696,19 +6029,37 @@ function clipDraftToWindow(
   draft: string,
   cursor: number,
   width: number,
-  _maxLines: number,
+  maxLines: number,
 ): DraftWindow {
   const safeWidth = Math.max(1, width);
   const cursorPosition = clamp(cursor, 0, draft.length);
-  const composed = composeDraftLine(draft, cursorPosition).replace(
-    /\r?\n/g,
-    " ",
-  );
+  const composed = composeDraftLine(draft).replace(/\r\n/g, "\n");
   const cursorOffsetInComposed = INPUT_PROMPT_PREFIX.length + cursorPosition;
+  const wrapped = wrapDraftWindowLines(
+    composed,
+    cursorOffsetInComposed,
+    safeWidth,
+  );
+  if (wrapped.lines.length <= maxLines) {
+    return { lines: wrapped.lines, hiddenAbove: 0, hiddenBelow: 0 };
+  }
+  let start = Math.max(0, wrapped.cursorRow - Math.floor(maxLines / 2));
+  let end = start + maxLines;
+  if (end > wrapped.lines.length) {
+    end = wrapped.lines.length;
+    start = Math.max(0, end - maxLines);
+  }
+  if (wrapped.cursorRow < start) {
+    start = wrapped.cursorRow;
+    end = start + maxLines;
+  } else if (wrapped.cursorRow >= end) {
+    end = wrapped.cursorRow + 1;
+    start = Math.max(0, end - maxLines);
+  }
   return {
-    lines: [clipVisualAroundIndex(composed, cursorOffsetInComposed, safeWidth)],
-    hiddenAbove: 0,
-    hiddenBelow: 0,
+    lines: wrapped.lines.slice(start, end),
+    hiddenAbove: start,
+    hiddenBelow: wrapped.lines.length - end,
   };
 }
 
@@ -5983,37 +6334,29 @@ function ToastView({ toast }: { toast: ToastState }) {
   );
 }
 
-function RuntimeStatusLine({ status }: { status: RunStatusState }) {
+function RuntimeStatusLine({
+  status,
+  width,
+}: {
+  status: RunStatusState;
+  width: number;
+}) {
   const theme = useTuiTheme();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), RUN_STATUS_TICK_MS);
-    return () => clearInterval(timer);
-  }, [status.startedAt]);
-  const elapsedMs = now - status.startedAt;
-  const spinner =
-    RUN_SPINNER_FRAMES[
-      Math.floor(elapsedMs / RUN_STATUS_TICK_MS) % RUN_SPINNER_FRAMES.length
-    ];
-  const label = truncate(
-    status.label.replace(/\s+/g, " ").trim() || "Thinking…",
-    80,
-  );
-  const elapsed = formatElapsed(elapsedMs);
-  const tokens = formatRunStatusTokens(status.tokens);
+  const now = Date.now();
+  const chars = buildRunStatusChars(status, now, width);
+  const activeIndex = runStatusActiveIndex(chars, now);
 
   return (
     <Text>
-      <Text color={theme.colors.yellow} bold>
-        {spinner}{" "}
-      </Text>
-      <Text color={theme.colors.yellow}>{label}</Text>
-      <Text color={theme.colors.gray}>
-        {" "}
-        ({elapsed}
-        {tokens ? ` · ${tokens}` : " · tokens pending"})
-      </Text>
+      {chars.map((cell, index) => (
+        <Text
+          key={`${index}-${cell.char}`}
+          color={runStatusCharColor(theme, cell, index, activeIndex)}
+          bold={cell.bold || index === activeIndex}
+        >
+          {cell.char}
+        </Text>
+      ))}
     </Text>
   );
 }
@@ -7013,6 +7356,14 @@ function healthGlyph(entry: McpPanelEntry): string {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "AbortError" ||
+    /aborted|abort|interrupted/i.test(error.message)
+  );
 }
 
 function humanizeRuntimeError(error: unknown): string {

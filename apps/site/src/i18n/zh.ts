@@ -8,6 +8,7 @@ export const zh = {
   nav_github: "GitHub",
   nav_docs: "文档",
   nav_home: "首页",
+  slogan: "勇气是人类的赞歌，敢于挑战困难是乐趣的来源",
   release_label: "版本",
   hero_title_1: "Braincode",
   hero_title_2: "一个多模型 coding agent 编排器。",
@@ -91,12 +92,46 @@ export const zh = {
   radical_body:
     "工具并行调用、更广的角色拆分、最多 8 个计划 todo，并在依赖允许时至少 4 路 support agent 并发。",
   radical_meta: "-> 谨慎使用",
-  section_roles_eyebrow: "14 个角色 · 角色优先",
+  section_roles_eyebrow: "15 个角色 · 角色优先",
   section_roles_title: "Workflow engine，不是单模型 CLI。",
   section_roles_lead:
     "没有通用的 coding 角色。代码工作按领域拆分，每个角色都能路由到真正擅长这个领域的模型。由 LLM 驱动的 routeBrain 决定哪个专家上场。",
   section_roles_removed:
     "v0.2.0 移除：coding、fastReply、research —— 分别合并进领域专家、rush、librarian。",
+  roles_carousel_label: "Braincode 角色调用说明轮播图",
+  role_prev: "上一个角色",
+  role_next: "下一个角色",
+  role_call_label: "调用时机",
+  role_call_routeBrain:
+    "用于意图分类、角色选择、Worker 图规划、todo 归属和依赖边。它只负责编排路由，不直接解决任务。",
+  role_call_frontend:
+    "用于浏览器端行为：组件、状态、可访问性、响应式布局、文案容纳和视觉验证。",
+  role_call_backend:
+    "用于 API、服务层、校验、授权触点、持久化边界、错误处理和稳定的服务端行为。",
+  role_call_designer:
+    "用于 UX 流程、信息架构、交互模式、状态设计、视觉层级和产品文案优先级。",
+  role_call_imageMaker:
+    "当用户需要新的位图资产、角色图、图片提示词、生成视觉或通过配置好的 Images API 改图时调用。",
+  role_call_dba:
+    "用于 schema、迁移、索引、查询计划、约束、数据完整性、保留策略、回填和回滚风险。",
+  role_call_devops:
+    "用于构建、CI、打包、部署、本地环境、密钥接线、可观测性和运维 runbook。",
+  role_call_security:
+    "用于认证、权限、密钥、注入、依赖暴露、信任边界、滥用路径和安全默认值。",
+  role_call_qa:
+    "用于验收标准、可复现 bug、边界用例、回归检查、测试策略、fixtures 和覆盖缺口。",
+  role_call_review:
+    "当计划、diff 或结果已经存在，需要独立找缺陷、审回归风险或检查缺失测试时调用。",
+  role_call_summarize:
+    "用于把长上下文压缩成可交接状态：目标、决策、产物、验证、注意事项、阻塞和下一步。",
+  role_call_oracle:
+    "用于困难架构选择、模糊调试、复杂权衡、深度推理和不确定条件下的技术判断。",
+  role_call_librarian:
+    "用于仓库定位、符号查找、架构追踪、依赖地图、事实核验和精确引用。",
+  role_call_rush:
+    "用于很小、低风险的杂事和简短直接回复，前提是没有更合适的专家角色。",
+  role_call_pet:
+    "只用于只读的 TUI 状态报告。它观察实时运行快照并输出短进度文字，不参与路由。",
   section_cta_title: "准备好挑一颗大脑了吗？",
   section_cta_lead: "支持 macOS、Linux 和 npm。",
   cta_docs: "阅读文档",
@@ -162,7 +197,7 @@ export const zh = {
   docs_brain_example_title: "brains.json 示例",
   docs_brain_roles_title: "内置角色",
   docs_brain_roles_body:
-    "Braincode v0.2.0 内置 14 个角色槽。coding、fastReply、research 已移除，分别合并进领域专家、rush 和 librarian。",
+    "Braincode v0.2.0 内置 15 个角色槽。coding、fastReply、research 已移除，分别合并进领域专家、rush 和 librarian。",
 
   docs_modes_title: "4. 执行模式",
   docs_modes_intro:

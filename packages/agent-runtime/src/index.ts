@@ -22,6 +22,7 @@ export type AgentRunRequest = {
   prompt: string
   sessionId?: string
   projectRoot?: string
+  signal?: AbortSignal
   forceRoles?: RoutedAgentRole[]
   onPlan?: (plan: RuntimePlan) => void | Promise<void>
   onTodoEvent?: (event: TodoLifecycleEvent) => void | Promise<void>
@@ -42,6 +43,27 @@ export type ToolApprovalRequest = {
 export type ToolApprovalDecision = {
   approved: boolean
   reason?: string
+}
+
+function createRunAbortedError(): Error {
+  const error = new Error("Braincode run interrupted by user.")
+  error.name = "AbortError"
+  return error
+}
+
+function throwIfRunAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createRunAbortedError()
+}
+
+function linkRuntimeAbort(runtime: BraincodeAgentRuntime, signal?: AbortSignal): () => void {
+  if (!signal) return () => {}
+  const abort = () => runtime.agent.abort()
+  if (signal.aborted) {
+    abort()
+    return () => {}
+  }
+  signal.addEventListener("abort", abort, { once: true })
+  return () => signal.removeEventListener("abort", abort)
 }
 
 export type WorkerLifecycleEvent =
@@ -2669,7 +2691,9 @@ async function runWorkerFromPlan(
   tools: AgentTool[] = [],
   toolEvidenceCache?: ToolEvidenceCache,
   onEvent?: (event: AgentEvent) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<ExecutedWorkerResult> {
+  throwIfRunAborted(signal)
   const emit = async (event: WorkerLifecycleEvent) => {
     if (!onWorkerEvent) return
     try { await onWorkerEvent(event) } catch { /* ignore listener error */ }
@@ -2698,7 +2722,9 @@ async function runWorkerFromPlan(
       await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: { ...handoff.task.progress, status: "running" }, todoIds: worker.todoIds })
       await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
       try {
-        const generation = await generateImage(selection.configured, apiKey, { prompt })
+        throwIfRunAborted(signal)
+        const generation = await generateImage(selection.configured, apiKey, { prompt, signal })
+        throwIfRunAborted(signal)
         const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
         const result = imageMakerWorkerResult(worker, handoff, artifactPath, generation, prompt)
         await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }), attempt: attempt + 1 }, home)
@@ -2707,6 +2733,7 @@ async function runWorkerFromPlan(
         await emit({ type: "worker_end", role: worker.role, phase, status: "completed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: result.progress, summary: result.summary, todoIds: worker.todoIds })
         return result
       } catch (error) {
+        if (signal?.aborted) throw createRunAbortedError()
         const message = error instanceof Error ? error.message : String(error)
         await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
         if (attempt === candidates.length - 1) {
@@ -2764,6 +2791,7 @@ async function runWorkerFromPlan(
       getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
       onEvent,
     })
+    const unlinkAbort = linkRuntimeAbort(runtime, signal)
 
     try {
       const workerPrompt = addHookAdditionalContext(
@@ -2774,8 +2802,11 @@ async function runWorkerFromPlan(
         ],
       )
       try {
+        throwIfRunAborted(signal)
         await runtime.agent.prompt(workerPrompt, promptImages.length > 0 ? promptImages : undefined)
+        throwIfRunAborted(signal)
       } finally {
+        unlinkAbort()
         await recordAgentTokenUsage(
           runtime.agent.state.messages,
           {
@@ -2836,6 +2867,7 @@ async function runWorkerFromPlan(
         willFallback: attempt < candidates.length - 1,
       })
       await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+      if (signal?.aborted) throw createRunAbortedError()
       if (isHandoffRequiredError(error)) {
         await recordAutomaticHandoffIfNeeded(error, sessionId, home)
         break
@@ -2868,7 +2900,9 @@ async function runSupportWorkers(
   readOnlyTools: AgentTool[] = [],
   toolEvidenceCache?: ToolEvidenceCache,
   onEvent?: (event: AgentEvent) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<ExecutedWorkerResult[]> {
+  throwIfRunAborted(signal)
   if (workers.length === 0) return []
   void toolExecution // tool execution governs intra-agent tool calls; worker dependency scheduling is Brain-mediated.
 
@@ -2896,6 +2930,7 @@ async function runSupportWorkers(
   }
 
   while (pending.size > 0) {
+    throwIfRunAborted(signal)
     const pendingIndexes = Array.from(pending)
     const readyIndexes = pendingIndexes.filter(workerIsReady)
     const wave = (readyIndexes.length > 0 ? readyIndexes : pendingIndexes).slice(0, limit)
@@ -2920,6 +2955,7 @@ async function runSupportWorkers(
         workerTools,
         workerTools.length > 0 ? toolEvidenceCache : undefined,
         workerTools.length > 0 ? onEvent : undefined,
+        signal,
       )
       for (const todoId of worker.todoIds ?? []) {
         completedTodoIds.add(todoId)
@@ -3000,6 +3036,7 @@ function mergeReviewResult(summary: string, review: ExecutedWorkerResult | undef
 }
 
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
+  throwIfRunAborted(request.signal)
   const sessionId = request.sessionId ?? crypto.randomUUID()
   const cwd = request.projectRoot ?? process.cwd()
   const promptHookContext = createHookContext(sessionId, cwd, home)
@@ -3025,10 +3062,13 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   if (promptHooks.blockedReason) {
     throw new Error(`UserPromptSubmit hook blocked the prompt: ${promptHooks.blockedReason}`)
   }
+  throwIfRunAborted(request.signal)
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
+  throwIfRunAborted(request.signal)
   const promptImages = expanded.images
   const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId, sessionId)
+  throwIfRunAborted(request.signal)
   await appendSessionRecord(sessionId, { type: "context_plan", context: plan.context }, home)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
   if (request.onPlan) {
@@ -3096,7 +3136,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)
     if (plan.role === "imageMaker") {
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
@@ -3122,7 +3162,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           todoIds: primaryTodoIds,
         })
         try {
-          const generation = await generateImage(selection.configured, apiKey, { prompt: imagePrompt })
+          throwIfRunAborted(request.signal)
+          const generation = await generateImage(selection.configured, apiKey, { prompt: imagePrompt, signal: request.signal })
+          throwIfRunAborted(request.signal)
           const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
           const primarySummary = [
             `Generated image artifact: ${artifactPath}`,
@@ -3175,6 +3217,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             todoIds: primaryTodoIds,
           })
           await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+          if (request.signal?.aborted) throw createRunAbortedError()
         }
       }
       await updateTodoStatus(plan, todoIdsForRole(plan, plan.role), "failed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, error: lastError instanceof Error ? lastError.message : String(lastError) })
@@ -3225,11 +3268,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         onEvent: request.onEvent,
         onToolApproval: request.onToolApproval,
       })
+      const unlinkAbort = linkRuntimeAbort(runtime, request.signal)
 
       try {
         try {
+          throwIfRunAborted(request.signal)
           await runtime.agent.prompt(primaryPrompt, promptImages.length > 0 ? promptImages : undefined)
+          throwIfRunAborted(request.signal)
         } finally {
+          unlinkAbort()
           await recordAgentTokenUsage(
             runtime.agent.state.messages,
             {
@@ -3277,7 +3324,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           : undefined
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, projectSupport, reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)
             : undefined
         const reviewDecision = reviewResult
           ? applyCheckGateToReviewDecision(reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult, checks), checks)
@@ -3332,6 +3379,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           todoIds: primaryTodoIds,
         })
         await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+        if (request.signal?.aborted) throw createRunAbortedError()
         if (isHandoffRequiredError(error) || isProviderMessageSizeLimitError(error)) {
           await recordAutomaticHandoffIfNeeded(error, sessionId, home)
           break

@@ -81,10 +81,13 @@ export function Header() {
             {t("nav_github")}
           </a>
         </nav>
-        <div className="lang-switch" role="group" aria-label="Language">
-          <button type="button" className={lang === "en" ? "active" : ""} onClick={() => switchLang("en")}>EN</button>
-          <button type="button" className={lang === "zh" ? "active" : ""} onClick={() => switchLang("zh")}>中</button>
-          <button type="button" className={lang === "fr" ? "active" : ""} onClick={() => switchLang("fr")}>FR</button>
+        <div className="topnav-right">
+          <p className="topnav-slogan">{t("slogan")}</p>
+          <div className="lang-switch" role="group" aria-label="Language">
+            <button type="button" className={lang === "en" ? "active" : ""} onClick={() => switchLang("en")}>EN</button>
+            <button type="button" className={lang === "zh" ? "active" : ""} onClick={() => switchLang("zh")}>中</button>
+            <button type="button" className={lang === "fr" ? "active" : ""} onClick={() => switchLang("fr")}>FR</button>
+          </div>
         </div>
       </div>
     </header>

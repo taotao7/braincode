@@ -1,22 +1,64 @@
 import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
-import { useI18n } from "../i18n";
+import { useI18n, type I18nKey } from "../i18n";
 import { createHeroTimeline, createReveal, createScaleReveal } from "../animations";
 import routingUrl from "../assets/routing-diagram.png";
+import backendRoleUrl from "../assets/roles/backend.webp";
+import brainPetRoleUrl from "../assets/roles/brain-pet.webp";
+import dbaRoleUrl from "../assets/roles/dba.webp";
+import designerRoleUrl from "../assets/roles/designer.webp";
+import devopsRoleUrl from "../assets/roles/devops.webp";
+import frontendRoleUrl from "../assets/roles/frontend.webp";
+import imageMakerRoleUrl from "../assets/roles/image-maker.webp";
+import librarianRoleUrl from "../assets/roles/librarian.webp";
+import oracleRoleUrl from "../assets/roles/oracle.webp";
+import qaRoleUrl from "../assets/roles/qa.webp";
+import reviewRoleUrl from "../assets/roles/review.webp";
+import routeBrainRoleUrl from "../assets/roles/route-brain.webp";
+import rushRoleUrl from "../assets/roles/rush.webp";
+import securityRoleUrl from "../assets/roles/security.webp";
+import summarizeRoleUrl from "../assets/roles/summarize.webp";
 
 declare const __VERSION__: string;
 
-const ROLES = [
-  "Frontend", "Backend", "Designer", "DBA", "DevOps",
-  "Security", "QA", "Rush", "Librarian", "Review",
-  "Oracle", "Summarize", "routeBrain", "BrainPet",
+type RoleSlide = {
+  id: string;
+  label: string;
+  image: string;
+  callKey: I18nKey;
+};
+
+const ROLE_SLIDES: RoleSlide[] = [
+  { id: "routeBrain", label: "Route Brain", image: routeBrainRoleUrl, callKey: "role_call_routeBrain" },
+  { id: "frontend", label: "Frontend", image: frontendRoleUrl, callKey: "role_call_frontend" },
+  { id: "backend", label: "Backend", image: backendRoleUrl, callKey: "role_call_backend" },
+  { id: "designer", label: "Designer", image: designerRoleUrl, callKey: "role_call_designer" },
+  { id: "imageMaker", label: "Image Maker", image: imageMakerRoleUrl, callKey: "role_call_imageMaker" },
+  { id: "dba", label: "DBA", image: dbaRoleUrl, callKey: "role_call_dba" },
+  { id: "devops", label: "DevOps", image: devopsRoleUrl, callKey: "role_call_devops" },
+  { id: "security", label: "Security", image: securityRoleUrl, callKey: "role_call_security" },
+  { id: "qa", label: "QA", image: qaRoleUrl, callKey: "role_call_qa" },
+  { id: "review", label: "Review", image: reviewRoleUrl, callKey: "role_call_review" },
+  { id: "summarize", label: "Summarize", image: summarizeRoleUrl, callKey: "role_call_summarize" },
+  { id: "oracle", label: "Oracle", image: oracleRoleUrl, callKey: "role_call_oracle" },
+  { id: "librarian", label: "Librarian", image: librarianRoleUrl, callKey: "role_call_librarian" },
+  { id: "rush", label: "Rush", image: rushRoleUrl, callKey: "role_call_rush" },
+  { id: "pet", label: "BrainPet", image: brainPetRoleUrl, callKey: "role_call_pet" },
 ];
 
 export function Home() {
   const { t } = useI18n();
   const mainRef = useRef<HTMLElement>(null);
+  const roleCarouselRef = useRef<HTMLDivElement>(null);
 
   const copyInstall = () => navigator.clipboard.writeText("npm i -g @taotao7/braincode");
+  const scrollRoles = (direction: -1 | 1) => {
+    const carousel = roleCarouselRef.current;
+    if (!carousel) return;
+    const slide = carousel.querySelector<HTMLElement>(".role-slide");
+    const amount = slide ? slide.offsetWidth + 20 : carousel.clientWidth * 0.85;
+    carousel.scrollBy({ left: direction * amount, behavior: "smooth" });
+  };
 
   useGSAP(() => {
     if (!mainRef.current) return;
@@ -107,16 +149,18 @@ export function Home() {
       y: 24,
       stagger: 0.1,
     });
-    createReveal(mainRef.current, "#roles .role-tag", {
-      y: 20,
+    createReveal(mainRef.current, "#roles .role-carousel-control", {
+      y: 16,
       scale: 0.95,
-      stagger: { amount: 0.4, from: "random" },
-      duration: 0.5,
-      ease: "back.out(1.4)",
+      stagger: 0.08,
+      duration: 0.45,
     }, { start: "top 88%" });
-    createReveal(mainRef.current, "#roles .ph-img", {
-      y: 30,
-      stagger: 0.15,
+    createReveal(mainRef.current, "#roles .role-slide", {
+      y: 28,
+      scale: 0.98,
+      stagger: 0.08,
+      duration: 0.5,
+      ease: "power3.out",
     }, { start: "top 85%" });
 
     // Install CTA
@@ -371,22 +415,35 @@ export function Home() {
 
       {/* Roles */}
       <section className="section" id="roles">
-        <div className="container grid-2-1">
-          <div>
-            <p className="eyebrow">{t("section_roles_eyebrow")}</p>
-            <h2>{t("section_roles_title")}</h2>
-            <p className="lead" style={{ marginBlock: 24 }}>{t("section_roles_lead")}</p>
-            <div className="role-grid">
-              {ROLES.map((r) => <div className="role-tag" key={r}>{r}</div>)}
+        <div className="container stack role-showcase" style={{ gap: 32 }}>
+          <div className="grid-1-2" style={{ alignItems: "end" }}>
+            <div>
+              <p className="eyebrow">{t("section_roles_eyebrow")}</p>
+              <h2>{t("section_roles_title")}</h2>
             </div>
-            <p className="meta" style={{ marginTop: 16 }}>{t("section_roles_removed")}</p>
+            <div>
+              <p className="lead" style={{ border: "none", padding: 0 }}>{t("section_roles_lead")}</p>
+              <p className="meta role-note">{t("section_roles_removed")}</p>
+            </div>
           </div>
-          <div className="stack" style={{ gap: 24 }}>
-            <div className="ph-img portrait" aria-label="Terminal TUI showing BrainPet">
-              <span style={{ fontSize: 12 }}>[ Terminal TUI &amp; BrainPet ]</span>
+          <div className="role-carousel-shell" aria-label={t("roles_carousel_label")}>
+            <div className="role-carousel-controls">
+              <button className="btn role-carousel-control" type="button" onClick={() => scrollRoles(-1)} aria-label={t("role_prev")}>←</button>
+              <button className="btn role-carousel-control" type="button" onClick={() => scrollRoles(1)} aria-label={t("role_next")}>→</button>
             </div>
-            <div className="ph-img wide" aria-label="Browser config interface">
-              <span style={{ fontSize: 12 }}>[ Browser Config UI ]</span>
+            <div className="role-carousel" ref={roleCarouselRef} tabIndex={0}>
+              {ROLE_SLIDES.map((role) => (
+                <article className="role-slide" key={role.id}>
+                  <div className="role-slide-image">
+                    <img src={role.image} alt={`${role.label} role illustration`} loading="lazy" decoding="async" />
+                  </div>
+                  <div className="role-slide-body">
+                    <span className="role-slide-kicker">{t("role_call_label")}</span>
+                    <h3>{role.label}</h3>
+                    <p>{t(role.callKey)}</p>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
         </div>

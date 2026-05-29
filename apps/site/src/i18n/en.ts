@@ -8,6 +8,7 @@ export const en = {
   nav_github: "GitHub",
   nav_docs: "Docs",
   nav_home: "Home",
+  slogan: "Courage is humanity's hymn. Daring to challenge difficulty is where the fun begins.",
   release_label: "RELEASE",
   hero_title_1: "Braincode",
   hero_title_2: "A multi-model coding agent orchestrator.",
@@ -92,12 +93,46 @@ export const en = {
   radical_body:
     "Parallel tool calls, broader role decomposition, up to 8 planned todos, and at least 4-way support-agent concurrency when dependencies allow.",
   radical_meta: "-> use with caution",
-  section_roles_eyebrow: "14 ROLES · ROLE-FIRST",
+  section_roles_eyebrow: "15 ROLES · ROLE-FIRST",
   section_roles_title: "Workflow engine, not a one-model CLI.",
   section_roles_lead:
     "There is no generic coding role. Code work is split by domain so each role can be routed to a model that is actually strong at that domain. The LLM-driven routeBrain picks which specialist runs.",
   section_roles_removed:
     "v0.2.0 removed: coding, fastReply, research — folded into domain specialists, rush, and librarian respectively.",
+  roles_carousel_label: "Braincode role call guide carousel",
+  role_prev: "Previous role",
+  role_next: "Next role",
+  role_call_label: "Call when",
+  role_call_routeBrain:
+    "Use for intent classification, role selection, worker graph planning, todo ownership, and dependency edges. It routes work; it does not solve the task.",
+  role_call_frontend:
+    "Use for browser-facing behavior: components, state, accessibility, responsive layout, copy fit, and visual verification.",
+  role_call_backend:
+    "Use for APIs, services, validation, authorization touchpoints, persistence boundaries, error handling, and durable server behavior.",
+  role_call_designer:
+    "Use for UX flows, information architecture, interaction patterns, state design, visual hierarchy, and product copy priority.",
+  role_call_imageMaker:
+    "Use when the user needs a new raster asset, role portrait, image prompt, generated visual, or image edit through the configured Images API.",
+  role_call_dba:
+    "Use for schema, migrations, indexes, query plans, constraints, data integrity, retention, backfills, and rollback risk.",
+  role_call_devops:
+    "Use for build, CI, packaging, deployment, local environment, secrets wiring, observability, and operational runbooks.",
+  role_call_security:
+    "Use for auth, permissions, secrets, injection, dependency exposure, trust boundaries, abuse cases, and safe defaults.",
+  role_call_qa:
+    "Use for acceptance criteria, reproducible bugs, edge cases, regression checks, test strategy, fixtures, and coverage gaps.",
+  role_call_review:
+    "Use after a plan, diff, or result exists and needs independent defect finding, regression risk review, or missing-test analysis.",
+  role_call_summarize:
+    "Use to compress long context into a handoff-ready state with goals, decisions, artifacts, validation, caveats, and blockers.",
+  role_call_oracle:
+    "Use for hard architecture choices, ambiguous debugging, complex tradeoffs, deep reasoning, and decisions under uncertainty.",
+  role_call_librarian:
+    "Use for repo orientation, symbol lookup, architecture tracing, dependency maps, verified facts, and precise references.",
+  role_call_rush:
+    "Use for tiny low-risk chores and short direct replies when no specialist role is a better fit.",
+  role_call_pet:
+    "Use only as a read-only TUI status reporter. It watches live run snapshots and emits short progress lines; it never routes work.",
   section_cta_title: "Ready to pick your brain?",
   section_cta_lead: "Available for macOS, Linux, and npm.",
   cta_docs: "Read Documentation",
@@ -163,7 +198,7 @@ export const en = {
   docs_brain_example_title: "Example brains.json",
   docs_brain_roles_title: "Built-in roles",
   docs_brain_roles_body:
-    "Braincode v0.2.0 ships with 14 role slots. coding, fastReply, and research were removed and absorbed into domain specialists, rush, and librarian.",
+    "Braincode v0.2.0 ships with 15 role slots. coding, fastReply, and research were removed and absorbed into domain specialists, rush, and librarian.",
 
   docs_modes_title: "4. Execution Modes",
   docs_modes_intro:
