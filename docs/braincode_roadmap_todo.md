@@ -140,10 +140,10 @@ Session:
   - [x] `collectPatchSummary`
   - [x] `collectPatchDiffSnapshot`
   - [ ] untracked preview，见 P1-3
-- [ ] 新建 `packages/agent-runtime/src/checks.ts`
-  - [ ] `runPatchChecks`
-  - [ ] `runPatchChecksWithApproval`
-  - [ ] package manager detection
+- [x] 新建 `packages/agent-runtime/src/checks.ts`
+  - [x] `runPatchChecks`
+  - [x] `runPatchChecksWithApproval`
+  - [x] package manager detection
 - [ ] 新建 `packages/agent-runtime/src/router.ts`
   - [ ] `buildRuntimePlan`
   - [ ] `routePromptWithBrain`

@@ -84,8 +84,15 @@ braincode/
         index.ts
     agent-runtime/
       src/
+        benchmark.ts
+        checks.ts
+        context-budget.ts
+        evidence-cache.ts
+        hooks.ts
         index.ts
+        mcp.ts
         model-selection.ts
+        patch.ts
     tools/
       src/
         index.ts
