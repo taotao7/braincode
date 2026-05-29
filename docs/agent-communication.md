@@ -267,7 +267,7 @@ Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` 
 
 - **`onPlan` / `TodoLifecycleEvent`** from `AgentRunRequest` — Braincode-level todo planning and status updates. `onPlan` gives the UI the initial todo list; `TodoLifecycleEvent` moves each item through pending/running/completed/blocked/failed as the primary, support workers, and review workers finish.
 - **Live run status** in the TUI — elapsed time is driven by a local one-second timer, while token totals still come from provider `AgentEvent` usage data. This avoids freezing the visible timer during long model calls with no streaming updates.
-- **Transcript folding** in the TUI — tool and agent rows with `▸` / `▾` markers can be toggled by clicking any visible wrapped row. Mouse capture is enabled by default and can be disabled with `BRAINCODE_TUI_MOUSE=false`.
+- **Transcript folding** in the TUI — tool and agent rows with `▸` / `▾` markers are toggled with `Ctrl+T`; mouse capture is only used for wheel scrolling and can be disabled with `BRAINCODE_TUI_MOUSE=false`.
 - **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`, including routing source, confidence, reason, workers, and mode budgets.
 - **Router plan preview** in the TUI — `/plan <task>` asks the configured `routeBrain` by default; `/plan --heuristic <task>` is reserved for deterministic no-provider diagnostics. Router failures are surfaced as a heuristic fallback in `RuntimePlan.routing`.
 

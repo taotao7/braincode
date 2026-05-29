@@ -122,14 +122,6 @@ type QueuedTask = {
   itemId: string;
 };
 
-type TranscriptClickBound = {
-  itemId: string;
-  rowStart: number;
-  rowEnd: number;
-  foldLeft: number;
-  foldRight: number;
-};
-
 type TranscriptRenderEntry = {
   item: TranscriptItem;
   index: number;
@@ -137,7 +129,6 @@ type TranscriptRenderEntry = {
   showDivider: boolean;
   collapsible: boolean;
   rowStart: number;
-  contentRow: number;
   rowEnd: number;
 };
 
@@ -338,8 +329,11 @@ export async function runTui(initialPrompt?: string): Promise<void> {
 
 const INPUT_MAX_LINES = 6;
 const INPUT_PROMPT_PREFIX = "› ";
-const INPUT_RESERVED_COLUMNS = 4; // "› " prefix + cursor + a little padding
-const ROOT_PADDING_X = 1;
+const FRAME_RESERVED_COLUMNS = 4;
+const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
+const INK_RENDER_SAFETY_ROWS = 1;
+const OVERLAY_SUGGESTION_MIN_ROWS = 4;
+const OVERLAY_SUGGESTION_MAX_ROWS = 12;
 const PET_PANEL_MIN_WIDTH = 28;
 const PET_PANEL_MAX_WIDTH = 42;
 const RUN_SPINNER_FRAMES = [
@@ -577,8 +571,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const activeUsageKey = useRef<string | null>(null);
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage());
   const verticalCursorColumn = useRef<number | null>(null);
-  const transcriptClickBounds = useRef<TranscriptClickBound[]>([]);
-  const transcriptClickViewportOffset = useRef(0);
   const transcriptViewportState = useRef({
     totalRows: 0,
     viewportRows: 0,
@@ -635,6 +627,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     addSkills(userSupport?.skills, "user");
     return [...COMMANDS, ...skills];
   }, [projectSupport?.skills, userSupport?.skills]);
+  const overlaySuggestionLimit = Math.max(
+    OVERLAY_SUGGESTION_MIN_ROWS,
+    Math.min(OVERLAY_SUGGESTION_MAX_ROWS, terminalRows - 22),
+  );
 
   function filteredCommandsDynamic(filter: string): CommandDefinition[] {
     if (!filter) return dynamicCommands;
@@ -644,6 +640,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         command.name.startsWith(lower) ||
         command.label.toLowerCase().includes(lower),
     );
+  }
+
+  function commandOverlayMatches(filter: string): CommandDefinition[] {
+    return filteredCommandsDynamic(filter).slice(0, overlaySuggestionLimit);
   }
 
   useEffect(() => {
@@ -727,9 +727,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       for (const scroll of parsed.scrolls) {
         scrollTranscriptBy(scroll * TRANSCRIPT_MOUSE_WHEEL_ROWS);
       }
-      for (const click of parsed.clicks) {
-        handleTranscriptClick(click);
-      }
     };
     process.stdin.on("data", onData);
     return () => {
@@ -751,26 +748,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       ...previous,
       normalizeTranscriptItem({ id: crypto.randomUUID(), ...item }),
     ]);
-  }
-
-  function handleTranscriptClick(click: { x: number; y: number }) {
-    const row = click.y + transcriptClickViewportOffset.current;
-    const target = transcriptClickBounds.current.find(
-      (bound) =>
-        row >= bound.rowStart &&
-        row <= bound.rowEnd &&
-        click.x >= bound.foldLeft &&
-        click.x <= bound.foldRight,
-    );
-    if (!target) return;
-    setItems((previous) =>
-      previous.map((item) => {
-        if (item.id !== target.itemId || !isTranscriptItemCollapsible(item))
-          return item;
-        const normalized = normalizeTranscriptItem(item);
-        return { ...item, collapsed: !(normalized.collapsed ?? false) };
-      }),
-    );
   }
 
   function scrollTranscriptBy(deltaRows: number) {
@@ -795,6 +772,28 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function scrollTranscriptTo(position: "top" | "bottom") {
     const { maxScrollTop } = transcriptViewportState.current;
     setTranscriptScrollTop(position === "top" && maxScrollTop > 0 ? 0 : null);
+  }
+
+  function toggleTranscriptFolds() {
+    const foldable = items
+      .map(normalizeTranscriptItem)
+      .filter(isTranscriptItemCollapsible);
+    if (foldable.length === 0) {
+      flash("No foldable transcript items");
+      return;
+    }
+
+    const shouldExpand = foldable.some((item) => item.collapsed ?? false);
+    const nextCollapsed = !shouldExpand;
+    const foldableIds = new Set(foldable.map((item) => item.id));
+    setItems((previous) =>
+      previous.map((item) =>
+        foldableIds.has(item.id)
+          ? { ...normalizeTranscriptItem(item), collapsed: nextCollapsed }
+          : item,
+      ),
+    );
+    flash(shouldExpand ? "Transcript expanded" : "Transcript collapsed");
   }
 
   function flash(text: string, tone: ToastTone = "info", durationMs = 2500) {
@@ -2706,7 +2705,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function moveCursorVertical(delta: -1 | 1): boolean {
-    const width = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS);
+    const width = inputTextWidth(terminalCols);
     const result = moveDraftCursorVertically({
       draft,
       cursor,
@@ -2800,7 +2799,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function acceptOverlay() {
     if (!overlay) return false;
     if (overlay.kind === "command") {
-      const filtered = filteredCommandsDynamic(overlay.filter);
+      const filtered = commandOverlayMatches(overlay.filter);
       const command = filtered[overlay.selected] ?? filtered[0];
       if (!command) return false;
       if (command.insert) {
@@ -2813,7 +2812,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return true;
     }
     if (overlay.kind === "file") {
-      const matches = fuzzyFilter(projectFiles, overlay.filter, 12);
+      const matches = fuzzyFilter(
+        projectFiles,
+        overlay.filter,
+        overlaySuggestionLimit,
+      );
       const target = matches[overlay.selected] ?? matches[0];
       if (!target) return false;
       const before = draft.slice(0, overlay.anchor);
@@ -2826,7 +2829,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return true;
     }
     if (overlay.kind === "session") {
-      const matches = filterSessions(sessionSuggestions, overlay.filter, 12);
+      const matches = filterSessions(
+        sessionSuggestions,
+        overlay.filter,
+        overlaySuggestionLimit,
+      );
       const target = matches[overlay.selected] ?? matches[0];
       if (!target) {
         void refreshSessionSuggestions();
@@ -2992,6 +2999,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       } else {
         showIntentPanel();
       }
+      return;
+    }
+
+    if (key.ctrl && input === "t") {
+      toggleTranscriptFolds();
       return;
     }
 
@@ -3164,10 +3176,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (overlay) {
       const total =
         overlay.kind === "command"
-          ? filteredCommandsDynamic(overlay.filter).length
+          ? commandOverlayMatches(overlay.filter).length
           : overlay.kind === "file"
-            ? fuzzyFilter(projectFiles, overlay.filter, 12).length
-            : filterSessions(sessionSuggestions, overlay.filter, 12).length;
+            ? fuzzyFilter(projectFiles, overlay.filter, overlaySuggestionLimit)
+                .length
+            : filterSessions(
+                sessionSuggestions,
+                overlay.filter,
+                overlaySuggestionLimit,
+              ).length;
       const moveNext = key.downArrow || (key.ctrl && input === "n");
       const movePrev = key.upArrow || (key.ctrl && input === "p");
       if (total > 0 && (moveNext || movePrev)) {
@@ -3271,21 +3288,25 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   });
 
   const commandMatches =
-    overlay?.kind === "command" ? filteredCommandsDynamic(overlay.filter) : [];
+    overlay?.kind === "command" ? commandOverlayMatches(overlay.filter) : [];
   const fileMatches =
     overlay?.kind === "file"
-      ? fuzzyFilter(projectFiles, overlay.filter, 12)
+      ? fuzzyFilter(projectFiles, overlay.filter, overlaySuggestionLimit)
       : [];
   const sessionMatches =
     overlay?.kind === "session"
-      ? filterSessions(sessionSuggestions, overlay.filter, 12)
+      ? filterSessions(
+          sessionSuggestions,
+          overlay.filter,
+          overlaySuggestionLimit,
+        )
       : [];
   const projectMcpCount = projectSupport?.mcp?.serverNames.length ?? 0;
   const userMcpCount = userSupport?.mcp?.serverNames.length ?? 0;
   const projectSkillCount = projectSupport?.skills.length ?? 0;
   const userSkillCount = userSupport?.skills.length ?? 0;
-  const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS);
-  const contentWidth = Math.max(20, terminalCols - 4);
+  const contentWidth = frameContentWidth(terminalCols);
+  const inputWidth = inputTextWidth(terminalCols);
   const transcriptLayout = useMemo(
     () => layoutTranscriptItems(items, contentWidth),
     [items, contentWidth],
@@ -3320,10 +3341,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const scrollHelp = TUI_MOUSE_ENABLED
     ? "PageUp/PageDown/wheel/Ctrl+↑↓ scroll"
     : "PageUp/PageDown/Ctrl+↑↓ scroll";
-  const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · ${scrollHelp} · select content to copy · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
+  const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · Ctrl+T folds · ${scrollHelp} · select content to copy · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
+  const showEmptyIntro = items.length === 0 && draft.length === 0;
   const nonTranscriptRows = estimateNonTranscriptRows({
     hasTranscript: items.length > 0,
-    emptyLogoRows: BRAIN_LOGO.length + 2,
+    emptyLogoRows: showEmptyIntro ? BRAIN_LOGO.length + 4 : 0,
     brainPanel,
     intentPanel,
     sessionPanel,
@@ -3346,7 +3368,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     queueLength: queueRef.current.length,
     toast,
   });
-  const availableTranscriptRows = Math.max(1, terminalRows - nonTranscriptRows);
+  const availableTranscriptRows = Math.max(
+    1,
+    terminalRows - nonTranscriptRows - INK_RENDER_SAFETY_ROWS,
+  );
   const transcriptViewportRows =
     items.length > 0
       ? Math.min(
@@ -3360,7 +3385,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         transcriptLayout,
         transcriptViewportRows,
         transcriptScrollTop,
-        transcriptFirstItemRow(items.length > 0),
       ),
     [items.length, transcriptLayout, transcriptScrollTop, transcriptViewportRows],
   );
@@ -3379,8 +3403,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     maxScrollTop: transcriptViewport.maxScrollTop,
     scrollAnchors: transcriptAnchors,
   };
-  transcriptClickViewportOffset.current = 0;
-  transcriptClickBounds.current = transcriptViewport.bounds;
   const transcriptScrollSummary =
     transcriptScrollTop !== null && transcriptViewport.maxScrollTop > 0
       ? `${Math.round(transcriptViewport.scrollTop + transcriptViewport.viewportRows)}/${transcriptLayout.totalRows} rows`
@@ -3434,7 +3456,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           </Box>
         </Box>
 
-        {items.length === 0 ? (
+        {items.length === 0 && showEmptyIntro ? (
           <Box flexDirection="column" alignItems="center" marginY={1}>
             {BRAIN_LOGO.map((line, index) => (
               <Text key={`logo-${index}`} color={colors.cyan} bold>
@@ -3448,7 +3470,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
               </Text>
             </Box>
           </Box>
-        ) : (
+        ) : items.length > 0 ? (
           <Box flexDirection="column">
             <SectionDivider
               label={
@@ -3538,7 +3560,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
               )}
             </Box>
           </Box>
-        )}
+        ) : null}
 
         {brainPanel ? (
           <Box
@@ -3937,6 +3959,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           borderColor={tone(tuiTheme, running ? "yellow" : "green")}
           paddingX={1}
           flexDirection="column"
+          width={contentWidth}
+          overflow="hidden"
         >
           {running ? (
             <RuntimeStatusLine
@@ -4200,11 +4224,9 @@ function layoutTranscriptItems(
   width: number,
 ): {
   entries: TranscriptRenderEntry[];
-  bounds: TranscriptClickBound[];
   totalRows: number;
 } {
   const entries: TranscriptRenderEntry[] = [];
-  const bounds: TranscriptClickBound[] = [];
   let row = 0;
 
   for (let index = 0; index < items.length; index++) {
@@ -4225,7 +4247,6 @@ function layoutTranscriptItems(
     const showDivider = index > 0 && !continuation;
     const rowStart = row;
     if (showDivider) row += 1;
-    const contentRow = row;
     const mainRows = estimateTranscriptItemRows(
       item,
       width,
@@ -4234,21 +4255,6 @@ function layoutTranscriptItems(
     );
     const supplementRows = estimateTranscriptSupplementRows(item, width);
     const itemRows = mainRows + supplementRows;
-    if (collapsible) {
-      const foldHitBox = transcriptFoldHitBox(
-        normalized,
-        continuation,
-        collapsible,
-        width,
-      );
-      bounds.push({
-        itemId: normalized.id,
-        rowStart: contentRow,
-        rowEnd: contentRow + Math.max(0, mainRows - 1),
-        foldLeft: foldHitBox.foldLeft,
-        foldRight: foldHitBox.foldRight,
-      });
-    }
     row += itemRows + 1;
     entries.push({
       item,
@@ -4257,32 +4263,22 @@ function layoutTranscriptItems(
       showDivider,
       collapsible,
       rowStart,
-      contentRow,
       rowEnd: row,
     });
   }
 
-  return { entries, bounds, totalRows: row };
-}
-
-function transcriptFirstItemRow(hasTranscript: boolean): number {
-  if (!hasTranscript) return 0;
-  // Header: 4 rows, margin: 1 row, transcript divider: 1 row. Mouse rows are 1-based.
-  return 7;
+  return { entries, totalRows: row };
 }
 
 function viewportTranscriptLayout(
   layout: {
     entries: TranscriptRenderEntry[];
-    bounds: TranscriptClickBound[];
     totalRows: number;
   },
   viewportRows: number,
   requestedScrollTop: number | null,
-  firstTerminalRow: number,
 ): {
   entries: TranscriptRenderEntry[];
-  bounds: TranscriptClickBound[];
   scrollTop: number;
   maxScrollTop: number;
   viewportRows: number;
@@ -4299,28 +4295,8 @@ function viewportTranscriptLayout(
   const entries = layout.entries.filter(
     (entry) => entry.rowEnd > scrollTop && entry.rowStart < viewportEnd,
   );
-  const visibleIds = new Set(entries.map((entry) => entry.item.id));
-  const bounds = layout.bounds
-    .filter((bound) => visibleIds.has(bound.itemId))
-    .map((bound) => ({
-      ...bound,
-      rowStart: Math.max(
-        firstTerminalRow,
-        firstTerminalRow + bound.rowStart - scrollTop,
-      ),
-      rowEnd: Math.min(
-        firstTerminalRow + height - 1,
-        firstTerminalRow + bound.rowEnd - scrollTop,
-      ),
-    }))
-    .filter(
-      (bound) =>
-        bound.rowStart <= bound.rowEnd &&
-        bound.rowEnd >= firstTerminalRow &&
-        bound.rowStart < firstTerminalRow + height,
-    );
 
-  return { entries, bounds, scrollTop, maxScrollTop, viewportRows: height };
+  return { entries, scrollTop, maxScrollTop, viewportRows: height };
 }
 
 function transcriptScrollAnchors(
@@ -4453,38 +4429,6 @@ function estimateNonTranscriptRows({
 
 function borderedPanelRows(contentRows: number): number {
   return contentRows + 3;
-}
-
-function transcriptFoldHitBox(
-  item: TranscriptItem,
-  continuation: boolean,
-  collapsible: boolean,
-  width: number,
-): { foldLeft: number; foldRight: number } {
-  if (!collapsible) return { foldLeft: 0, foldRight: 0 };
-  const foldColumn = transcriptFoldColumn(item, continuation);
-  return {
-    foldLeft: 1,
-    foldRight: Math.max(
-      foldColumn + ROOT_PADDING_X + 2,
-      width + ROOT_PADDING_X,
-    ),
-  };
-}
-
-function transcriptFoldColumn(
-  item: TranscriptItem,
-  continuation: boolean,
-): number {
-  if (item.kind === "tool") {
-    const category = item.toolCategory ?? "tool";
-    const categoryLabel = `[${toolCategoryTitle(category)}]`;
-    const prefix = continuation
-      ? ` ↳ ${categoryLabel} `
-      : `[TOOL] · ${categoryLabel} `;
-    return visualWidth(prefix) + 1;
-  }
-  return 1;
 }
 
 function isTranscriptContinuation(
@@ -4728,11 +4672,9 @@ function sliceJsonObject(text: string): string | null {
 }
 
 function consumeMouseInput(input: string): {
-  clicks: Array<{ x: number; y: number }>;
   scrolls: number[];
   rest: string;
 } {
-  const clicks: Array<{ x: number; y: number }> = [];
   const scrolls: number[] = [];
   const regex = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
   let match: RegExpExecArray | null;
@@ -4740,8 +4682,6 @@ function consumeMouseInput(input: string): {
   while ((match = regex.exec(input))) {
     consumedUntil = regex.lastIndex;
     const code = Number(match[1]);
-    const x = Number(match[2]);
-    const y = Number(match[3]);
     const action = match[4];
     const button = code & 3;
     const isWheel = (code & 64) === 64;
@@ -4750,21 +4690,12 @@ function consumeMouseInput(input: string): {
       if (button === 1) scrolls.push(1);
       continue;
     }
-    if (
-      action === "M" &&
-      button === 0 &&
-      !isWheel &&
-      Number.isFinite(x) &&
-      Number.isFinite(y)
-    ) {
-      clicks.push({ x, y });
-    }
   }
   const rest =
     consumedUntil > 0
       ? input.slice(consumedUntil)
       : input.slice(Math.max(0, input.length - 32));
-  return { clicks, scrolls, rest };
+  return { scrolls, rest };
 }
 
 function isMouseInput(input: string): boolean {
@@ -4904,6 +4835,17 @@ function clamp(value: number, min: number, max: number): number {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+function frameContentWidth(terminalCols: number): number {
+  return Math.max(20, terminalCols - FRAME_RESERVED_COLUMNS);
+}
+
+function inputTextWidth(terminalCols: number): number {
+  return Math.max(
+    20,
+    frameContentWidth(terminalCols) - INPUT_BOX_HORIZONTAL_CHROME,
+  );
 }
 
 function composeDraftLine(draft: string, cursor: number): string {
@@ -5887,9 +5829,7 @@ function formatHelp(): string {
       : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is disabled by BRAINCODE_TUI_MOUSE=false.",
     "  • Press Ctrl+P/Ctrl+N for prompt history; ↑/↓ still moves within multi-line input.",
     "  • Press Ctrl+Y to edit the most recent queued prompt.",
-    TUI_MOUSE_ENABLED
-      ? "  • Click any long transcript item row with ▸/▾ to expand or collapse it."
-      : "  • Unset BRAINCODE_TUI_MOUSE=false to enable mouse wheel and click folding.",
+    "  • Press Ctrl+T to expand or collapse foldable transcript rows.",
     "  • Ctrl+V pastes a clipboard image or text from the system clipboard.",
     "  • Models are picked by Brain routing; use `braincode config` to change providers.",
   ].join("\n");

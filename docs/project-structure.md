@@ -110,7 +110,7 @@ Expected commands:
 
 The CLI should stay thin. It should delegate implementation to packages.
 
-The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, transcript folding, live token/elapsed status, and session state. The running status line should tick independently of provider/tool events so elapsed time stays current during long quiet calls. Transcript folding uses mouse capture by default and lets users click any visible row with a fold marker; set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture. The TUI should let users switch Braincode mode between `auto` and `radical` without leaving the TUI. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
+The interactive TUI is implemented with Ink and should expose Braincode product concepts such as mode, Brain Model routing, agent roles, tool approval, transcript folding, live token/elapsed status, and session state. The running status line should tick independently of provider/tool events so elapsed time stays current during long quiet calls. Transcript folding is controlled with `Ctrl+T`, while mouse capture is limited to wheel scrolling and can be disabled with `BRAINCODE_TUI_MOUSE=false`. The TUI should let users switch Braincode mode between `auto` and `radical` without leaving the TUI. It should not expose generic Pi model-switching controls; provider/model configuration belongs in `braincode config`.
 
 Early TUI commands:
 

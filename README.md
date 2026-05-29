@@ -82,14 +82,14 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 - Authenticated subscription providers from Pi OAuth, including Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot, can be selected from the model catalog without re-entering an API key.
 - TUI running status has its own one-second clock, so elapsed time keeps moving even when no token or tool event arrives.
 - TUI running status now has a lightweight text animation: the activity prefix cycles and the active status label highlights one character at a time.
-- TUI transcript folding uses mouse capture by default; click any visible main row of an item with a `▸` or `▾` marker to expand or collapse it. Tool calls now stay concise by default and move args/result details behind the folded row. Set `BRAINCODE_TUI_MOUSE=false` to disable mouse capture.
+- TUI transcript folding is keyboard-driven with `Ctrl+T`, which toggles foldable transcript rows between expanded and collapsed. Tool calls stay concise by default and move args/result details behind the folded row. Mouse capture is only used for wheel scrolling and can be disabled with `BRAINCODE_TUI_MOUSE=false`.
 - Provider message-size failures are surfaced as a Braincode handoff boundary. The TUI prompts `/handoff` so the user can continue from a compact `@@session` packet instead of silently compressing the active transcript.
 - The read-only evidence cache now resets cached entries and duplicate counters after write/execute tools, reducing stale duplicate-read warnings after files or command output change.
 - The npm wrapper and release metadata are versioned as `0.2.3` for the matching GitHub release assets.
 
 ### v0.2.2
 
-- TUI transcript folding now only toggles when the `▸` / `▾` marker is clicked, and hit testing accounts for the visible viewport and wrapped detail rows.
+- TUI transcript folding moved off row clicks and onto `Ctrl+T`, so transcript selection and folding no longer compete for mouse clicks.
 - TUI transcript rendering now uses an internal viewport with Up/Down when input is empty, PageUp/PageDown, Ctrl+Up/Ctrl+Down, and mouse-wheel history scrolling, so streaming output no longer forces the whole terminal scrollback to repaint. Prompt history is available with Ctrl+P/Ctrl+N.
 - BrainPet now lives in the bottom-right footer with stable low-refresh rendering by default, and reports context-aware progress with short dry asides when available. Set `BRAINCODE_TUI_ANIMATIONS=true` to re-enable its animation.
 - The npm wrapper and release metadata are versioned as `0.2.2` for the matching GitHub release assets.
@@ -98,7 +98,7 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 - Bun monorepo with `apps/*` and `packages/*` workspaces.
 - CLI entrypoints for `braincode`, `braincode run`, `braincode run --dry-run`, and `braincode config`.
-- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, row-click transcript folding, a live elapsed/token status line, footer BrainPet progress, and tool approval decisions.
+- Braincode-owned Ink TUI with slash commands, sessions, handoff, MCP/hook/brain/intent panels, streaming text, thinking, todo updates, worker lifecycle, `Ctrl+T` transcript folding, a live elapsed/token status line, footer BrainPet progress, and tool approval decisions.
 - Browser config service backed by `~/.braincode/` for settings, execution mode, brains, models, tools, auth status, authenticated subscription model selection, and usage statistics.
 - Brain preset inheritance via `extends`, so small Brain Model presets can override only the differing planner, role, routing, or context fields.
 - Runtime plans with mode, Brain Model, routed primary role, todos, dependencies, workers, routing metadata, selected model, and tool execution mode.

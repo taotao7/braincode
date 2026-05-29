@@ -71,14 +71,14 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 - L'interface Config Web est organisée en onglets, avec Models en premier. L'onglet usage affiche les statistiques de tokens par modèle, rôle et phase d'exécution, avec graphiques Recharts et filtres de détail au clic.
 - Les fournisseurs d'abonnement authentifiés via Pi OAuth, dont Claude Pro/Max, ChatGPT Plus/Pro Codex et GitHub Copilot, peuvent être sélectionnés dans le catalogue de modèles sans ressaisir de clé API.
 - La ligne d'état running de la TUI a maintenant sa propre horloge à une seconde et une animation légère : le préfixe tourne et le libellé met en surbrillance un caractère à la fois.
-- Le pliage du transcript de la TUI capture la souris par défaut et ne bascule que sur les lignes principales visibles avec `▸` ou `▾`. Les appels d'outils restent courts par défaut, avec arguments et résumé de résultat dans le détail replié. Définissez `BRAINCODE_TUI_MOUSE=false` pour désactiver la capture souris.
+- Le pliage du transcript de la TUI se fait au clavier avec `Ctrl+T`, qui bascule les lignes pliables entre affichage étendu et replié. Les appels d'outils restent courts par défaut, avec arguments et résumé de résultat dans le détail replié. La capture souris ne sert plus qu'à la molette et peut être désactivée avec `BRAINCODE_TUI_MOUSE=false`.
 - Les erreurs provider de taille de message sont présentées comme une frontière de handoff Braincode. La TUI propose `/handoff` pour continuer depuis un paquet `@@session` compact au lieu de compresser silencieusement le transcript actif.
 - Le cache d'évidence read-only réinitialise maintenant les entrées et compteurs de doublons après les outils write/execute, ce qui réduit les alertes stale duplicate-read.
 - Le wrapper npm et les métadonnées de release sont en `0.2.3` pour correspondre aux assets GitHub de même version.
 
 ### v0.2.2
 
-- Le pliage du transcript dans la TUI ne bascule plus que lors d'un clic sur `▸` / `▾`, avec un hit testing qui tient compte du viewport visible et des lignes de détails repliées.
+- Le pliage du transcript dans la TUI n'utilise plus les clics de souris et passe par `Ctrl+T`, afin que la sélection de texte et le pliage ne se concurrencent plus.
 - Le rendu du transcript de la TUI utilise maintenant un viewport interne avec Up/Down quand la saisie est vide, PageUp/PageDown, Ctrl+Up/Ctrl+Down et molette souris, afin que le streaming ne force plus le repaint de tout le scrollback du terminal. L'historique des prompts est disponible avec Ctrl+P/Ctrl+N.
 - BrainPet est maintenant ancré en bas à droite avec un rendu stable et peu rafraîchi par défaut, et affiche une progression contextuelle avec de courts apartés secs quand le contexte le permet. Définissez `BRAINCODE_TUI_ANIMATIONS=true` pour réactiver son animation.
 - Le wrapper npm et les métadonnées de release sont en `0.2.2` pour correspondre aux assets GitHub de même version.
@@ -128,7 +128,7 @@ Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs u
 - Fournir un service de configuration local que l'utilisateur ouvre dans son navigateur.
 - Stocker la configuration utilisateur réelle sous `~/.braincode/`.
 - Utiliser une TUI Ink appartenant à Braincode, centrée sur le mode, le routage Brain Model, les rôles d'agent, les permissions d'outils et l'état de session.
-- Garder le pliage du transcript précis sur les marqueurs `▸` / `▾`, avec BrainPet ancré en bas à droite pour la progression contextuelle.
+- Garder le pliage du transcript disponible avec `Ctrl+T`, avec BrainPet ancré en bas à droite pour la progression contextuelle.
 - Utiliser Bun et une architecture monorepo dès le départ.
 - Garder les paquets faiblement couplés et réutilisables.
 
