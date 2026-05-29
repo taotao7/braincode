@@ -277,7 +277,7 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 
 ## Current implementation phase
 
-The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, structured review decisions, permission policy, read-only evidence workers, package-manager-aware checks, and tool-call evidence caching are in place.
+The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, structured review decisions, permission policy, read-only evidence workers, package-manager-aware checks, review artifacts for untracked files, and tool-call evidence caching are in place.
 
 The coding patch engine now follows this path:
 
@@ -287,6 +287,7 @@ local tools
   -> file edits
   -> changed files
   -> git diff
+  -> untracked file previews
   -> checks
   -> review decision
   -> final patch report
@@ -360,6 +361,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: non-interactive run permission modes: read-only default, `--allow-edits` for local reads/file edits, and `--yes`.
 - Done: minimal patch ledger record with changed files and git diff stats.
 - Done: automated package-script checks for file-changing runs with package manager detection, `check_summary` session records, and review-worker patch/check artifacts.
+- Done: review-worker artifacts include capped text previews for newly created untracked files and binary markers for untracked binary files.
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
 - Done: run-level read-only evidence cache with duplicate tool-call reminders and write/execute invalidation.

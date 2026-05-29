@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process"
+import { open, stat } from "node:fs/promises"
+import { resolve, sep } from "node:path"
 
 const MAX_REVIEW_DIFF_CHARS = 60_000
+const MAX_UNTRACKED_PREVIEW_BYTES = 12_000
 
 export type PatchFileChange = {
   path: string
@@ -31,14 +34,22 @@ export type PatchDiffSnapshot = {
   truncated: boolean
 }
 
+export type UntrackedFilePreview = {
+  path: string
+  text?: string
+  truncated: boolean
+  binary: boolean
+  size: number
+}
+
 export async function collectPatchBaseline(projectRoot: string): Promise<PatchBaseline | undefined> {
-  const status = await runGitCommand(projectRoot, ["status", "--short"])
+  const status = await runGitCommand(projectRoot, ["status", "--short", "--untracked-files=all"])
   if (status.exitCode !== 0) return undefined
   return { changedFiles: parsePatchStatus(status.stdout) }
 }
 
 export async function collectPatchSummary(projectRoot: string, baseline?: PatchBaseline): Promise<PatchSummary | undefined> {
-  const status = await runGitCommand(projectRoot, ["status", "--short"])
+  const status = await runGitCommand(projectRoot, ["status", "--short", "--untracked-files=all"])
   if (status.exitCode !== 0) return undefined
   const currentChangedFiles = parsePatchStatus(status.stdout)
   const shortstat = await runGitCommand(projectRoot, ["diff", "--shortstat"])
@@ -85,6 +96,23 @@ export async function collectPatchDiffSnapshot(projectRoot: string, maxChars = M
   ].filter(Boolean).join("\n\n")
   const clipped = clipText(rawDiff, maxChars)
   return { stat, diff: clipped.text, truncated: clipped.truncated }
+}
+
+export async function collectUntrackedFilePreviews(projectRoot: string, patch?: PatchSummary, maxBytes = MAX_UNTRACKED_PREVIEW_BYTES): Promise<UntrackedFilePreview[]> {
+  const changes = patch
+    ? patch.changedFiles
+    : parsePatchStatus((await runGitCommand(projectRoot, ["status", "--short", "--untracked-files=all"])).stdout)
+  const paths = [...new Set(changes.filter((change) => change.status === "??").map((change) => change.path))]
+  const previews: UntrackedFilePreview[] = []
+
+  for (const path of paths) {
+    const absolutePath = resolveProjectPath(projectRoot, path)
+    if (!absolutePath) continue
+    const preview = await readUntrackedPreview(path, absolutePath, maxBytes)
+    if (preview) previews.push(preview)
+  }
+
+  return previews
 }
 
 async function runGitCommand(cwd: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
@@ -135,6 +163,62 @@ function combineGitShortstats(unstagedRaw: string, stagedRaw: string, untrackedF
     unstagedRaw,
     stagedRaw,
   }
+}
+
+function resolveProjectPath(projectRoot: string, path: string): string | undefined {
+  const root = resolve(projectRoot)
+  const absolutePath = resolve(root, path)
+  if (absolutePath !== root && absolutePath.startsWith(`${root}${sep}`)) return absolutePath
+  return undefined
+}
+
+async function readUntrackedPreview(path: string, absolutePath: string, maxBytes: number): Promise<UntrackedFilePreview | undefined> {
+  const info = await stat(absolutePath).catch(() => undefined)
+  if (!info) return undefined
+  if (!info.isFile()) {
+    return { path, truncated: false, binary: true, size: info.size }
+  }
+
+  const safeMaxBytes = Math.max(0, maxBytes)
+  const readBytes = Math.min(info.size, safeMaxBytes + 4)
+  const handle = await open(absolutePath, "r")
+  try {
+    const buffer = Buffer.alloc(readBytes)
+    const { bytesRead } = await handle.read(buffer, 0, readBytes, 0)
+    const sample = buffer.subarray(0, bytesRead)
+    const binary = isLikelyBinary(sample)
+    const truncated = info.size > safeMaxBytes
+    if (binary) return { path, truncated, binary: true, size: info.size }
+
+    const textBuffer = trimIncompleteUtf8(sample.subarray(0, Math.min(sample.length, safeMaxBytes)))
+    return {
+      path,
+      text: new TextDecoder("utf-8").decode(textBuffer),
+      truncated,
+      binary: false,
+      size: info.size,
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+function isLikelyBinary(buffer: Buffer): boolean {
+  return buffer.includes(0)
+}
+
+function trimIncompleteUtf8(buffer: Buffer): Buffer {
+  let leadIndex = buffer.length - 1
+  while (leadIndex >= 0 && (buffer[leadIndex] & 0b1100_0000) === 0b1000_0000) leadIndex -= 1
+  if (leadIndex < 0) return buffer.subarray(0, 0)
+  const lead = buffer[leadIndex]
+  const expectedLength =
+    (lead & 0b1111_1000) === 0b1111_0000 ? 4
+    : (lead & 0b1111_0000) === 0b1110_0000 ? 3
+    : (lead & 0b1110_0000) === 0b1100_0000 ? 2
+    : 1
+  const availableLength = buffer.length - leadIndex
+  return availableLength < expectedLength ? buffer.subarray(0, leadIndex) : buffer
 }
 
 function parseGitShortstat(raw: string): Pick<PatchSummary["diffStats"], "filesChanged" | "insertions" | "deletions"> {

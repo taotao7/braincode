@@ -28,9 +28,9 @@ import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunn
 import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
 export { runConfiguredHooks } from "./hooks"
 export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
-import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, hasPatchActivity, type PatchDiffSnapshot, type PatchSummary } from "./patch"
-export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary } from "./patch"
-export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary } from "./patch"
+import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews, hasPatchActivity, type PatchDiffSnapshot, type PatchSummary, type UntrackedFilePreview } from "./patch"
+export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews } from "./patch"
+export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary, UntrackedFilePreview } from "./patch"
 
 export type AgentRunRequest = {
   prompt: string
@@ -183,6 +183,7 @@ export type PatchReviewArtifacts = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   diff?: PatchDiffSnapshot
+  untrackedPreviews?: UntrackedFilePreview[]
 }
 
 export type ReviewDecisionStatus = "approved" | "changes_requested" | "blocked"
@@ -1705,7 +1706,7 @@ Return only JSON in this shape:
 }
 
 function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
-  if (!artifacts?.patch && !artifacts?.checks && !artifacts?.diff) return "No patch artifacts were collected."
+  if (!artifacts?.patch && !artifacts?.checks && !artifacts?.diff && !artifacts?.untrackedPreviews?.length) return "No patch artifacts were collected."
   const sections: string[] = []
   if (artifacts.patch) {
     const changed = artifacts.patch.changedFiles.length > 0
@@ -1728,6 +1729,18 @@ function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined)
   }
   if (artifacts.diff) {
     sections.push(`Git diff stat:\n${artifacts.diff.stat || "(no diff stat)"}\n\nGit diff${artifacts.diff.truncated ? " (truncated)" : ""}:\n${artifacts.diff.diff || "(no textual diff)"}`)
+  }
+  if (artifacts.untrackedPreviews?.length) {
+    const previews = artifacts.untrackedPreviews.map((preview) => {
+      const marker = [
+        `${preview.size} bytes`,
+        preview.binary ? "binary" : "text",
+        preview.truncated ? "truncated" : "",
+      ].filter(Boolean).join(", ")
+      if (preview.binary) return `- ${preview.path} (${marker})\n  (binary content omitted)`
+      return `- ${preview.path} (${marker})\n${preview.text || "(empty file)"}`
+    })
+    sections.push(`Untracked file previews:\n${previews.join("\n\n")}`)
   }
   return sections.join("\n\n")
 }
@@ -2744,7 +2757,12 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
         }
         const reviewArtifacts: PatchReviewArtifacts | undefined = hasPatchActivity(patchAfterPrimary)
-          ? { patch: patchAfterPrimary, checks, diff: await collectPatchDiffSnapshot(cwd) }
+          ? {
+              patch: patchAfterPrimary,
+              checks,
+              diff: await collectPatchDiffSnapshot(cwd),
+              untrackedPreviews: await collectUntrackedFilePreviews(cwd, patchAfterPrimary),
+            }
           : undefined
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"

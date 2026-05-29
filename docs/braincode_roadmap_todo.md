@@ -350,7 +350,7 @@ vendor
 
 ### TODO
 
-- [ ] 扩展 `PatchReviewArtifacts`
+- [x] 扩展 `PatchReviewArtifacts`
 
 ```ts
 type PatchReviewArtifacts = {
@@ -367,16 +367,16 @@ type PatchReviewArtifacts = {
 }
 ```
 
-- [ ] 从 `git status --short` 找出 `??` 文件
-- [ ] 对文本文件收集 capped preview
-- [ ] 对 binary 文件记录 binary marker
-- [ ] `buildReviewPrompt` 中加入 untracked previews
+- [x] 从 `git status --short` 找出 `??` 文件
+- [x] 对文本文件收集 capped preview
+- [x] 对 binary 文件记录 binary marker
+- [x] `buildReviewPrompt` 中加入 untracked previews
 
 ### 验收标准
 
-- [ ] 新建文件会出现在 review artifacts 中
-- [ ] reviewer 能看到新文件内容片段
-- [ ] 大文件/二进制不会污染上下文
+- [x] 新建文件会出现在 review artifacts 中
+- [x] reviewer 能看到新文件内容片段
+- [x] 大文件/二进制不会污染上下文
 
 ---
 
