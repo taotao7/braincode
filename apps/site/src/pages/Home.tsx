@@ -149,17 +149,9 @@ export function Home() {
       y: 24,
       stagger: 0.1,
     });
-    createReveal(mainRef.current, "#roles .role-carousel-control", {
-      y: 16,
-      scale: 0.95,
-      stagger: 0.08,
+    createReveal(mainRef.current, "#roles .role-carousel", {
+      y: 14,
       duration: 0.45,
-    }, { start: "top 88%" });
-    createReveal(mainRef.current, "#roles .role-slide", {
-      y: 28,
-      scale: 0.98,
-      stagger: 0.08,
-      duration: 0.5,
       ease: "power3.out",
     }, { start: "top 85%" });
 
@@ -173,6 +165,7 @@ export function Home() {
 
   return (
     <main id="content" ref={mainRef}>
+      <a href="#features" className="skip-link">Skip to content</a>
       {/* Hero Split */}
       <section className="section hero">
         <div className="container hero-split">
@@ -210,24 +203,24 @@ export function Home() {
             <p className="eyebrow">{t("section_arch_eyebrow")}</p>
             <h2>{t("section_arch_title")}</h2>
           </div>
-          <div className="grid-3">
+          <div className="features-asymmetric">
             <div className="feature">
               <div className="feature-mark">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v18M3 12h18"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h6M14 7h6M4 12h16M4 17h6M14 17h6"/></svg>
               </div>
               <h3>{t("feature_1_title")}</h3>
               <p>{t("feature_1_body")}</p>
             </div>
             <div className="feature">
               <div className="feature-mark">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><path d="M12 8v3M7.5 16.5L12 11l4.5 5.5"/></svg>
               </div>
               <h3>{t("feature_2_title")}</h3>
               <p>{t("feature_2_body")}</p>
             </div>
             <div className="feature">
               <div className="feature-mark">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 16V7a2 2 0 00-2-2H6a2 2 0 00-2 2v9m16 0H4m16 0l1.28 2.55a1 1 0 01-.9 1.45H3.62a1 1 0 01-.9-1.45L4 16"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
               </div>
               <h3>{t("feature_3_title")}</h3>
               <p>{t("feature_3_body")}</p>
@@ -344,26 +337,26 @@ export function Home() {
       </section>
 
       {/* Execution Modes */}
-      <section className="section" id="modes" style={{ background: "var(--fg)", color: "var(--bg)" }}>
+      <section className="section modes-section" id="modes">
         <div className="container stack" style={{ gap: 48 }}>
           <div>
-            <p className="eyebrow" style={{ color: "var(--bg)", borderColor: "var(--bg)" }}>{t("section_modes_eyebrow")}</p>
-            <h2 style={{ color: "var(--bg)" }}>{t("section_modes_title")}</h2>
+            <p className="eyebrow">{t("section_modes_eyebrow")}</p>
+            <h2>{t("section_modes_title")}</h2>
           </div>
           <div className="grid-2">
-            <div className="card" style={{ background: "var(--bg)", color: "var(--fg)" }}>
+            <div className="card">
               <h3>{t("auto_title")}</h3>
               <hr className="rule-strong" style={{ marginBlock: 16 }} />
               <p style={{ fontWeight: "bold", marginBottom: 24 }}>{t("auto_tagline")}</p>
               <p>{t("auto_body")}</p>
               <div className="meta" style={{ marginTop: 24 }}>{t("auto_meta")}</div>
             </div>
-            <div className="card" style={{ background: "var(--accent)", color: "var(--bg)", borderColor: "var(--bg)", boxShadow: "6px 6px 0px var(--bg)" }}>
+            <div className="card mode-radical">
               <h3>{t("radical_title")}</h3>
-              <hr className="rule-strong" style={{ marginBlock: 16, borderColor: "var(--bg)" }} />
+              <hr className="rule-strong mode-radical-rule" style={{ marginBlock: 16 }} />
               <p style={{ fontWeight: "bold", marginBottom: 24 }}>{t("radical_tagline")}</p>
               <p>{t("radical_body")}</p>
-              <div className="meta" style={{ marginTop: 24, color: "var(--bg)", opacity: 0.8 }}>{t("radical_meta")}</div>
+              <div className="meta mode-radical-meta" style={{ marginTop: 24 }}>{t("radical_meta")}</div>
             </div>
           </div>
         </div>
@@ -416,8 +409,8 @@ export function Home() {
 
       {/* Roles */}
       <section className="section" id="roles">
-        <div className="container stack role-showcase" style={{ gap: 32 }}>
-          <div className="grid-1-2" style={{ alignItems: "end" }}>
+        <div className="container stack role-showcase" style={{ gap: 24 }}>
+          <div className="grid-1-2 role-showcase-head">
             <div>
               <p className="eyebrow">{t("section_roles_eyebrow")}</p>
               <h2>{t("section_roles_title")}</h2>

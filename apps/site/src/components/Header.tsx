@@ -76,7 +76,7 @@ export function Header() {
           <ScrollLink to="/" section="handoff">{t("nav_handoff")}</ScrollLink>
           <ScrollLink to="/" section="modes">{t("nav_modes")}</ScrollLink>
           <ScrollLink to="/" section="install">{t("nav_install")}</ScrollLink>
-          <a href="#/docs">{t("nav_docs")}</a>
+          <a href="#/docs" className={location.pathname === "/docs" ? "active" : ""}>{t("nav_docs")}</a>
           <a href="https://github.com/taotao7/braincode" target="_blank" rel="noopener noreferrer">
             {t("nav_github")}
           </a>
