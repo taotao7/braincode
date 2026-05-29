@@ -102,10 +102,10 @@ export type ContextRef = {
 
 1. **Prompt 展开** —— `expandPromptReferences` 把 `@<path>` 和 `@@<session-id>` 标记重写为内联段落，追加到 prompt 末尾。原 token 保留，方便模型引用。上限：单个文件 64 KB，单次会话快照 24 KB。
 2. **项目支持文件组装** —— `readProjectSupport` 收集 `AGENTS.md`、`.mcp.json` 元数据、`.agents/skill/*` 内容。`formatProjectSupportPromptSection` 用于 prompt 文本；`projectSupportContextRefs` 把它打包成 `ContextRef[]` 进 handoff packet。
-3. **运行时 context 计划** —— `buildRuntimePlan` 创建一个 `BrainTaskContext`；真实执行时它的 id 就是 session id，同时给每个 `RuntimeWorkerPlan` 分配稳定的子 `contextId`。
-4. **Handoff 构造** —— `createWorkerHandoff` 给每个 worker 生成一个 `HandoffPacket`，使用 worker 计划里的 `contextId` 作为 `task.id`，`parentId` 设为 Brain session id，`constraints` 填进隔离规则（见下），`expectedResult` 描述 worker 该返回的 JSON 形状。
-5. **Worker 运行** —— `runWorkerFromPlan` 为 worker 新建一个 Pi `Agent`。prompt 由 `buildSupportWorkerPrompt` 组装：项目支持段 + 原始用户请求 + todo 依赖需要时由 Brain 提供的上游 worker 摘要 + handoff packet（JSON）+ 期望回复形状。Worker 没法访问编排器的 `Agent` 状态。
-6. **结果归一化** —— `normalizeWorkerResultText` 把 worker 的回复解析成 `WorkerResult`。如果回复是纯文本而不是 JSON，会包成一个 `completed` 状态、`summary` = 文本的 `WorkerResult`。这是故意做的容错：provider 漂移不应该弄垮编排。
+3. **运行时 context 计划** —— `packages/agent-runtime/src/router.ts` 里的 `buildRuntimePlan` 创建一个 `BrainTaskContext`；真实执行时它的 id 就是 session id，同时给每个 `RuntimeWorkerPlan` 分配稳定的子 `contextId`。
+4. **Handoff 构造** —— `packages/agent-runtime/src/workers.ts` 里的 `createWorkerHandoff` 给每个 worker 生成一个 `HandoffPacket`，使用 worker 计划里的 `contextId` 作为 `task.id`，`parentId` 设为 Brain session id，`constraints` 填进隔离规则（见下），`expectedResult` 描述 worker 该返回的 JSON 形状。
+5. **Worker 运行** —— `packages/agent-runtime/src/workers.ts` 里的 `runWorkerFromPlan` 为 worker 新建一个 Pi `Agent`。prompt 由 `buildSupportWorkerPrompt` 组装：项目支持段 + 原始用户请求 + todo 依赖需要时由 Brain 提供的上游 worker 摘要 + handoff packet（JSON）+ 期望回复形状。Worker 没法访问编排器的 `Agent` 状态。
+6. **结果归一化** —— `packages/agent-runtime/src/workers.ts` 里的 `normalizeWorkerResultText` 把 worker 的回复解析成 `WorkerResult`。如果回复是纯文本而不是 JSON，会包成一个 `completed` 状态、`summary` = 文本的 `WorkerResult`。这是故意做的容错：provider 漂移不应该弄垮编排。
 7. **通信记录** —— Brain 会把 handoff 和 result/error 信封记录成 `agent_message` 事件，后续 replay 或远程 worker 可以共用同一条消息流。
 8. **主 prompt** —— `buildPrimaryPrompt` 给主 agent 的内容是：用户请求 + 格式化后的 worker 摘要列表（role、status、goal、progress、summary、risks、open questions）。**不** 给主 agent 任何 worker 的对话历史。
 9. **Todo 更新** —— runtime 会在 primary / worker / review 的 owner 启动和结束时，把 todo 标为 running、completed、blocked 或 failed。
@@ -178,7 +178,7 @@ Brain Model 还暴露了一份软策略（`brain.context.maxInputTokens`、`comp
 
 - Packet 类型：`packages/context/src/index.ts`
 - 线协议词汇：`packages/protocol/src/index.ts`
-- Handoff / result 接线：`packages/agent-runtime/src/index.ts` 里的 `createWorkerHandoff`、`runWorkerFromPlan`、`normalizeWorkerResultText`
+- Handoff / result 接线：`packages/agent-runtime/src/workers.ts` 里的 `createWorkerHandoff`、`runWorkerFromPlan`、`normalizeWorkerResultText`
 - Prompt 组装：`buildSupportWorkerPrompt`、`buildPrimaryPrompt`、`buildReviewPrompt`、`formatWorkerResults`、`formatProjectSupportPromptSection`
 - Prompt 引用：`expandPromptReferences`、`formatSessionContext`
 - Session 读写：`packages/config/src/index.ts` 里的 `appendSessionRecord`、`readSessionContext`

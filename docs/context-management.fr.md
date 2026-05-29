@@ -102,11 +102,12 @@ L'orchestrateur est `executePromptFromConfig` dans `packages/agent-runtime/src/i
 
 1. **Expansion du prompt** — `expandPromptReferences` réécrit les marqueurs `@<path>` et `@@<session-id>` en sections inlinées ajoutées au prompt. Les tokens originaux sont conservés pour que le modèle puisse y faire référence. Limites : 64 Ko par fichier, 24 Ko par instantané de session.
 2. **Assemblage du support projet** — `readProjectSupport` collecte `AGENTS.md`, les métadonnées de `.mcp.json` et le contenu de `.agents/skill/*`. `formatProjectSupportPromptSection` formate ceci pour les prompts ; `projectSupportContextRefs` l'emballe en `ContextRef[]` pour les handoff packets.
-3. **Construction du handoff worker** — `createWorkerHandoff` construit un `HandoffPacket` par worker, frappe un nouveau `task.id`, fixe `parentId` à l'id de session Brain, remplit `constraints` avec les règles d'isolation (voir ci-dessous), et fixe `expectedResult` à la forme JSON que le worker doit retourner.
-4. **Exécution du worker** — `runWorkerFromPlan` crée un Pi `Agent` flambant neuf pour le worker. Son prompt est composé par `buildSupportWorkerPrompt` : section support projet + requête utilisateur originale + handoff packet (en JSON) + forme de réponse attendue. Le worker n'a aucun accès à l'état `Agent` de l'orchestrateur.
-5. **Normalisation du résultat** — `normalizeWorkerResultText` parse la réponse du worker en `WorkerResult`. Si la réponse est du texte brut au lieu de JSON, elle est emballée dans un `WorkerResult` complété avec `summary` = le texte. C'est une résilience intentionnelle : la dérive provider ne doit pas casser l'orchestration.
-6. **Prompt primaire** — `buildPrimaryPrompt` donne à l'agent primaire la requête utilisateur plus une liste formatée des résumés workers (rôle, statut, but, progression, summary, risques, questions ouvertes). Il *ne* donne *pas* à l'agent primaire les conversations brutes des workers.
-7. **Review optionnelle** — si le plan exige une review et que le primaire n'est pas déjà le rôle review, `buildReviewPrompt` exécute un worker review avec le résumé du primaire, les résultats workers et un handoff packet frais.
+3. **Plan de contexte runtime** — `buildRuntimePlan` dans `packages/agent-runtime/src/router.ts` crée le `BrainTaskContext` et assigne à chaque `RuntimeWorkerPlan` un `contextId` stable.
+4. **Construction du handoff worker** — `createWorkerHandoff` dans `packages/agent-runtime/src/workers.ts` construit un `HandoffPacket` par worker, utilise le `contextId` du worker comme `task.id`, fixe `parentId` à l'id de session Brain, remplit `constraints` avec les règles d'isolation (voir ci-dessous), et fixe `expectedResult` à la forme JSON que le worker doit retourner.
+5. **Exécution du worker** — `runWorkerFromPlan` dans `packages/agent-runtime/src/workers.ts` crée un Pi `Agent` flambant neuf pour le worker. Son prompt est composé par `buildSupportWorkerPrompt` : section support projet + requête utilisateur originale + handoff packet (en JSON) + forme de réponse attendue. Le worker n'a aucun accès à l'état `Agent` de l'orchestrateur.
+6. **Normalisation du résultat** — `normalizeWorkerResultText` dans `packages/agent-runtime/src/workers.ts` parse la réponse du worker en `WorkerResult`. Si la réponse est du texte brut au lieu de JSON, elle est emballée dans un `WorkerResult` complété avec `summary` = le texte. C'est une résilience intentionnelle : la dérive provider ne doit pas casser l'orchestration.
+7. **Prompt primaire** — `buildPrimaryPrompt` donne à l'agent primaire la requête utilisateur plus une liste formatée des résumés workers (rôle, statut, but, progression, summary, risques, questions ouvertes). Il *ne* donne *pas* à l'agent primaire les conversations brutes des workers.
+8. **Review optionnelle** — si le plan exige une review et que le primaire n'est pas déjà le rôle review, `buildReviewPrompt` exécute un worker review avec le résumé du primaire, les résultats workers et un handoff packet frais.
 
 La liste de contraintes incrustée dans chaque handoff de support (depuis `createWorkerHandoff`) est :
 
@@ -170,7 +171,7 @@ Brain Model expose aussi une politique douce (`brain.context.maxInputTokens`, `c
 
 - Types de packet : `packages/context/src/index.ts`
 - Vocabulaire filaire : `packages/protocol/src/index.ts`
-- Câblage handoff + result : `createWorkerHandoff`, `runWorkerFromPlan`, `normalizeWorkerResultText` dans `packages/agent-runtime/src/index.ts`
+- Câblage handoff + result : `createWorkerHandoff`, `runWorkerFromPlan`, `normalizeWorkerResultText` dans `packages/agent-runtime/src/workers.ts`
 - Assemblage de prompt : `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`, `formatProjectSupportPromptSection`
 - Références de prompt : `expandPromptReferences`, `formatSessionContext`
 - Lecture/écriture session : `appendSessionRecord`, `readSessionContext` dans `packages/config/src/index.ts`

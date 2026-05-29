@@ -102,10 +102,10 @@ The orchestrator is `executePromptFromConfig` in `packages/agent-runtime/src/ind
 
 1. **Prompt expansion** — `expandPromptReferences` rewrites `@<path>` and `@@<session-id>` markers into inlined sections appended to the prompt. The original tokens are kept so the model can refer to them. Limits: 64 KB per file, 24 KB per session snapshot.
 2. **Project support assembly** — `readProjectSupport` collects `AGENTS.md`, `.mcp.json` metadata, and `.agents/skill/*` content. `formatProjectSupportPromptSection` formats this for prompts; `projectSupportContextRefs` packs it as `ContextRef[]` for handoff packets.
-3. **Runtime context plan** — `buildRuntimePlan` creates one `BrainTaskContext` whose id is the session id during real execution, then assigns every `RuntimeWorkerPlan` a stable child `contextId`.
-4. **Worker handoff construction** — `createWorkerHandoff` builds one `HandoffPacket` per worker, uses the worker's planned `contextId` as `task.id`, sets `parentId` to the Brain session id, fills `constraints` with the isolation rules (see below), and sets `expectedResult` to the JSON shape the worker should return.
-5. **Worker run** — `runWorkerFromPlan` creates a brand-new Pi `Agent` for the worker. Its prompt is composed by `buildSupportWorkerPrompt`: project support section + original user request + optional Brain-supplied prior worker summaries for todo dependencies + the handoff packet (as JSON) + the expected reply shape. The worker has no access to the orchestrator's `Agent` state.
-6. **Result normalization** — `normalizeWorkerResultText` parses the worker's reply into a `WorkerResult`. If the reply is plain text instead of JSON, it is wrapped into a completed `WorkerResult` with `summary` = the text. This is intentional resilience: provider drift should not break orchestration.
+3. **Runtime context plan** — `buildRuntimePlan` in `packages/agent-runtime/src/router.ts` creates one `BrainTaskContext` whose id is the session id during real execution, then assigns every `RuntimeWorkerPlan` a stable child `contextId`.
+4. **Worker handoff construction** — `createWorkerHandoff` in `packages/agent-runtime/src/workers.ts` builds one `HandoffPacket` per worker, uses the worker's planned `contextId` as `task.id`, sets `parentId` to the Brain session id, fills `constraints` with the isolation rules (see below), and sets `expectedResult` to the JSON shape the worker should return.
+5. **Worker run** — `runWorkerFromPlan` in `packages/agent-runtime/src/workers.ts` creates a brand-new Pi `Agent` for the worker. Its prompt is composed by `buildSupportWorkerPrompt`: project support section + original user request + optional Brain-supplied prior worker summaries for todo dependencies + the handoff packet (as JSON) + the expected reply shape. The worker has no access to the orchestrator's `Agent` state.
+6. **Result normalization** — `normalizeWorkerResultText` in `packages/agent-runtime/src/workers.ts` parses the worker's reply into a `WorkerResult`. If the reply is plain text instead of JSON, it is wrapped into a completed `WorkerResult` with `summary` = the text. This is intentional resilience: provider drift should not break orchestration.
 7. **Communication record** — Brain records `agent_message` events for the handoff and the result/error envelope so later replay or remote worker work has a canonical message stream.
 8. **Primary prompt** — `buildPrimaryPrompt` gives the primary agent the user request plus a formatted list of worker summaries (role, status, goal, progress, summary, risks, open questions). It does *not* hand the primary any worker transcripts.
 9. **Todo updates** — the runtime marks the primary/worker/review todos as running, completed, blocked, or failed as each owner starts or finishes.
@@ -178,7 +178,7 @@ Brain Model also exposes a soft policy (`brain.context.maxInputTokens`, `compact
 
 - Packet types: `packages/context/src/index.ts`
 - Wire vocabulary: `packages/protocol/src/index.ts`
-- Handoff + result wiring: `createWorkerHandoff`, `runWorkerFromPlan`, `normalizeWorkerResultText` in `packages/agent-runtime/src/index.ts`
+- Handoff + result wiring: `createWorkerHandoff`, `runWorkerFromPlan`, `normalizeWorkerResultText` in `packages/agent-runtime/src/workers.ts`
 - Prompt assembly: `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`, `formatProjectSupportPromptSection`
 - Prompt references: `expandPromptReferences`, `formatSessionContext`
 - Session writes/reads: `appendSessionRecord`, `readSessionContext` in `packages/config/src/index.ts`

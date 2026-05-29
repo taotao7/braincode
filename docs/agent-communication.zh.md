@@ -92,7 +92,7 @@ WorkerResult = AgentToBrainContextTransfer & {
 
 ## 一个 worker 的生命周期
 
-`packages/agent-runtime/src/index.ts` 里的 `runWorkerFromPlan` 是 worker 的标准驱动。它实现的形状：
+`packages/agent-runtime/src/workers.ts` 里的 `runWorkerFromPlan` 是 worker 的标准驱动。它实现的形状：
 
 ```
 plan 出一个 worker  -->  createWorkerHandoff(worker, parentId, phase)
@@ -162,7 +162,7 @@ return ExecutedWorkerResult
 两层路由协作产出一个 `AgentRoutingPlan`：
 
 - `packages/brain` 里的 `planAgentRouting(prompt, brain)` —— 确定性的安全兜底。用于 heuristic 诊断、provider 失败、以及作为 router brain 细化时的基线。
-- `agent-runtime` 里的 `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` —— 用一个严格 JSON 风格的 prompt 调 brain 的 `planner` / `roles.routeBrain` 模型，解析结果。`normalizeRouterDecision` 会用启发式兜底和 `brain.routing.maxParallelAgents` 校验和裁剪选择。
+- `packages/agent-runtime/src/router.ts` 里的 `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` —— 用一个严格 JSON 风格的 prompt 调 brain 的 `planner` / `roles.routeBrain` 模型，解析结果。`normalizeRouterDecision` 会用启发式兜底和 `brain.routing.maxParallelAgents` 校验和裁剪选择。
 
 两条路径最终归一为同一种形状：
 
@@ -305,8 +305,8 @@ Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后
 
 - 信封：`packages/protocol/src/index.ts` —— `AgentMessage`、`ContextRef`。
 - Payload：`packages/context/src/index.ts` —— `HandoffPacket`、`WorkerResult`、task context、方向常量。
-- Worker 驱动：`packages/agent-runtime/src/index.ts` 里的 `runWorkerFromPlan`。
-- Plan 组成：`buildRuntimePlan`、`routePromptWithBrain`、`normalizeRouterDecision`。
+- Worker 驱动：`packages/agent-runtime/src/workers.ts` 里的 `runWorkerFromPlan`。
+- Plan 组成：`packages/agent-runtime/src/router.ts` 里的 `buildRuntimePlan`、`routePromptWithBrain`、`normalizeRouterDecision`。
 - Prompt 构造器：`buildSupportWorkerPrompt`、`buildPrimaryPrompt`、`buildReviewPrompt`、`formatWorkerResults`。
 - 可靠性：`packages/agent-runtime/src/model-selection.ts` 里的 `selectRuntimeModelCandidatesWithApiKey`。
 - Hooks：`runConfiguredHooks`、`runAndRecordHooks`、`parseHookOutput`。

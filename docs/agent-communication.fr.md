@@ -92,7 +92,7 @@ Correspondance entre les deux :
 
 ## Cycle de vie d'un worker
 
-`runWorkerFromPlan` dans `packages/agent-runtime/src/index.ts` est le pilote canonique du worker. La forme qu'il implémente :
+`runWorkerFromPlan` dans `packages/agent-runtime/src/workers.ts` est le pilote canonique du worker. La forme qu'il implémente :
 
 ```
 plan un worker  -->  createWorkerHandoff(worker, parentId, phase)
@@ -157,7 +157,7 @@ Notes à intérioriser avant de changer ce code :
 Deux routeurs coopèrent pour produire un `AgentRoutingPlan` :
 
 - `planAgentRouting(prompt, brain)` dans `packages/brain` — classificateur déterministe regex/mots-clés. Utilisé pour les diagnostics heuristic, le fallback et comme base que le router brain raffine.
-- `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` dans `agent-runtime` — appelle le modèle `planner` / `roles.routeBrain` du brain avec un prompt JSON strict et parse le résultat. `normalizeRouterDecision` valide et plafonne le choix contre le fallback heuristique et `brain.routing.maxParallelAgents`.
+- `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` dans `packages/agent-runtime/src/router.ts` — appelle le modèle `planner` / `roles.routeBrain` du brain avec un prompt JSON strict et parse le résultat. `normalizeRouterDecision` valide et plafonne le choix contre le fallback heuristique et `brain.routing.maxParallelAgents`.
 
 Les deux chemins se normalisent vers la même forme :
 
@@ -297,8 +297,8 @@ Les étapes 1–3 sont le contrat. Les étapes 4–6 sont comment le reste de Br
 
 - Enveloppe : `packages/protocol/src/index.ts` — `AgentMessage`, `ContextRef`.
 - Payloads : `packages/context/src/index.ts` — `HandoffPacket`, `WorkerResult`, contextes de tâche, constantes de direction.
-- Pilote worker : `runWorkerFromPlan` dans `packages/agent-runtime/src/index.ts`.
-- Composition du plan : `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision`.
+- Pilote worker : `runWorkerFromPlan` dans `packages/agent-runtime/src/workers.ts`.
+- Composition du plan : `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision` dans `packages/agent-runtime/src/router.ts`.
 - Constructeurs de prompt : `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`.
 - Fiabilité : `selectRuntimeModelCandidatesWithApiKey` dans `packages/agent-runtime/src/model-selection.ts`.
 - Hooks : `runConfiguredHooks`, `runAndRecordHooks`, `parseHookOutput`.

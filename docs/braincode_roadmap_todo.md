@@ -144,15 +144,15 @@ Session:
   - [x] `runPatchChecks`
   - [x] `runPatchChecksWithApproval`
   - [x] package manager detection
-- [ ] 新建 `packages/agent-runtime/src/router.ts`
-  - [ ] `buildRuntimePlan`
-  - [ ] `routePromptWithBrain`
-  - [ ] `normalizeRouterDecision`
-  - [ ] input modality routing directive
-- [ ] 新建 `packages/agent-runtime/src/workers.ts`
-  - [ ] `runWorkerFromPlan`
-  - [ ] `runSupportWorkers`
-  - [ ] worker handoff/prompt builder
+- [x] 新建 `packages/agent-runtime/src/router.ts`
+  - [x] `buildRuntimePlan`
+  - [x] `routePromptWithBrain`
+  - [x] `normalizeRouterDecision`
+  - [x] input modality routing directive
+- [x] 新建 `packages/agent-runtime/src/workers.ts`
+  - [x] `runWorkerFromPlan`
+  - [x] `runSupportWorkers`
+  - [x] worker handoff/prompt builder
 - [x] 新建 `packages/agent-runtime/src/review.ts`
   - [x] `buildReviewPrompt`
   - [x] `normalizeReviewDecisionText`
@@ -167,15 +167,15 @@ Session:
   - [x] image model selection
   - [x] image generation artifact save
   - [x] imageMaker worker result
-- [ ] 保留 `index.ts` 作为 public exports + thin orchestration entry
+- [x] 保留 `index.ts` 作为 public exports + thin orchestration entry
 
 ### 验收标准
 
-- [ ] `bun run check` 通过
-- [ ] `bun test` 通过
-- [ ] public exports 不破坏现有 CLI/TUI
-- [ ] 每个新模块都有最少一个聚焦测试
-- [ ] `agent-runtime/src/index.ts` 行数明显下降，只保留入口和 re-export
+- [x] `bun run check` 通过
+- [x] `bun test` 通过
+- [x] public exports 不破坏现有 CLI/TUI
+- [x] 每个新模块都有最少一个聚焦测试
+- [x] `agent-runtime/src/index.ts` 行数明显下降，只保留入口和 re-export
 
 ---
 
@@ -751,7 +751,7 @@ braincode run --yes "fix failing test and run checks"
 
 ## 第 1 周：结构和报告
 
-- [ ] P0-1 拆 `agent-runtime/src/index.ts`
+- [x] P0-1 拆 `agent-runtime/src/index.ts`
 - [x] P0-2 定义 `FinalReport`
 - [x] P0-3 CLI 输出 Final Report
 
@@ -887,7 +887,7 @@ Acceptance:
 
 ## v0.3：Structured Report & Runtime Refactor
 
-- [ ] 拆 agent-runtime
+- [x] 拆 agent-runtime
 - [x] FinalReport
 - [x] CLI/TUI report renderer
 - [x] session `final_report`

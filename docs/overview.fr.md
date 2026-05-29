@@ -65,11 +65,12 @@ packages/
 Où vivent réellement les choses (points d'entrée à marquer) :
 
 - Routage : `packages/brain/src/index.ts` — `planAgentRouting`, `agentRoleProfiles`, `agentRoleSystemPrompts`.
-- Construction du plan : `packages/agent-runtime/src/index.ts` — `buildRuntimePlan`, `routePromptWithBrain`.
+- Entrée runtime / exports publics : `packages/agent-runtime/src/index.ts` — `executePromptFromConfig`, `planRuntimeFromConfig` et les exports du paquet.
+- Construction du plan : `packages/agent-runtime/src/router.ts` — `buildRuntimePlan`, `routePromptWithBrain`.
 - Sélection de modèle : `packages/agent-runtime/src/model-selection.ts` — `selectRuntimeModel`, `selectRuntimeModelCandidatesWithApiKey`.
-- Exécution des workers : `packages/agent-runtime/src/index.ts` — `runWorkerFromPlan`, `runSupportWorkers`.
+- Exécution des workers : `packages/agent-runtime/src/workers.ts` — `runWorkerFromPlan`, `runSupportWorkers`.
 - Formes de contexte : `packages/context/src/index.ts` — tous les types qui traversent la frontière Brain/agent.
-- Références de prompt : `packages/agent-runtime/src/index.ts` — `expandPromptReferences` pour `@path` et `@@session`.
+- Références de prompt : `packages/agent-runtime/src/prompt-references.ts` plus le wrapper runtime dans `index.ts` — `expandPromptReferences` pour `@path` et `@@session`.
 - Sessions : `packages/config/src/index.ts` — `appendSessionRecord`, `readSessionContext`.
 
 ## Flux d'une requête de bout en bout

@@ -65,11 +65,12 @@ packages/
 Where things actually live (entry points worth bookmarking):
 
 - Routing: `packages/brain/src/index.ts` — `planAgentRouting`, `agentRoleProfiles`, `agentRoleSystemPrompts`.
-- Plan building: `packages/agent-runtime/src/index.ts` — `buildRuntimePlan`, `routePromptWithBrain`.
+- Runtime entry/public exports: `packages/agent-runtime/src/index.ts` — `executePromptFromConfig`, `planRuntimeFromConfig`, and package exports.
+- Plan building: `packages/agent-runtime/src/router.ts` — `buildRuntimePlan`, `routePromptWithBrain`.
 - Model selection: `packages/agent-runtime/src/model-selection.ts` — `selectRuntimeModel`, `selectRuntimeModelCandidatesWithApiKey`.
-- Worker execution: `packages/agent-runtime/src/index.ts` — `runWorkerFromPlan`, `runSupportWorkers`.
+- Worker execution: `packages/agent-runtime/src/workers.ts` — `runWorkerFromPlan`, `runSupportWorkers`.
 - Context shapes: `packages/context/src/index.ts` — every type that crosses the Brain/agent boundary.
-- Prompt references: `packages/agent-runtime/src/index.ts` — `expandPromptReferences` for `@path` and `@@session`.
+- Prompt references: `packages/agent-runtime/src/prompt-references.ts` plus the runtime wrapper in `index.ts` — `expandPromptReferences` for `@path` and `@@session`.
 - Sessions: `packages/config/src/index.ts` — `appendSessionRecord`, `readSessionContext`.
 
 ## End-to-end request flow

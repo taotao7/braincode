@@ -92,7 +92,7 @@ Mapping the two:
 
 ## Lifecycle of one worker
 
-`runWorkerFromPlan` in `packages/agent-runtime/src/index.ts` is the canonical worker driver. The shape it implements:
+`runWorkerFromPlan` in `packages/agent-runtime/src/workers.ts` is the canonical worker driver. The shape it implements:
 
 ```
 plan a worker  -->  createWorkerHandoff(worker, parentId, phase)
@@ -164,7 +164,7 @@ Notes worth internalizing before changing this code:
 Two routers cooperate to produce an `AgentRoutingPlan`:
 
 - `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for heuristic diagnostics, provider failures, and the baseline the router brain refines.
-- `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `agent-runtime` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
+- `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `packages/agent-runtime/src/router.ts` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
 
 The two paths normalize into the same shape:
 
@@ -179,7 +179,7 @@ type AgentRoutingPlan = {
 }
 ```
 
-`buildRuntimePlan` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. It also applies mode routing limits: auto uses the configured worker/concurrency cap and 6 todos; radical raises the effective worker and support-concurrency budgets to at least 4 and allows 8 todos. The final `RuntimePlan` is what the rest of the orchestrator consumes.
+`buildRuntimePlan` in `packages/agent-runtime/src/router.ts` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. It also applies mode routing limits: auto uses the configured worker/concurrency cap and 6 todos; radical raises the effective worker and support-concurrency budgets to at least 4 and allows 8 todos. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 
 Before routing, `selectBrain` resolves Brain preset inheritance. A brain with `extends: "brain"` inherits the parent planner, roles, routing, and context, then applies its own focused overrides.
 
@@ -312,8 +312,8 @@ Steps 1–3 are the contract. Steps 4–6 are how the rest of Braincode stays co
 
 - Envelope: `packages/protocol/src/index.ts` — `AgentMessage`, `ContextRef`.
 - Payloads: `packages/context/src/index.ts` — `HandoffPacket`, `WorkerResult`, task contexts, direction constants.
-- Worker driver: `runWorkerFromPlan` in `packages/agent-runtime/src/index.ts`.
-- Plan composition: `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision`.
+- Worker driver: `runWorkerFromPlan` in `packages/agent-runtime/src/workers.ts`.
+- Plan composition: `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision` in `packages/agent-runtime/src/router.ts`.
 - Prompt builders: `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`.
 - Reliability: `selectRuntimeModelCandidatesWithApiKey` in `packages/agent-runtime/src/model-selection.ts`.
 - Hooks: `runConfiguredHooks`, `runAndRecordHooks`, `parseHookOutput`.

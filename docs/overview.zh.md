@@ -65,11 +65,12 @@ packages/
 值得收藏的关键入口：
 
 - 路由：`packages/brain/src/index.ts` —— `planAgentRouting`、`agentRoleProfiles`、`agentRoleSystemPrompts`。
-- Plan 构建：`packages/agent-runtime/src/index.ts` —— `buildRuntimePlan`、`routePromptWithBrain`。
+- Runtime 入口 / public exports：`packages/agent-runtime/src/index.ts` —— `executePromptFromConfig`、`planRuntimeFromConfig` 和包导出。
+- Plan 构建：`packages/agent-runtime/src/router.ts` —— `buildRuntimePlan`、`routePromptWithBrain`。
 - 模型选择：`packages/agent-runtime/src/model-selection.ts` —— `selectRuntimeModel`、`selectRuntimeModelCandidatesWithApiKey`。
-- Worker 执行：`packages/agent-runtime/src/index.ts` —— `runWorkerFromPlan`、`runSupportWorkers`。
+- Worker 执行：`packages/agent-runtime/src/workers.ts` —— `runWorkerFromPlan`、`runSupportWorkers`。
 - 上下文形状：`packages/context/src/index.ts` —— 所有跨越 Brain/agent 边界的类型。
-- Prompt 引用：`packages/agent-runtime/src/index.ts` —— `expandPromptReferences` 处理 `@path` 与 `@@session`。
+- Prompt 引用：`packages/agent-runtime/src/prompt-references.ts` 加 `index.ts` 里的 runtime wrapper —— `expandPromptReferences` 处理 `@path` 与 `@@session`。
 - 会话：`packages/config/src/index.ts` —— `appendSessionRecord`、`readSessionContext`。
 
 ## 一次完整请求的流程
