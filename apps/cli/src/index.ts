@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -26,7 +26,7 @@ function printHelp() {
 Usage:
   braincode [tui]
   braincode config [--port <port>] [--host <host>] [--no-open]
-  braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] <prompt>
+  braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] [--json|--summary-only] <prompt>
   braincode benchmark [--heuristic] [--task <id>] [--json]
   braincode help
 
@@ -44,6 +44,9 @@ Run flags:
   --read-only   Expose read-only local tools only.
   --allow-edits Expose read/write local tools and auto-approve file edits, but block command execution.
   --yes         Expose all local tools and auto-approve tool calls for non-interactive execution.
+  --json        Print the structured FinalReport as JSON.
+  --summary-only
+                Print only the primary model summary.
 
 Benchmark flags:
   --heuristic   Skip routeBrain and benchmark the deterministic fallback plan.
@@ -101,13 +104,18 @@ async function runTask(args: string[]) {
   const yes = args.includes("--yes") || args.includes("-y")
   const allowEdits = args.includes("--allow-edits")
   const readOnly = args.includes("--read-only")
-  const prompt = args.filter((arg) => !["--dry-run", "--heuristic", "--no-router", "--yes", "-y", "--allow-edits", "--read-only"].includes(arg)).join(" ").trim()
+  const json = args.includes("--json")
+  const summaryOnly = args.includes("--summary-only")
+  const prompt = args.filter((arg) => !["--dry-run", "--heuristic", "--no-router", "--yes", "-y", "--allow-edits", "--read-only", "--json", "--summary-only"].includes(arg)).join(" ").trim()
 
   if (!prompt) {
     throw new Error("Missing prompt. Usage: braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] <prompt>")
   }
   if ([readOnly, allowEdits, yes].filter(Boolean).length > 1) {
     throw new Error("Choose only one run permission mode: --read-only, --allow-edits, or --yes.")
+  }
+  if (json && summaryOnly) {
+    throw new Error("Choose only one output mode: --json or --summary-only.")
   }
 
   if (dryRun) {
@@ -130,8 +138,49 @@ async function runTask(args: string[]) {
     localToolMode: runPermissions === "yes" ? "all" : runPermissions === "allow-edits" ? "read-write" : "read-only",
     onToolApproval: runPermissions === "read-only" ? undefined : createRunApprovalHandler(runPermissions),
   })
-  console.log(result.summary)
-  console.error(`\nSession: ${result.sessionId}`)
+  if (json) {
+    console.log(JSON.stringify(result.finalReport, null, 2))
+  } else if (summaryOnly) {
+    console.log(result.summary)
+  } else {
+    console.log(formatRunReport(result.finalReport))
+  }
+}
+
+export function formatRunReport(report: FinalReport): string {
+  const workers = report.routing.workers.length > 0
+    ? report.routing.workers.map((worker) => `${worker.role} ${worker.status ?? worker.phase}`).join(", ")
+    : "none"
+  const patch = report.patch && report.patch.changedFiles.length > 0
+    ? `${report.patch.changedFiles.length} file${report.patch.changedFiles.length === 1 ? "" : "s"}, +${report.patch.diffStats.insertions} -${report.patch.diffStats.deletions}`
+    : "no patch activity"
+  const checks = report.checks
+    ? report.checks.results.length > 0
+      ? `${report.checks.status} (${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")})`
+      : report.checks.reason ? `${report.checks.status} (${report.checks.reason})` : report.checks.status
+    : "not run"
+  const review = report.review ? report.review.decision : "not run"
+  const warnings = report.warnings.length > 0
+    ? ["", "Warnings:", ...report.warnings.map((warning) => `- ${warning}`)]
+    : []
+  const summary = report.modelSummary.trim()
+    ? ["", "Summary:", report.modelSummary.trim()]
+    : []
+
+  return [
+    "Braincode Run Report",
+    `Status: ${report.status}`,
+    `Task: ${report.task}`,
+    `Brain: ${report.brain.name} / ${report.brain.mode}`,
+    `Routing: ${report.routing.source} -> ${report.routing.primaryRole}${report.routing.confidence !== undefined ? ` (${Math.round(report.routing.confidence * 100)}%)` : ""}`,
+    `Workers: ${workers}`,
+    `Patch: ${patch}`,
+    `Checks: ${checks}`,
+    `Review: ${review}`,
+    `Session: ${report.sessionId}`,
+    ...warnings,
+    ...summary,
+  ].join("\n")
 }
 
 function createRunApprovalHandler(mode: "yes" | "allow-edits") {
@@ -266,7 +315,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(humanizeAgentRuntimeError(error))
-  process.exitCode = 1
-})
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(humanizeAgentRuntimeError(error))
+    process.exitCode = 1
+  })
+}

@@ -1,5 +1,3 @@
-import { mkdir } from "node:fs/promises"
-import { join } from "node:path"
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
@@ -17,9 +15,9 @@ export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
 import type { ImageContent } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, getBraincodeHome, normalizeTokenUsage, readAuth, readBrains, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
+import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, normalizeTokenUsage, readAuth, readBrains, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
-import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
+import type { BraincodeModel } from "@braincode/llm"
 import { generateImage, isImageGenerationModel, resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
@@ -38,6 +36,12 @@ export { applyCheckGateToReviewDecision, buildReviewPrompt, mergeReviewResult, n
 export type { PatchReviewArtifacts, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity } from "./review"
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
 export type { ExpandedPromptResult, ExpandPromptReferencesOptions, PromptReference } from "./prompt-references"
+import { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
+export { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
+export type { ImageMakerWorkerPlan, ImageMakerWorkerResult } from "./image-maker"
+import { buildFinalReport, type FinalReport } from "./final-report"
+export { buildFinalReport, resolveFinalReportStatus } from "./final-report"
+export type { BuildFinalReportInput, FinalReport, FinalReportStatus } from "./final-report"
 
 export type AgentRunRequest = {
   prompt: string
@@ -104,6 +108,7 @@ export type TodoLifecycleEvent = {
 export type AgentRunResult = {
   sessionId: string
   summary: string
+  finalReport: FinalReport
   plan: RuntimePlan
   workerResults: ExecutedWorkerResult[]
   mcp?: McpHubConnectReport
@@ -1495,71 +1500,6 @@ async function emitWorkerLifecycleEvent(
   }
 }
 
-function imageExtension(mimeType: string): string {
-  if (/jpe?g/i.test(mimeType)) return "jpg"
-  if (/webp/i.test(mimeType)) return "webp"
-  return "png"
-}
-
-async function saveGeneratedImageArtifact(sessionId: string, result: ImageGenerationResult, home?: string): Promise<string> {
-  const root = join(home ?? getBraincodeHome(), "generated-images", sessionId)
-  await mkdir(root, { recursive: true })
-  const path = join(root, `image-${Date.now()}.${imageExtension(result.mimeType)}`)
-  await Bun.write(path, Buffer.from(result.base64, "base64"))
-  return path
-}
-
-function buildImageMakerPrompt(input: { request: string; workerResults?: ExecutedWorkerResult[]; projectSupport?: ProjectSupport }): string {
-  const sections = [
-    "Create a raster image asset for this Braincode request.",
-    "Use the user's requested subject, style, and constraints. Avoid adding visible text unless the user explicitly asked for text in the image.",
-    "",
-    "User request:",
-    input.request,
-  ]
-  if (input.workerResults && input.workerResults.length > 0) {
-    sections.push("", "Brain-supplied worker guidance:", formatWorkerResults(input.workerResults))
-  }
-  if (input.projectSupport?.agents) {
-    sections.push("", "Project visual constraints from AGENTS.md may apply; honor explicit brand or safety constraints when they are relevant.")
-  }
-  return sections.join("\n")
-}
-
-function imageMakerWorkerResult(
-  worker: RuntimeWorkerPlan,
-  handoff: HandoffPacket,
-  artifactPath: string,
-  generation: ImageGenerationResult,
-  prompt: string,
-): ExecutedWorkerResult {
-  const summary = [
-    `Generated image artifact: ${artifactPath}`,
-    `Model: ${generation.provider}/${generation.modelId}`,
-    `Bytes: ${generation.bytes}`,
-    "Prompt:",
-    prompt,
-  ].join("\n")
-  return {
-    ...agentToBrainContextTransfer,
-    handoffId: handoff.id,
-    taskId: handoff.task.id,
-    parentId: handoff.task.parentId,
-    progress: {
-      status: "completed",
-      summary: `Generated image artifact at ${artifactPath}.`,
-    },
-    role: worker.role,
-    goal: worker.goal,
-    todoIds: worker.todoIds ?? [],
-    status: "completed",
-    summary,
-    artifacts: [{ kind: "artifact", uri: artifactPath, label: "Generated image" }],
-    risks: generation.revisedPrompt ? [`Provider revised prompt: ${generation.revisedPrompt}`] : [],
-    nextQuestions: [],
-  }
-}
-
 function workerResultStatus(result: WorkerResult): ExecutedWorkerResult["status"] {
   if (result.progress.status === "failed") return "failed"
   if (result.progress.status === "blocked") return "blocked"
@@ -1595,7 +1535,9 @@ async function runWorkerFromPlan(
   const requirements = runtimeModelRequirementsForRole(worker.role, promptImages)
 
   try {
-    candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home, requirements)
+    candidates = worker.role === "imageMaker"
+      ? await selectImageMakerModelCandidates(worker.policy, models, home)
+      : await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home, requirements)
   } catch (error) {
     const result = failedWorkerResult(worker, handoff, error)
     await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
@@ -1968,7 +1910,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
   const requirements = runtimeModelRequirementsForRole(plan.role, promptImages)
-  const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
+  const candidates = plan.role === "imageMaker"
+    ? await selectImageMakerModelCandidates(plan.policy, models, home)
+    : await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
 
   const projectSupport = await readProjectSupport(cwd)
   const userSupport = await readUserSupport(home)
@@ -2086,8 +2030,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           )
           const summary = `${primarySummary}${formatStopHookFeedback(stopHooks)}`
           const patch = await collectPatchSummary(cwd, patchBaseline)
-          await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, attempt: attempt + 1 }, home)
-          return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch }
+          const finalReport = buildFinalReport({
+            task: request.prompt,
+            sessionId,
+            plan,
+            workerResults,
+            modelSummary: primarySummary,
+            patch,
+            runtimeToolCount: runtimeTools.length,
+          })
+          await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
+          await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, finalReport, attempt: attempt + 1 }, home)
+          return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpReport, patch }
         } catch (error) {
           lastError = error
           const message = error instanceof Error ? error.message : String(error)
@@ -2253,8 +2207,20 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         if (hasPatchActivity(patch)) {
           await appendSessionRecord(sessionId, { type: "patch_summary", ...patch, attempt: attempt + 1 }, home)
         }
-        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, attempt: attempt + 1 }, home)
-        return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch, checks, reviewDecision }
+        const finalReport = buildFinalReport({
+          task: request.prompt,
+          sessionId,
+          plan,
+          workerResults,
+          modelSummary: primarySummary,
+          patch,
+          checks,
+          review: reviewDecision,
+          runtimeToolCount: runtimeTools.length,
+        })
+        await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
+        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, finalReport, attempt: attempt + 1 }, home)
+        return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpReport, patch, checks, reviewDecision }
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)

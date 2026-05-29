@@ -163,10 +163,10 @@ Session:
   - [x] `@file`
   - [x] `@@session`
   - [x] image references
-- [ ] 新建 `packages/agent-runtime/src/image-maker.ts`
-  - [ ] image model selection
-  - [ ] image generation artifact save
-  - [ ] imageMaker worker result
+- [x] 新建 `packages/agent-runtime/src/image-maker.ts`
+  - [x] image model selection
+  - [x] image generation artifact save
+  - [x] imageMaker worker result
 - [ ] 保留 `index.ts` 作为 public exports + thin orchestration entry
 
 ### 验收标准
@@ -187,10 +187,11 @@ Session:
 
 ### TODO
 
-- [ ] 定义 `FinalReport` 类型
+- [x] 定义 `FinalReport` 类型
 
 ```ts
 type FinalReport = {
+  status: "approved" | "changes_requested" | "blocked" | "answered" | "read_only"
   task: string
   sessionId: string
   brain: {
@@ -219,10 +220,10 @@ type FinalReport = {
 }
 ```
 
-- [ ] 在 `executePromptFromConfig` 返回值里增加 `finalReport`
-- [ ] `modelSummary` 保留 primary agent 原始总结
-- [ ] `patch/check/review/todos/routing` 由 runtime 填充，不能由模型编造
-- [ ] 对 review/check 状态做统一状态机
+- [x] 在 `executePromptFromConfig` 返回值里增加 `finalReport`
+- [x] `modelSummary` 保留 primary agent 原始总结
+- [x] `patch/check/review/todos/routing` 由 runtime 填充，不能由模型编造
+- [x] 对 review/check 状态做统一状态机
 
 ```txt
 checks failed + review approved => final status = changes_requested
@@ -233,9 +234,9 @@ no patch + no tools => final status = answered / read_only
 ### 验收标准
 
 - [ ] CLI/TUI 都能消费同一个 `FinalReport`
-- [ ] failed checks 不会被最终报告展示成 approved
-- [ ] 没有 patch 时，报告明确说明 no patch activity
-- [ ] `FinalReport` 可 JSON 序列化并写入 session ledger
+- [x] failed checks 不会被最终报告展示成 approved
+- [x] 没有 patch 时，报告明确说明 no patch activity
+- [x] `FinalReport` 可 JSON 序列化并写入 session ledger
 
 ---
 
@@ -243,7 +244,7 @@ no patch + no tools => final status = answered / read_only
 
 ### TODO
 
-- [ ] CLI 增加默认 human-readable report
+- [x] CLI 增加默认 human-readable report
 
 ```txt
 Braincode Run Report
@@ -257,16 +258,16 @@ Review: approved
 Session: xxx
 ```
 
-- [ ] CLI 增加 `--json` 输出完整 `FinalReport`
-- [ ] CLI 增加 `--summary-only` 保持只输出模型 summary
+- [x] CLI 增加 `--json` 输出完整 `FinalReport`
+- [x] CLI 增加 `--summary-only` 保持只输出模型 summary
 - [ ] TUI run 完成时展示 compact report card
 - [ ] TUI 支持展开 sections：Patch / Checks / Review / Workers
-- [ ] Session ledger 记录 `final_report`
+- [x] Session ledger 记录 `final_report`
 
 ### 验收标准
 
-- [ ] `braincode run --allow-edits "update README"` 输出 changed files/check/review 信息
-- [ ] `braincode run --json "..."` 可用于自动化脚本
+- [x] `braincode run --allow-edits "update README"` 输出 changed files/check/review 信息
+- [x] `braincode run --json "..."` 可用于自动化脚本
 - [ ] TUI 不再只依赖 assistant text 传达执行事实
 
 ---
