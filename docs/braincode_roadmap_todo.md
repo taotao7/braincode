@@ -153,11 +153,11 @@ Session:
   - [ ] `runWorkerFromPlan`
   - [ ] `runSupportWorkers`
   - [ ] worker handoff/prompt builder
-- [ ] 新建 `packages/agent-runtime/src/review.ts`
-  - [ ] `buildReviewPrompt`
-  - [ ] `normalizeReviewDecisionText`
-  - [ ] `applyCheckGateToReviewDecision`
-  - [ ] `mergeReviewResult`
+- [x] 新建 `packages/agent-runtime/src/review.ts`
+  - [x] `buildReviewPrompt`
+  - [x] `normalizeReviewDecisionText`
+  - [x] `applyCheckGateToReviewDecision`
+  - [x] `mergeReviewResult`
 - [ ] 新建 `packages/agent-runtime/src/prompt-references.ts`
   - [ ] `expandPromptReferences`
   - [ ] `@file`
