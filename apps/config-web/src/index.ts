@@ -182,6 +182,7 @@ export const configWebHtml = `<!doctype html>
       button.primary { border-color: var(--fg); background: var(--fg); color: var(--surface); }
       button.primary:hover { background: color-mix(in srgb, var(--fg) 80%, black); }
       button.danger { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger-fg); }
+      a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
       .poster-copy { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-lead); }
       .language-bar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; font: 12px var(--font-mono); color: var(--muted); }
       .logo-card { display: flex; align-items: center; gap: var(--gap-md); }
@@ -440,6 +441,13 @@ export const configWebHtml = `<!doctype html>
           <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
           <div class="panel-grid">
             <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.</p><div id="configured-tools" class="list"></div></div>
+            <div class="card stack">
+              <h3 data-i18n="tavilyQuickConfig">Tavily web search</h3>
+              <p class="muted" data-i18n="tavilyQuickConfigHint">Configure Tavily MCP for web search. The API key is saved in ~/.braincode/auth.json; ~/.braincode/mcp.json only stores a Braincode auth reference.</p>
+              <div class="field"><label for="tavily-api-key" data-i18n="tavilyApiKey">Tavily API key</label><input id="tavily-api-key" type="password" autocomplete="off" placeholder="tvly-..." /></div>
+              <div class="row"><button id="configure-tavily" class="primary" type="button" data-i18n="configureTavily">Configure Tavily</button><a href="https://app.tavily.com/home" target="_blank" rel="noreferrer" data-i18n="tavilyGetApiKey">Get API key</a></div>
+              <div id="tavily-status" class="test-result" hidden></div>
+            </div>
             <div class="stack">
               <h3 data-i18n="subscriptionAuth">Subscription OAuth</h3>
               <p class="muted" data-i18n="subscriptionAuthHint">Connect subscription-backed providers through Pi OAuth. Tokens are saved in ~/.braincode/auth.json.</p>
@@ -466,7 +474,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", subscriptionModels: "Authenticated subscriptions", useSubscriptionProvider: "Use subscription", subscriptionProviderApplied: "Subscription provider selected", apiKeyOptional: "Optional token saved for the selected provider", apiKeyOptionalAuthenticated: "Optional; authenticated subscription token is used if empty", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
           usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.", usageChartModels: "Model token chart", usageChartRoles: "Role token chart", usageChartPhases: "Phase share",
           brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
-          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
+          toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", tavilyQuickConfig: "Tavily web search", tavilyQuickConfigHint: "Configure Tavily MCP for web search. The API key is saved in ~/.braincode/auth.json; ~/.braincode/mcp.json only stores a Braincode auth reference.", tavilyApiKey: "Tavily API key", configureTavily: "Configure Tavily", tavilyGetApiKey: "Get API key", tavilyConfigured: "Tavily MCP configured", tavilyNotConfigured: "Tavily MCP is not configured", tavilyNeedsApiKey: "Add a Tavily API key to finish setup", tavilyServerReady: "MCP server ready", tavilyAuthReady: "API key saved", tavilyApiKeyRequired: "Tavily API key is required", tavilyRestartHint: "Start a new agent run or use /mcp to recheck the server.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
@@ -493,7 +501,7 @@ export const configWebHtml = `<!doctype html>
           modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", subscriptionModels: "已认证订阅", useSubscriptionProvider: "使用订阅", subscriptionProviderApplied: "已选择订阅 Provider", apiKeyOptional: "可选；会保存到选中的 Provider", apiKeyOptionalAuthenticated: "可选；留空会使用已认证订阅 token", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
           usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。", usageChartModels: "模型 token 图表", usageChartRoles: "角色 token 图表", usageChartPhases: "阶段占比",
           brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
-          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
+          toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", tavilyQuickConfig: "Tavily 网页搜索", tavilyQuickConfigHint: "为 web_search 配置 Tavily MCP。API key 会保存到 ~/.braincode/auth.json；~/.braincode/mcp.json 只保存 Braincode 认证引用。", tavilyApiKey: "Tavily API key", configureTavily: "配置 Tavily", tavilyGetApiKey: "获取 API key", tavilyConfigured: "Tavily MCP 已配置", tavilyNotConfigured: "Tavily MCP 尚未配置", tavilyNeedsApiKey: "添加 Tavily API key 才能完成配置", tavilyServerReady: "MCP server 已就绪", tavilyAuthReady: "API key 已保存", tavilyApiKeyRequired: "需要 Tavily API key", tavilyRestartHint: "开始新的 agent run，或用 /mcp 重新检查 server。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
@@ -580,12 +588,16 @@ export const configWebHtml = `<!doctype html>
       const oauthLoginState = document.querySelector("#oauth-login-state")
       const oauthManualCodeInput = document.querySelector("#oauth-manual-code")
       const submitOAuthCodeButton = document.querySelector("#submit-oauth-code")
+      const tavilyApiKeyInput = document.querySelector("#tavily-api-key")
+      const configureTavilyButton = document.querySelector("#configure-tavily")
+      const tavilyStatus = document.querySelector("#tavily-status")
 
       let currentSettings = null
       let currentBrains = { brains: [] }
       let currentModels = { models: [] }
       let currentTools = { tools: [] }
       let currentAuthStatus = { configuredProviders: [], providerAuth: [] }
+      let currentUserMcp = { path: "", config: { mcpServers: {} }, serverNames: [] }
       let currentUsageStats = { generatedAt: Date.now(), sessions: 0, totals: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byModel: [], byRole: [], byPhase: [], recent: [] }
       let currentUsageFilter = null
       const activeTabStorageKey = "braincode-config-tab-v2"
@@ -743,10 +755,33 @@ export const configWebHtml = `<!doctype html>
         catalogApiKeyInput.placeholder = authenticatedProviderIds.has(providerSelect.value) ? t("apiKeyOptionalAuthenticated") : t("apiKeyOptional")
       }
 
+      function hasProviderApiKey(provider) {
+        return (currentAuthStatus.providerAuth || []).some((entry) => entry.provider === provider && entry.kind === "api-key")
+      }
+
+      function userMcpServers() {
+        return currentUserMcp.config?.mcpServers || currentUserMcp.config?.servers || {}
+      }
+
+      function renderTavilyConfig() {
+        const servers = userMcpServers()
+        const hasServer = Boolean(servers.tavily)
+        const hasKey = hasProviderApiKey("tavily")
+        tavilyStatus.hidden = false
+        tavilyStatus.className = "test-result" + (hasServer && hasKey ? " ok" : hasServer && !hasKey ? " fail" : "")
+        const lines = hasServer && hasKey
+          ? [t("tavilyConfigured"), t("tavilyServerReady") + ": tavily", t("tavilyAuthReady") + ": tavily", t("tavilyRestartHint")]
+          : hasServer
+            ? [t("tavilyNeedsApiKey"), t("tavilyServerReady") + ": tavily"]
+            : [t("tavilyNotConfigured")]
+        tavilyStatus.textContent = lines.join("\\n")
+      }
+
       function setAuthStatusData(authStatusData) {
         currentAuthStatus = authStatusData || { configuredProviders: [], providerAuth: [] }
         authStatus.textContent = JSON.stringify(currentAuthStatus, null, 2)
         renderSubscriptionProviders()
+        renderTavilyConfig()
       }
 
       function renderSavedProviders() {
@@ -1561,16 +1596,34 @@ export const configWebHtml = `<!doctype html>
         stopOAuthPolling()
       }
 
+      async function configureTavily() {
+        const apiKey = tavilyApiKeyInput.value.trim()
+        if (!apiKey && !hasProviderApiKey("tavily")) throw new Error(t("tavilyApiKeyRequired"))
+        configureTavilyButton.disabled = true
+        status.textContent = t("saving") + " Tavily..."
+        try {
+          const result = await postJson("/api/mcp/tavily", { apiKey })
+          currentUserMcp = result.mcp || currentUserMcp
+          tavilyApiKeyInput.value = ""
+          setAuthStatusData(result.authStatus || await getJson("/api/auth/status"))
+          renderTavilyConfig()
+          status.textContent = t("saved") + " Tavily"
+        } finally {
+          configureTavilyButton.disabled = false
+        }
+      }
+
       async function loadAll() {
         status.textContent = t("loading")
-        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData, usageStatsData] = await Promise.all([
-          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers"), getJson("/api/usage-stats")
+        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData, usageStatsData, userMcpData] = await Promise.all([
+          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers"), getJson("/api/usage-stats"), getJson("/api/mcp/user")
         ])
         currentSettings = settingsData
         currentBrains = brainsData
         currentModels = modelsData
         currentTools = toolsData
         currentUsageStats = usageStatsData
+        currentUserMcp = userMcpData.mcp || currentUserMcp
         oauthProviders = oauthProvidersData.providers || []
         setAuthStatusData(authStatusData)
         renderSettings(); renderSavedProviders(); renderCatalogProviders(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders()
@@ -1728,7 +1781,7 @@ export const configWebHtml = `<!doctype html>
       }
 
       refresh.addEventListener("click", () => loadAll().catch(showError))
-      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders(); renderSubscriptionProviders(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
+      language.addEventListener("change", () => { currentLang = language.value; localStorage.setItem("braincode-config-lang", currentLang); applyLanguage(); renderConfiguredModels(); renderUsageStats(); renderBrainRouting(); renderTools(); renderOAuthProviders(); renderSubscriptionProviders(); renderTavilyConfig(); if (oauthLoginSession) renderOAuthLoginSession(oauthLoginSession) })
       for (const button of tabButtons) {
         button.addEventListener("click", () => setActiveTab(button.dataset.tab))
       }
@@ -1740,6 +1793,7 @@ export const configWebHtml = `<!doctype html>
       startOAuthLoginButton.addEventListener("click", () => startOAuthLogin().catch(showError))
       submitOAuthCodeButton.addEventListener("click", () => submitOAuthCode().catch(showError))
       cancelOAuthLoginButton.addEventListener("click", () => cancelOAuthLogin().catch(showError))
+      configureTavilyButton.addEventListener("click", () => configureTavily().catch(showError))
       providerSelect.addEventListener("change", renderCatalogModels)
       catalogModelSelect.addEventListener("change", syncCatalogVision)
       brainSelect.addEventListener("change", renderBrainRouting)

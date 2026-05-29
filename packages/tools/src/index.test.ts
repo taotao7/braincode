@@ -164,6 +164,7 @@ test("local tool prepareArguments normalizes aliases and primitive coercions", a
     expect(getTool("list_files", projectRoot).prepareArguments?.({ dir: ".", pattern: "*.ts", limit: "2" })).toEqual({ directory: ".", glob: "*.ts", maxFiles: 2 })
     expect(getTool("read_file", projectRoot).prepareArguments?.({ filePath: "a.txt", offset: "1", maxBytes: "3" })).toEqual({ path: "a.txt", offset: 1, limit: 3 })
     expect(getTool("search_files", projectRoot).prepareArguments?.({ text: "needle", mode: "path", limit: "5" })).toEqual({ query: "needle", mode: "path", glob: undefined, maxResults: 5 })
+    expect(getTool("search_files", projectRoot).prepareArguments?.({ glob: "*.ts", limit: "5" })).toEqual({ query: undefined, mode: "path", glob: "*.ts", maxResults: 5 })
     expect(getTool("edit_file", projectRoot).prepareArguments?.({ file: "a.txt", old: "x", new: "y", replace_all: "true" })).toEqual({ path: "a.txt", content: undefined, oldString: "x", newString: "y", replaceAll: true })
     expect(getTool("apply_patch", projectRoot).prepareArguments?.({ diff: "patch" })).toEqual({ patch: "patch" })
     expect(getTool("exec_command", projectRoot).prepareArguments?.({ command: "echo hi", yield_time_ms: "25", max_output_tokens: "10" })).toEqual({ cmd: "echo hi", workdir: undefined, shell: undefined, yieldTimeMs: 25, timeoutMs: undefined, maxOutputBytes: 40 })
@@ -216,6 +217,8 @@ test("search_files path mode and fallback search work without rg", async () => {
     const searchFiles = getTool("search_files", projectRoot)
     const pathResult = await searchFiles.execute("search-path", { query: "alpha", mode: "path", maxResults: 1 } as never)
     expect(textContent(pathResult)).toBe("alpha.ts")
+    const globOnlyResult = await searchFiles.execute("search-glob-only", { glob: "*.ts", maxResults: 1 } as never)
+    expect(textContent(globOnlyResult)).toBe("alpha.ts")
 
     process.env.PATH = ""
     const listFiles = getTool("list_files", projectRoot)

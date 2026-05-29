@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
-import { appendSessionRecord, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
+import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, normalizeRouterDecision, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
@@ -47,6 +47,85 @@ test("selectRuntimeModel rejects unknown configured model ids before runtime exe
       ],
     ),
   ).toThrow("Model policy references no usable model")
+})
+
+test("collectMcpToolServers resolves Braincode auth env references", () => {
+  const result = collectMcpToolServers({
+    userMcp: {
+      path: "/tmp/mcp.json",
+      serverNames: ["tavily"],
+      config: {
+        mcpServers: {
+          tavily: {
+            command: "bunx",
+            args: ["tavily-mcp@latest"],
+            env: { TAVILY_API_KEY: createBraincodeAuthEnvRef("tavily") },
+          },
+        },
+      },
+    },
+    auth: { providers: { tavily: { apiKey: "tvly-secret" } } },
+  })
+
+  expect(result.skipped).toEqual([])
+  expect(result.servers[0]?.env).toEqual({ TAVILY_API_KEY: "tvly-secret" })
+})
+
+test("collectMcpToolServers skips MCP servers with unresolved auth refs", () => {
+  const result = collectMcpToolServers({
+    userMcp: {
+      path: "/tmp/mcp.json",
+      serverNames: ["tavily"],
+      config: {
+        mcpServers: {
+          tavily: {
+            command: "bunx",
+            env: { TAVILY_API_KEY: createBraincodeAuthEnvRef("tavily") },
+          },
+        },
+      },
+    },
+  })
+
+  expect(result.servers).toEqual([])
+  expect(result.skipped[0]?.reason).toContain("Missing API key")
+})
+
+test("normalizeRouterDecision does not inherit heuristic rush support for specialist routing", () => {
+  const fallback = {
+    primaryRole: "rush" as const,
+    workers: [{
+      role: "rush" as const,
+      goal: "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
+      reason: "Deterministic fallback used when no router decision is available.",
+    }],
+    todos: [],
+    dependencies: [],
+    requiresReview: false,
+    reason: "Deterministic fallback plan.",
+  }
+
+  const decision = normalizeRouterDecision(
+    {
+      role: "librarian",
+      todos: [
+        { id: "gather-news", title: "Gather current news", role: "librarian" },
+        { id: "todo-03-rush", title: "Handle fallback response", role: "rush" },
+      ],
+      dependencies: [
+        { from: "todo-03-rush", to: "gather-news", reason: "fallback output feeds primary" },
+      ],
+      confidence: 0.92,
+      reason: "current news requires external fact finding",
+    },
+    fallback,
+    { maxWorkerAgents: 4, maxTodos: 8 },
+  )
+
+  expect(decision.primaryRole).toBe("librarian")
+  expect(decision.workers.map((worker) => worker.role)).toEqual(["librarian"])
+  expect(decision.todos.map((todo) => [todo.id, todo.role])).toEqual([["gather-news", "librarian"]])
+  expect(decision.dependencies).toEqual([])
 })
 
 test("selectRuntimeModel falls back when the primary model is unavailable", () => {

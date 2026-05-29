@@ -9,7 +9,7 @@ export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTask
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, normalizeTokenUsage, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
+import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, normalizeTokenUsage, readAuth, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
@@ -1677,7 +1677,7 @@ function isAgentRole(value: unknown): value is AgentRole {
   return value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
-function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">): RouterPlanDecision {
+export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">): RouterPlanDecision {
   const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
   const workersByRole = new Map<RoutedAgentRole, AgentRoutingPlan["workers"][number]>()
   if (Array.isArray(value.workers)) {
@@ -1693,20 +1693,34 @@ function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; tod
     }
   }
 
+  const fallbackPrimaryWorker = fallback.workers.find((worker) => worker.role === primaryRole)
+  const primaryWorker = {
+    role: primaryRole,
+    goal: fallbackPrimaryWorker?.goal ?? `Handle ${primaryRole} work.`,
+    reason: primaryRole === fallback.primaryRole
+      ? fallbackPrimaryWorker?.reason ?? "Router selected this as the primary role."
+      : "Router selected this as the primary role.",
+  }
   const workers = Array.from(workersByRole.values())
   if (workers.length === 0) {
-    workers.push(...fallback.workers)
+    workers.push(primaryWorker)
   }
+  const filteredWorkers = primaryRole === "rush"
+    ? workers
+    : workers.filter((worker) => worker.role !== "rush")
+  workers.splice(0, workers.length, ...(filteredWorkers.length > 0 ? filteredWorkers : [primaryWorker]))
   if (!workers.some((worker) => worker.role === primaryRole)) {
-    workers.unshift({ role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
+    workers.unshift(primaryWorker)
   }
   const cappedWorkers = workers.slice(0, Math.max(1, limits.maxWorkerAgents))
   if (!cappedWorkers.some((worker) => worker.role === primaryRole)) {
-    cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, { role: primaryRole, goal: fallback.workers.find((worker) => worker.role === primaryRole)?.goal ?? `Handle ${primaryRole} work.`, reason: "Router selected this as the primary role." })
+    cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, primaryWorker)
   }
   const todoInputs = normalizeRouterTodos(value.todos, primaryRole, limits.maxTodos)
   const workerRoles = new Set(cappedWorkers.map((worker) => worker.role))
-  const routedTodoInputs = todoInputs.map((todo) => workerRoles.has(todo.role) ? todo : { ...todo, role: primaryRole })
+  const routedTodoInputs = todoInputs
+    .filter((todo) => primaryRole === "rush" || todo.role !== "rush")
+    .map((todo) => workerRoles.has(todo.role) ? todo : { ...todo, role: primaryRole })
   const normalized = normalizeAgentRoutingPlan({
     primaryRole,
     workers: cappedWorkers,
@@ -1844,6 +1858,7 @@ Output constraints:
 - "role" MUST be one of the enum values above. Do not invent role names. Do not include "coding", "fastReply", or "research" — they are deprecated.
 - Pick exactly one primary role in "role".
 - Include only workers that would materially improve the task.
+- Do not include rush as a support worker when the primary role is not rush. If a specialist is primary and no extra support is needed, include only the primary specialist worker.
 - Break the work into 1-${routingLimits.maxTodos} concrete todos in execution order.
 - Assign every todo to the agent role that should complete it.
 - Use short lowercase todo ids with letters, numbers, dashes, or underscores.
@@ -2911,6 +2926,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   const projectSupport = await readProjectSupport(cwd)
   const userSupport = await readUserSupport(home)
+  const auth = await readAuth(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const primaryWorker = plan.workers.find((worker) => worker.role === plan.role)
@@ -2930,6 +2946,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const { servers: mcpServers, skipped: mcpSkipped } = collectMcpToolServers({
     userMcp: userSupport.mcp,
     projectMcp: projectSupport.mcp,
+    auth,
   })
   let mcpReport: McpHubConnectReport = { connected: [], failed: [], skipped: mcpSkipped, toolCount: 0 }
   if (mcpServers.length > 0) {

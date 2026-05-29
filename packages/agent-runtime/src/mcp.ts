@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { Type } from "typebox"
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
-import { extractMcpServerEntries, type McpServerEntry, type ProjectMcpConfig } from "@braincode/config"
+import { extractMcpServerEntries, resolveMcpServerEnv, type BraincodeAuth, type McpServerEntry, type ProjectMcpConfig } from "@braincode/config"
 import { debugLog } from "@braincode/shared"
 
 const PROTOCOL_VERSION = "2024-11-05"
@@ -156,6 +156,7 @@ function stringifyJsonRpcError(value: unknown): string {
 export class McpToolHub {
   private connections: McpConnection[] = []
   private agentTools: AgentTool[] = []
+  private agentToolNames = new Set<string>()
 
   async connect(servers: McpToolServerInput[]): Promise<McpHubConnectReport> {
     const report: McpHubConnectReport = { connected: [], failed: [], skipped: [], toolCount: 0 }
@@ -165,12 +166,15 @@ export class McpToolHub {
         try {
           await connection.initialize()
           const tools = await connection.listTools()
+          let addedToolCount = 0
           for (const tool of tools) {
-            this.agentTools.push(toAgentTool(connection, server, tool))
+            if (this.addAgentTool(toAgentTool(connection, server, tool))) addedToolCount += 1
+            const alias = toWebSearchAlias(connection, server, tool)
+            if (alias && this.addAgentTool(alias)) addedToolCount += 1
           }
           this.connections.push(connection)
-          report.connected.push({ scope: server.scope, name: server.name, toolCount: tools.length })
-          report.toolCount += tools.length
+          report.connected.push({ scope: server.scope, name: server.name, toolCount: addedToolCount })
+          report.toolCount += addedToolCount
         } catch (error) {
           connection.shutdown()
           const message = error instanceof Error ? error.message : String(error)
@@ -186,22 +190,56 @@ export class McpToolHub {
     return this.agentTools
   }
 
+  private addAgentTool(tool: AgentTool): boolean {
+    if (this.agentToolNames.has(tool.name)) return false
+    this.agentToolNames.add(tool.name)
+    this.agentTools.push(tool)
+    return true
+  }
+
   shutdown() {
     for (const connection of this.connections) connection.shutdown()
     this.connections = []
     this.agentTools = []
+    this.agentToolNames.clear()
   }
 }
 
 function toAgentTool(connection: McpConnection, server: McpToolServerInput, tool: { name: string; description?: string; inputSchema?: unknown }): AgentTool {
   const safeName = `mcp__${sanitizeIdentifier(server.name)}__${sanitizeIdentifier(tool.name)}`
+  return createMcpAgentTool(connection, server, tool, safeName, `${server.name}/${tool.name}`)
+}
+
+function toWebSearchAlias(connection: McpConnection, server: McpToolServerInput, tool: { name: string; description?: string; inputSchema?: unknown }): AgentTool | undefined {
+  const serverName = server.name.toLowerCase()
+  const toolName = tool.name.toLowerCase().replace(/[-\s]+/g, "_")
+  if (serverName !== "tavily" || toolName !== "tavily_search") return undefined
+  return createMcpAgentTool(
+    connection,
+    server,
+    {
+      ...tool,
+      description: tool.description ?? "Search the web through the configured Tavily MCP server.",
+    },
+    "web_search",
+    "web_search",
+  )
+}
+
+function createMcpAgentTool(
+  connection: McpConnection,
+  server: McpToolServerInput,
+  tool: { name: string; description?: string; inputSchema?: unknown },
+  name: string,
+  label: string,
+): AgentTool {
   const schema = (tool.inputSchema && typeof tool.inputSchema === "object")
     ? (tool.inputSchema as Record<string, unknown>)
     : { type: "object", properties: {}, additionalProperties: true }
   const parameters = Type.Unsafe(schema)
   return {
-    name: safeName,
-    label: `${server.name}/${tool.name}`,
+    name,
+    label,
     description: tool.description ?? `MCP tool '${tool.name}' from server '${server.name}'`,
     parameters,
     prepareArguments: (args) => (args && typeof args === "object" ? args : {}) as Record<string, unknown>,
@@ -232,6 +270,7 @@ function sanitizeIdentifier(name: string): string {
 export function collectMcpToolServers(options: {
   userMcp?: ProjectMcpConfig
   projectMcp?: ProjectMcpConfig
+  auth?: BraincodeAuth
 }): { servers: McpToolServerInput[]; skipped: Array<{ scope: "user" | "project"; name: string; reason: string }> } {
   const servers: McpToolServerInput[] = []
   const skipped: Array<{ scope: "user" | "project"; name: string; reason: string }> = []
@@ -250,12 +289,19 @@ export function collectMcpToolServers(options: {
         skipped.push({ scope, name, reason: entry.url ? "url-based server (stdio only)" : "no command configured" })
         continue
       }
+      let env: Record<string, string> | undefined
+      try {
+        env = resolveMcpServerEnv(entry.env, options.auth ?? { providers: {} })
+      } catch (error) {
+        skipped.push({ scope, name, reason: error instanceof Error ? error.message : String(error) })
+        continue
+      }
       servers.push({
         scope,
         name,
         command: entry.command,
         args: entry.args,
-        env: entry.env,
+        env,
       })
     }
   }

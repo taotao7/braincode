@@ -249,7 +249,7 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
 
 function createSearchFilesTool(context: LocalToolContext): AgentTool {
   const parameters = Type.Object({
-    query: Type.String(),
+    query: Type.Optional(Type.String()),
     mode: Type.Optional(Type.Union([Type.Literal("content"), Type.Literal("path")])),
     glob: Type.Optional(Type.String()),
     maxResults: Type.Optional(Type.Number()),
@@ -257,36 +257,40 @@ function createSearchFilesTool(context: LocalToolContext): AgentTool {
   return {
     name: "search_files",
     label: "Search Files",
-    description: "Search project files by content or path substring inside the current workspace.",
+    description: "Search project files by content, path substring, or glob-only file listing inside the current workspace.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
+      const query = pickString(record, ["query", "pattern", "text"])
       const mode = pickString(record, ["mode"])
       return {
-        query: pickRequiredString(record, ["query", "pattern", "text"]),
-        mode: mode === "path" ? "path" : "content",
+        query,
+        mode: mode === "path" || !query ? "path" : "content",
         glob: pickString(record, ["glob"]),
         maxResults: pickNumber(record, ["maxResults", "limit"]),
       }
     },
     execute: async (_toolCallId, params) => {
-      const input = params as { query: string; mode?: "content" | "path"; glob?: string; maxResults?: number }
+      const input = params as { query?: string; mode?: "content" | "path"; glob?: string; maxResults?: number }
+      const query = input.query?.trim() ?? ""
       const maxResults = clampInteger(input.maxResults, 1, 1000, 100)
-      if (input.mode === "path") {
+      const mode = input.mode ?? (query ? "content" : "path")
+      if (mode === "path" || !query) {
         const files = await listProjectFiles(context, context.projectRoot, input.glob, 5000)
-        const matches = files.filter((file) => file.toLowerCase().includes(input.query.toLowerCase())).slice(0, maxResults)
-        return textResult(matches.join("\n") || "(no matches)", { tool: "search_files", mode: "path", matches, count: matches.length })
+        const lowerQuery = query.toLowerCase()
+        const matches = (lowerQuery ? files.filter((file) => file.toLowerCase().includes(lowerQuery)) : files).slice(0, maxResults)
+        return textResult(matches.join("\n") || "(no matches)", { tool: "search_files", mode: "path", query: query || undefined, glob: input.glob, matches, count: matches.length })
       }
-      const rgArgs = ["--line-number", "--no-heading", "--color", "never", input.query]
+      const rgArgs = ["--line-number", "--no-heading", "--color", "never", query]
       if (input.glob) rgArgs.splice(4, 0, "--glob", input.glob)
       const result = await runProcess("rg", rgArgs, { cwd: context.projectRoot, maxOutputBytes: context.maxOutputBytes, timeoutMs: context.commandTimeoutMs, allowExitCodes: [0, 1] })
       if (!result.spawned) {
-        const matches = await fallbackContentSearch(context, input.query, input.glob, maxResults)
+        const matches = await fallbackContentSearch(context, query, input.glob, maxResults)
         return textResult(matches.join("\n") || "(no matches)", { tool: "search_files", mode: "content", matches, count: matches.length, fallback: true })
       }
       const lines = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, maxResults)
       if (lines.length === 0) {
-        const matches = await fallbackContentSearch(context, input.query, input.glob, maxResults)
+        const matches = await fallbackContentSearch(context, query, input.glob, maxResults)
         if (matches.length > 0) return textResult(matches.join("\n"), { tool: "search_files", mode: "content", matches, count: matches.length, fallback: true })
       }
       return textResult(lines.join("\n") || "(no matches)", { tool: "search_files", mode: "content", matches: lines, count: lines.length, exitCode: result.exitCode })

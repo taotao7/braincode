@@ -1,9 +1,11 @@
 import {
   defaultBrains,
   defaultModels,
+  configureTavilyMcpServer,
   ensureBraincodeHome,
   readAuthStatus,
   readBrains,
+  readUserMcpConfig,
   readModels,
   readSettings,
   readTools,
@@ -368,6 +370,16 @@ async function handleRequest(request: Request): Promise<Response> {
     if (request.method === "GET" && url.pathname === "/api/auth/status") {
       const authStatus = await readAuthStatus()
       return json(ok(authStatus))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/mcp/user") {
+      return json(ok({ mcp: await readUserMcpConfig() }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/mcp/tavily") {
+      const body = (await request.json()) as { apiKey?: string }
+      const mcp = await configureTavilyMcpServer({ apiKey: body.apiKey })
+      return json(ok({ mcp, authStatus: await readAuthStatus() }))
     }
 
     if (request.method === "GET" && url.pathname === "/api/usage-stats") {

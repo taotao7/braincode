@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { appendSessionRecord, appendTokenUsageRecord, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserSupport, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -75,6 +75,65 @@ test("MCP server entries can be listed and toggled disabled", async () => {
   const emptyPath = join(home, "empty-mcp.json")
   await Bun.write(emptyPath, JSON.stringify({ servers: null }))
   await expect(setMcpServerDisabled(emptyPath, "alpha", true)).rejects.toThrow("has no 'mcpServers' map")
+})
+
+test("Tavily quick config stores key in auth and MCP auth reference in user config", async () => {
+  const home = await makeTempHome()
+
+  const mcp = await configureTavilyMcpServer({ apiKey: " tvly-secret " }, home)
+  const parsed = JSON.parse(await Bun.file(getUserSupportPaths(home).mcp).text())
+
+  expect(mcp.serverNames).toEqual([TAVILY_MCP_SERVER_NAME])
+  expect(parsed.mcpServers[TAVILY_MCP_SERVER_NAME]).toEqual({
+    type: "stdio",
+    command: "bunx",
+    args: [TAVILY_MCP_PACKAGE],
+    env: { TAVILY_API_KEY: createBraincodeAuthEnvRef(TAVILY_AUTH_PROVIDER) },
+  })
+  expect(await readProviderApiKey(TAVILY_AUTH_PROVIDER, home)).toBe("tvly-secret")
+})
+
+test("Tavily quick config preserves non-secret MCP env and can reuse saved auth", async () => {
+  const home = await makeTempHome()
+  await writeProviderApiKey(TAVILY_AUTH_PROVIDER, "tvly-saved", home)
+  await Bun.write(getUserSupportPaths(home).mcp, JSON.stringify({
+    mcpServers: {
+      [TAVILY_MCP_SERVER_NAME]: {
+        command: "custom",
+        env: { DEFAULT_PARAMETERS: "{\"max_results\":5}", TAVILY_API_KEY: "old" },
+        disabled: true,
+      },
+    },
+  }))
+
+  await configureTavilyMcpServer({}, home)
+  const parsed = JSON.parse(await Bun.file(getUserSupportPaths(home).mcp).text())
+
+  expect(parsed.mcpServers[TAVILY_MCP_SERVER_NAME].disabled).toBeUndefined()
+  expect(parsed.mcpServers[TAVILY_MCP_SERVER_NAME].command).toBe("bunx")
+  expect(parsed.mcpServers[TAVILY_MCP_SERVER_NAME].env).toEqual({
+    DEFAULT_PARAMETERS: "{\"max_results\":5}",
+    TAVILY_API_KEY: createBraincodeAuthEnvRef(TAVILY_AUTH_PROVIDER),
+  })
+})
+
+test("readUserMcpConfig returns an empty user MCP document when missing", async () => {
+  const home = await makeTempHome()
+  const mcp = await readUserMcpConfig(home)
+
+  expect(mcp.path).toBe(getUserSupportPaths(home).mcp)
+  expect(mcp.config).toEqual({ mcpServers: {} })
+  expect(mcp.serverNames).toEqual([])
+})
+
+test("resolveMcpServerEnv replaces Braincode auth references with API keys", () => {
+  const env = resolveMcpServerEnv(
+    { TAVILY_API_KEY: createBraincodeAuthEnvRef("tavily"), DEFAULT_PARAMETERS: "{}" },
+    { providers: { tavily: { apiKey: "tvly-secret" } } },
+  )
+
+  expect(env).toEqual({ TAVILY_API_KEY: "tvly-secret", DEFAULT_PARAMETERS: "{}" })
+  expect(() => resolveMcpServerEnv({ TAVILY_API_KEY: createBraincodeAuthEnvRef("tavily") }, { providers: {} })).toThrow("Missing API key")
 })
 
 test("normalizeHooks keeps trusted command metadata and filters invalid groups", () => {

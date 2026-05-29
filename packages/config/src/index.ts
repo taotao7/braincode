@@ -127,6 +127,10 @@ export type UserSupport = {
   skills: ProjectSkill[];
 };
 
+export const TAVILY_AUTH_PROVIDER = "tavily";
+export const TAVILY_MCP_SERVER_NAME = "tavily";
+export const TAVILY_MCP_PACKAGE = "tavily-mcp@latest";
+
 export type HookEventName =
   | "SessionStart"
   | "SubagentStart"
@@ -569,6 +573,114 @@ function detectMcpServersKey(parsed: Record<string, unknown>): "mcpServers" | "s
   if (parsed.mcpServers && typeof parsed.mcpServers === "object") return "mcpServers";
   if (parsed.servers && typeof parsed.servers === "object") return "servers";
   return "mcpServers";
+}
+
+export function createBraincodeAuthEnvRef(provider: string): string {
+  const normalizedProvider = provider.trim();
+  if (!normalizedProvider) throw new Error("provider is required");
+  return `\${BRAINCODE_AUTH:${normalizedProvider}}`;
+}
+
+function braincodeAuthProviderFromEnvRef(value: string): string | undefined {
+  const match = /^\$\{BRAINCODE_AUTH:([^}]+)\}$/.exec(value.trim());
+  return match?.[1]?.trim() || undefined;
+}
+
+export function resolveMcpServerEnv(
+  env: Record<string, string> | undefined,
+  auth: BraincodeAuth,
+): Record<string, string> | undefined {
+  if (!env) return undefined;
+
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const textValue = String(value);
+    const provider = braincodeAuthProviderFromEnvRef(textValue);
+    if (!provider) {
+      resolved[key] = textValue;
+      continue;
+    }
+    const apiKey = getProviderApiKey(auth, provider);
+    if (!apiKey) {
+      throw new Error(`Missing API key for MCP auth provider '${provider}'`);
+    }
+    resolved[key] = apiKey;
+  }
+  return resolved;
+}
+
+export function createTavilyMcpServerEntry(existing?: McpServerEntry): McpServerEntry {
+  const env = {
+    ...(existing?.env ?? {}),
+    TAVILY_API_KEY: createBraincodeAuthEnvRef(TAVILY_AUTH_PROVIDER),
+  };
+  const entry: McpServerEntry = {
+    ...(existing ?? {}),
+    type: "stdio",
+    command: "bunx",
+    args: [TAVILY_MCP_PACKAGE],
+    env,
+  };
+  delete entry.url;
+  delete entry.http_headers;
+  delete entry.disabled;
+  return entry;
+}
+
+export async function readUserMcpConfig(
+  home = getBraincodeHome(),
+): Promise<ProjectMcpConfig> {
+  const paths = getUserSupportPaths(home);
+  const mcpFile = Bun.file(paths.mcp);
+  const mcpConfig = (await mcpFile.exists())
+    ? asRecord(JSON.parse(await mcpFile.text())) ?? { mcpServers: {} }
+    : { mcpServers: {} };
+
+  return {
+    path: paths.mcp,
+    config: mcpConfig,
+    serverNames: extractMcpServerNames(mcpConfig),
+  };
+}
+
+export async function upsertUserMcpServer(
+  serverName: string,
+  entry: McpServerEntry,
+  home = getBraincodeHome(),
+): Promise<ProjectMcpConfig> {
+  const normalizedServerName = serverName.trim();
+  if (!normalizedServerName) throw new Error("serverName is required");
+
+  await ensureBraincodeHome(home);
+  const paths = getUserSupportPaths(home);
+  const mcp = await readUserMcpConfig(home);
+  const parsed = mcp.config;
+  const key = detectMcpServersKey(parsed);
+  const servers = asRecord(parsed[key]) ?? {};
+  servers[normalizedServerName] = entry as Record<string, unknown>;
+  parsed[key] = servers;
+  await writeJsonFile(paths.mcp, parsed);
+  return readUserMcpConfig(home);
+}
+
+export async function configureTavilyMcpServer(
+  options: { apiKey?: string } = {},
+  home = getBraincodeHome(),
+): Promise<ProjectMcpConfig> {
+  const apiKey = options.apiKey?.trim() ?? "";
+  if (apiKey) {
+    await writeProviderApiKey(TAVILY_AUTH_PROVIDER, apiKey, home);
+  } else if (!(await readProviderApiKey(TAVILY_AUTH_PROVIDER, home))) {
+    throw new Error("Tavily API key is required");
+  }
+
+  const mcp = await readUserMcpConfig(home);
+  const existing = extractMcpServerEntries(mcp.config).find((server) => server.name === TAVILY_MCP_SERVER_NAME)?.entry;
+  return upsertUserMcpServer(
+    TAVILY_MCP_SERVER_NAME,
+    createTavilyMcpServerEntry(existing),
+    home,
+  );
 }
 
 export async function setMcpServerDisabled(

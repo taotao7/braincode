@@ -21,6 +21,7 @@ import {
 import {
   extractMcpServerEntries,
   listSessions,
+  readAuth,
   readBrains,
   readHookSources,
   readProjectSupport,
@@ -28,6 +29,7 @@ import {
   readSettings,
   readTools,
   readUserSupport,
+  resolveMcpServerEnv,
   setHookHandlerEnabled,
   setMcpServerDisabled,
   writeSettings,
@@ -340,7 +342,18 @@ const INPUT_RESERVED_COLUMNS = 4; // "› " prefix + cursor + a little padding
 const ROOT_PADDING_X = 1;
 const PET_PANEL_MIN_WIDTH = 28;
 const PET_PANEL_MAX_WIDTH = 42;
-const RUN_SPINNER_FRAMES = [".:,:.", ":,:.:", ",:.:,", ":.:,:", ",:,:."] as const;
+const RUN_SPINNER_FRAMES = [
+  "⠋",
+  "⠙",
+  "⠹",
+  "⠸",
+  "⠼",
+  "⠴",
+  "⠦",
+  "⠧",
+  "⠇",
+  "⠏",
+] as const;
 const COLLAPSED_TEXT_LINE_LIMIT = 10;
 const COLLAPSIBLE_TEXT_LINE_THRESHOLD = 18;
 const COLLAPSIBLE_TEXT_CHAR_THRESHOLD = 2400;
@@ -348,6 +361,7 @@ const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
+const RUN_STATUS_TICK_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
 const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE !== "false";
 
@@ -545,9 +559,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   );
   const [runStatus, setRunStatus] = useState<RunStatusState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [transcriptScrollTop, setTranscriptScrollTop] = useState<
-    number | null
-  >(null);
+  const [transcriptScrollTop, setTranscriptScrollTop] = useState<number | null>(
+    null,
+  );
   const initialRan = useRef(false);
   const lastEscapeAt = useRef(0);
   const DOUBLE_ESC_MS = 500;
@@ -1110,10 +1124,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }));
       return;
     }
+    let env: Record<string, string> | undefined;
+    try {
+      env = resolveMcpServerEnv(entry.entry.env, await readAuth());
+    } catch (error) {
+      updateMcpEntry(entry.name, entry.filePath, () =>
+        mergeHealth({ status: "error", error: formatError(error) }),
+      );
+      return;
+    }
     const result = await checkMcpHealth({
       command: entry.entry.command,
       args: entry.entry.args,
-      env: entry.entry.env,
+      env,
       url: entry.entry.url,
       type: entry.entry.type,
     });
@@ -2259,11 +2282,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             toolStatus: event.isError ? "failed" : "ok",
             toolCategory: tracked.toolCategory,
             finishedAt: Date.now(),
-            text: formatToolEndText(
-              event.toolName,
-              event.isError,
-              elapsed,
-            ),
+            text: formatToolEndText(event.toolName, event.isError, elapsed),
             toolDetail: formatToolResultDetail(event.result),
             collapsed: true,
           });
@@ -2618,9 +2637,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     } catch (error) {
       finalizeStreamingBuffers();
       const message = showRuntimeErrorPanel(error, "Run Failed");
-      if (isHandoffRequiredError(error) || isProviderMessageSizeLimitError(error)) {
+      if (
+        isHandoffRequiredError(error) ||
+        isProviderMessageSizeLimitError(error)
+      ) {
         applyDraftChange("/handoff ");
-        flash("Context boundary reached — run /handoff to continue from a compact packet", "error", 6000);
+        flash(
+          "Context boundary reached — run /handoff to continue from a compact packet",
+          "error",
+          6000,
+        );
       }
       setItems((previous) => [
         ...previous.filter((item) => item.id !== statusId),
@@ -2915,11 +2941,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       scrollTranscriptTo(scrollKey.home ? "top" : "bottom");
       return;
     }
-    if (
-      !overlay &&
-      (key.ctrl || key.meta) &&
-      (key.upArrow || key.downArrow)
-    ) {
+    if (!overlay && (key.ctrl || key.meta) && (key.upArrow || key.downArrow)) {
       scrollTranscriptBy(key.downArrow ? 1 : -1);
       return;
     }
@@ -3264,7 +3286,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0;
   const inputWidth = Math.max(20, terminalCols - INPUT_RESERVED_COLUMNS);
   const contentWidth = Math.max(20, terminalCols - 4);
-  const transcriptLayout = layoutTranscriptItems(items, contentWidth);
+  const transcriptLayout = useMemo(
+    () => layoutTranscriptItems(items, contentWidth),
+    [items, contentWidth],
+  );
   const projectPath = relative(homedir(), projectRoot) || projectRoot;
   const headerRootLimit = Math.max(18, Math.min(54, terminalCols - 92));
   const headerRoot = truncate(projectPath, headerRootLimit);
@@ -3329,21 +3354,30 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           Math.max(1, transcriptLayout.totalRows),
         )
       : 0;
-  const transcriptViewport = viewportTranscriptLayout(
-    transcriptLayout,
-    transcriptViewportRows,
-    transcriptScrollTop,
-    transcriptFirstItemRow(items.length > 0),
+  const transcriptViewport = useMemo(
+    () =>
+      viewportTranscriptLayout(
+        transcriptLayout,
+        transcriptViewportRows,
+        transcriptScrollTop,
+        transcriptFirstItemRow(items.length > 0),
+      ),
+    [items.length, transcriptLayout, transcriptScrollTop, transcriptViewportRows],
+  );
+  const transcriptAnchors = useMemo(
+    () =>
+      transcriptScrollAnchors(
+        transcriptLayout,
+        transcriptViewport.maxScrollTop,
+      ),
+    [transcriptLayout, transcriptViewport.maxScrollTop],
   );
   transcriptViewportState.current = {
     totalRows: transcriptLayout.totalRows,
     viewportRows: transcriptViewport.viewportRows,
     scrollTop: transcriptViewport.scrollTop,
     maxScrollTop: transcriptViewport.maxScrollTop,
-    scrollAnchors: transcriptScrollAnchors(
-      transcriptLayout,
-      transcriptViewport.maxScrollTop,
-    ),
+    scrollAnchors: transcriptAnchors,
   };
   transcriptClickViewportOffset.current = 0;
   transcriptClickBounds.current = transcriptViewport.bounds;
@@ -3951,8 +3985,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             {queueRef.current.length > 0 ? (
               <Text color={colors.yellow} wrap="truncate-end">
                 {queueRef.current.length} task
-                {queueRef.current.length === 1 ? "" : "s"} queued · Ctrl+Y
-                edits the most recent
+                {queueRef.current.length === 1 ? "" : "s"} queued · Ctrl+Y edits
+                the most recent
               </Text>
             ) : null}
             {toast ? <ToastView toast={toast} /> : null}
@@ -4270,7 +4304,10 @@ function viewportTranscriptLayout(
     .filter((bound) => visibleIds.has(bound.itemId))
     .map((bound) => ({
       ...bound,
-      rowStart: Math.max(firstTerminalRow, firstTerminalRow + bound.rowStart - scrollTop),
+      rowStart: Math.max(
+        firstTerminalRow,
+        firstTerminalRow + bound.rowStart - scrollTop,
+      ),
       rowEnd: Math.min(
         firstTerminalRow + height - 1,
         firstTerminalRow + bound.rowEnd - scrollTop,
@@ -4306,10 +4343,7 @@ function nextTranscriptScrollTop(
   const current = clamp(Math.round(currentTop), 0, maxScrollTop);
   const target = clamp(Math.round(current + deltaRows), 0, maxScrollTop);
   if (target === current) return current;
-  const orderedAnchors =
-    anchors.length > 0
-      ? anchors
-      : [0, maxScrollTop];
+  const orderedAnchors = anchors.length > 0 ? anchors : [0, maxScrollTop];
 
   if (deltaRows > 0) {
     const targetAnchor = orderedAnchors
@@ -4323,9 +4357,7 @@ function nextTranscriptScrollTop(
     (anchor) => anchor >= target && anchor < current,
   );
   if (targetAnchor !== undefined) return targetAnchor;
-  return orderedAnchors
-    .filter((anchor) => anchor < current)
-    .at(-1) ?? 0;
+  return orderedAnchors.filter((anchor) => anchor < current).at(-1) ?? 0;
 }
 
 function estimateNonTranscriptRows({
@@ -4371,15 +4403,29 @@ function estimateNonTranscriptRows({
   if (hasTranscript) rows += 1;
   else rows += emptyLogoRows;
 
-  if (brainPanel) rows += borderedPanelRows(2 + brainPanel.brains.length * 2 + (brainPanel.message ? 1 : 0));
+  if (brainPanel)
+    rows += borderedPanelRows(
+      2 + brainPanel.brains.length * 2 + (brainPanel.message ? 1 : 0),
+    );
   if (intentPanel) rows += borderedPanelRows(8);
-  if (sessionPanel) rows += borderedPanelRows(2 + sessionPanel.entries.length * 2 + (sessionPanel.message ? 1 : 0));
-  if (hookPanel) rows += borderedPanelRows(2 + hookPanel.entries.length * 2 + (hookPanel.message ? 1 : 0));
-  if (mcpPanel) rows += borderedPanelRows(2 + mcpPanel.entries.length * 2 + (mcpPanel.message ? 1 : 0));
+  if (sessionPanel)
+    rows += borderedPanelRows(
+      2 + sessionPanel.entries.length * 2 + (sessionPanel.message ? 1 : 0),
+    );
+  if (hookPanel)
+    rows += borderedPanelRows(
+      2 + hookPanel.entries.length * 2 + (hookPanel.message ? 1 : 0),
+    );
+  if (mcpPanel)
+    rows += borderedPanelRows(
+      2 + mcpPanel.entries.length * 2 + (mcpPanel.message ? 1 : 0),
+    );
 
-  if (overlay?.kind === "command") rows += borderedPanelRows(commandMatchRows + 2);
+  if (overlay?.kind === "command")
+    rows += borderedPanelRows(commandMatchRows + 2);
   if (overlay?.kind === "file") rows += borderedPanelRows(fileMatchRows + 2);
-  if (overlay?.kind === "session") rows += borderedPanelRows(sessionMatchRows + 2);
+  if (overlay?.kind === "session")
+    rows += borderedPanelRows(sessionMatchRows + 2);
 
   if (decisionPanel) {
     rows += borderedPanelRows(
@@ -4387,7 +4433,9 @@ function estimateNonTranscriptRows({
     );
   }
   if (runtimeErrorPanel) {
-    rows += borderedPanelRows(2 + runtimeErrorPanel.message.split(/\r?\n/).length);
+    rows += borderedPanelRows(
+      2 + runtimeErrorPanel.message.split(/\r?\n/).length,
+    );
   }
 
   rows += 1;
@@ -4417,7 +4465,10 @@ function transcriptFoldHitBox(
   const foldColumn = transcriptFoldColumn(item, continuation);
   return {
     foldLeft: 1,
-    foldRight: Math.max(foldColumn + ROOT_PADDING_X + 2, width + ROOT_PADDING_X),
+    foldRight: Math.max(
+      foldColumn + ROOT_PADDING_X + 2,
+      width + ROOT_PADDING_X,
+    ),
   };
 }
 
@@ -4492,7 +4543,10 @@ function estimateTranscriptSupplementRows(
     }
   }
   if (item.editPreview) {
-    rows += countWrappedRows(`Edit ${item.editPreview.filePath}`, Math.max(10, width - 2));
+    rows += countWrappedRows(
+      `Edit ${item.editPreview.filePath}`,
+      Math.max(10, width - 2),
+    );
     const verb = item.editPreview.created
       ? "File created."
       : item.editPreview.deleted
@@ -4513,7 +4567,10 @@ function estimateTranscriptSupplementRows(
       rows += hunk.rows.reduce(
         (sum, row) =>
           sum +
-          countWrappedRows(editPreviewRowEstimateText(row), Math.max(10, width - 2)),
+          countWrappedRows(
+            editPreviewRowEstimateText(row),
+            Math.max(10, width - 2),
+          ),
         0,
       );
     }
@@ -5335,40 +5392,27 @@ function RuntimeStatusLine({ status }: { status: RunStatusState }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 180);
+    const timer = setInterval(() => setNow(Date.now()), RUN_STATUS_TICK_MS);
     return () => clearInterval(timer);
   }, [status.startedAt]);
   const elapsedMs = now - status.startedAt;
   const spinner =
     RUN_SPINNER_FRAMES[
-      Math.floor(elapsedMs / 180) % RUN_SPINNER_FRAMES.length
+      Math.floor(elapsedMs / RUN_STATUS_TICK_MS) % RUN_SPINNER_FRAMES.length
     ];
   const label = truncate(
     status.label.replace(/\s+/g, " ").trim() || "Thinking…",
     80,
   );
-  const labelChars = Array.from(label);
-  const activeIndex =
-    labelChars.length > 0 ? Math.floor(elapsedMs / 140) % labelChars.length : 0;
   const elapsed = formatElapsed(elapsedMs);
   const tokens = formatRunStatusTokens(status.tokens);
-  const highlightColor =
-    theme.name === "dark" ? "#ffffff" : "#000000";
 
   return (
     <Text>
       <Text color={theme.colors.yellow} bold>
         {spinner}{" "}
       </Text>
-      {labelChars.map((char, index) => (
-        <Text
-          key={`${char}-${index}`}
-          color={index === activeIndex ? highlightColor : theme.colors.yellow}
-          bold={index === activeIndex}
-        >
-          {char}
-        </Text>
-      ))}
+      <Text color={theme.colors.yellow}>{label}</Text>
       <Text color={theme.colors.gray}>
         {" "}
         ({elapsed}
@@ -6282,10 +6326,7 @@ function summarizeArgValue(value: unknown, maxLen = 40): string {
   return truncate(String(value), maxLen);
 }
 
-function summarizeToolResult(
-  result: unknown,
-  maxLength = 120,
-): string {
+function summarizeToolResult(result: unknown, maxLength = 120): string {
   if (!result) return "";
   if (typeof result === "string")
     return truncate(result.replace(/\s+/g, " ").trim(), maxLength);
