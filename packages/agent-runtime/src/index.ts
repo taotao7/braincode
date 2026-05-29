@@ -1,25 +1,36 @@
 import { spawn } from "node:child_process"
 import { mkdir } from "node:fs/promises"
 import { join, resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
-import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core"
+import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTasks, runDemoBenchmarkSuite } from "./benchmark"
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
+import { ContextHandoffRequiredError, enforceHandoffContextBudget, estimateProviderContextBytes, formatBytes, isHandoffRequiredError, isProviderMessageSizeLimitError } from "./context-budget"
+export { ContextHandoffRequiredError, enforceHandoffContextBudget, estimateProviderContextBytes, isHandoffRequiredError, isProviderMessageSizeLimitError } from "./context-budget"
+import { createToolEvidenceCache, wrapToolsWithEvidenceCache, type ToolEvidenceCache } from "./evidence-cache"
+export { createToolEvidenceCache, wrapToolsWithEvidenceCache } from "./evidence-cache"
+export type { ToolEvidenceCache } from "./evidence-cache"
 import { runtimeModelRequirementsForImages, runtimeModelRequirementsForRole, selectRuntimeModel, selectRuntimeModelCandidatesWithApiKey, selectRuntimeModelWithApiKey, toPiModelSummary, type RuntimeModelCandidate, type RuntimeModelRequirements, type RuntimeModelSelection, type RuntimePiModelSummary } from "./model-selection"
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
 import type { ImageContent } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, getBraincodeHome, normalizeTokenUsage, readAuth, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
+import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, getBraincodeHome, normalizeTokenUsage, readAuth, readBrains, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
 import { generateImage, isImageGenerationModel, resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
 import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode } from "@braincode/tools"
+import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
+export { runConfiguredHooks } from "./hooks"
+export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
+import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, hasPatchActivity, type PatchDiffSnapshot, type PatchSummary } from "./patch"
+export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary } from "./patch"
+export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary } from "./patch"
 
 export type AgentRunRequest = {
   prompt: string
@@ -140,62 +151,6 @@ export function humanizeAgentRuntimeError(error: unknown): string {
   return message
 }
 
-const PROVIDER_MESSAGE_SIZE_LIMIT_BYTES = 2 * 1024 * 1024
-const PROVIDER_MESSAGE_SIZE_GUARD_BYTES = Math.floor(PROVIDER_MESSAGE_SIZE_LIMIT_BYTES * 0.88)
-const AUTO_HANDOFF_SUMMARY_CHARS = 24 * 1024
-const AUTO_HANDOFF_MESSAGE_CHARS = 1600
-
-export class ContextHandoffRequiredError extends Error {
-  readonly estimatedBytes: number
-  readonly limitBytes: number
-  readonly sessionId?: string
-  readonly handoffSummary?: string
-
-  constructor(input: { estimatedBytes: number; limitBytes: number; sessionId?: string; handoffSummary?: string }) {
-    super(`Braincode handoff required: active message context is ${input.estimatedBytes} bytes, exceeding the ${input.limitBytes} byte safety budget.`)
-    this.name = "ContextHandoffRequiredError"
-    this.estimatedBytes = input.estimatedBytes
-    this.limitBytes = input.limitBytes
-    this.sessionId = input.sessionId
-    this.handoffSummary = input.handoffSummary
-  }
-}
-
-export function isHandoffRequiredError(error: unknown): boolean {
-  if (error instanceof ContextHandoffRequiredError) return true
-  const message = error instanceof Error ? error.message : String(error)
-  return /Braincode handoff required|Context handoff required/i.test(message)
-}
-
-export function isProviderMessageSizeLimitError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /total message size\s+\d+\s+exceeds limit\s+\d+/i.test(message)
-    || /message payload is too large/i.test(message)
-}
-
-export type PatchFileChange = {
-  path: string
-  status: string
-}
-
-export type PatchBaseline = {
-  changedFiles: PatchFileChange[]
-}
-
-export type PatchSummary = {
-  changedFiles: PatchFileChange[]
-  preExistingChangedFiles: PatchFileChange[]
-  diffStats: {
-    filesChanged: number
-    insertions: number
-    deletions: number
-    untrackedFiles: number
-    raw: string
-    unstagedRaw: string
-    stagedRaw: string
-  }
-}
-
 export type PatchCheckStatus = "passed" | "failed" | "skipped"
 
 export type PatchCheckResult = {
@@ -224,12 +179,6 @@ export type PatchCheckOptions = {
   maxOutputBytes?: number
 }
 
-export type PatchDiffSnapshot = {
-  stat: string
-  diff: string
-  truncated: boolean
-}
-
 export type PatchReviewArtifacts = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
@@ -256,18 +205,6 @@ export type ReviewDecision = {
   requiredChanges: string[]
   blockingIssues: string[]
   residualRisks: string[]
-}
-
-type ToolEvidenceCacheEntry = {
-  result: AgentToolResult<any>
-  createdAt: number
-}
-
-export type ToolEvidenceCache = {
-  entries: Map<string, ToolEvidenceCacheEntry>
-  counts: Map<string, number>
-  lastKey?: string
-  consecutiveCount: number
 }
 
 export type BraincodeAgentRuntimeOptions = {
@@ -372,262 +309,6 @@ type WorkerTodoStatusHandler = (
   detail?: { summary?: string; error?: string },
 ) => void | Promise<void>
 
-export type HookPermissionMode = "default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions"
-
-export type HookRuntimeContext = {
-  sessionId: string
-  cwd: string
-  home?: string
-  transcriptPath?: string | null
-  model?: string
-  turnId?: string
-  permissionMode?: HookPermissionMode
-}
-
-export type HookRunRecord = {
-  eventName: HookEventName
-  source: Pick<HookSource, "kind" | "path">
-  matcher?: string
-  command?: string
-  status: "completed" | "skipped" | "failed" | "blocked"
-  reason?: string
-  stdout?: string
-  stderr?: string
-  exitCode?: number | null
-}
-
-export type HookRunResult = {
-  records: HookRunRecord[]
-  additionalContext: string[]
-  blockedReason?: string
-}
-
-function hookMatcherMatches(eventName: HookEventName, matcher: string | undefined, matcherValue?: string): boolean {
-  if (eventName === "UserPromptSubmit" || eventName === "Stop") return true
-  if (!matcher || matcher === "*") return true
-
-  try {
-    return new RegExp(matcher).test(matcherValue ?? "")
-  } catch {
-    return matcher === matcherValue
-  }
-}
-
-function getMatchingHookGroups(source: HookSource, eventName: HookEventName, matcherValue?: string): HookMatcherGroup[] {
-  return (source.document.hooks[eventName] ?? []).filter((group) => hookMatcherMatches(eventName, group.matcher, matcherValue))
-}
-
-function buildHookInput(eventName: HookEventName, eventInput: Record<string, unknown>, context: HookRuntimeContext): Record<string, unknown> {
-  return {
-    session_id: context.sessionId,
-    transcript_path: context.transcriptPath ?? null,
-    cwd: context.cwd,
-    hook_event_name: eventName,
-    model: context.model ?? "braincode",
-    turn_id: context.turnId ?? context.sessionId,
-    permission_mode: context.permissionMode ?? "default",
-    ...eventInput,
-  }
-}
-
-function parseHookOutput(eventName: HookEventName, stdout: string, stderr: string, exitCode: number | null): { additionalContext?: string; blockedReason?: string } {
-  const trimmed = stdout.trim()
-  if (exitCode === 2) {
-    return { blockedReason: stderr.trim() || trimmed || "Hook blocked the event." }
-  }
-  if (!trimmed) return {}
-
-  try {
-    const parsed = JSON.parse(trimmed) as { decision?: unknown; reason?: unknown; continue?: unknown; stopReason?: unknown; systemMessage?: unknown; hookSpecificOutput?: unknown }
-    const hookSpecificOutput = parsed.hookSpecificOutput && typeof parsed.hookSpecificOutput === "object" ? parsed.hookSpecificOutput as { hookEventName?: unknown; additionalContext?: unknown } : undefined
-    const additionalContext = hookSpecificOutput?.hookEventName === eventName && typeof hookSpecificOutput.additionalContext === "string" && hookSpecificOutput.additionalContext.trim()
-      ? hookSpecificOutput.additionalContext.trim()
-      : undefined
-    if (parsed.decision === "block") {
-      return {
-        additionalContext,
-        blockedReason: typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "Hook blocked the event.",
-      }
-    }
-    if (parsed.continue === false) {
-      return {
-        additionalContext,
-        blockedReason: typeof parsed.stopReason === "string" && parsed.stopReason.trim() ? parsed.stopReason.trim() : "Hook stopped the event.",
-      }
-    }
-    return { additionalContext }
-  } catch {
-    if (eventName === "SessionStart" || eventName === "SubagentStart" || eventName === "UserPromptSubmit") {
-      return { additionalContext: trimmed }
-    }
-    return {}
-  }
-}
-
-async function runCommandHook(
-  eventName: HookEventName,
-  source: HookSource,
-  group: HookMatcherGroup,
-  handler: HookHandler,
-  hookInput: Record<string, unknown>,
-  cwd: string,
-): Promise<{ record: HookRunRecord; additionalContext?: string; blockedReason?: string }> {
-  const baseRecord = {
-    eventName,
-    source: { kind: source.kind, path: source.path },
-    matcher: group.matcher,
-    command: handler.command,
-  }
-
-  if (handler.enabled === false) {
-    return { record: { ...baseRecord, status: "skipped", reason: "disabled" } }
-  }
-  if (handler.async === true) {
-    return { record: { ...baseRecord, status: "skipped", reason: "async command hooks are not supported yet" } }
-  }
-  if (handler.type !== "command") {
-    return { record: { ...baseRecord, status: "skipped", reason: `unsupported hook type: ${handler.type}` } }
-  }
-  if (!handler.command) {
-    return { record: { ...baseRecord, status: "skipped", reason: "missing command" } }
-  }
-  if (handler.trusted !== true) {
-    return { record: { ...baseRecord, status: "skipped", reason: "untrusted" } }
-  }
-
-  const timeoutMs = (handler.timeout ?? 600) * 1000
-  const command = process.platform === "win32" ? handler.commandWindows ?? handler.command_windows ?? handler.command : handler.command
-
-  return await new Promise((resolve) => {
-    const child = spawn(command, {
-      cwd,
-      shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        BRAINCODE_HOOK_SOURCE: source.path,
-      },
-    })
-    let stdout = ""
-    let stderr = ""
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill("SIGTERM")
-    }, timeoutMs)
-
-    child.stdout?.on("data", (chunk) => {
-      stdout += String(chunk)
-    })
-    child.stderr?.on("data", (chunk) => {
-      stderr += String(chunk)
-    })
-    child.on("error", (error) => {
-      clearTimeout(timer)
-      resolve({ record: { ...baseRecord, status: "failed", reason: error.message, stdout, stderr } })
-    })
-    child.on("close", (exitCode) => {
-      clearTimeout(timer)
-      if (timedOut) {
-        resolve({ record: { ...baseRecord, status: "failed", reason: `timed out after ${handler.timeout ?? 600}s`, stdout, stderr, exitCode } })
-        return
-      }
-
-      const output = parseHookOutput(eventName, stdout, stderr, exitCode)
-      const status = output.blockedReason ? "blocked" : exitCode === 0 ? "completed" : "failed"
-      resolve({
-        record: {
-          ...baseRecord,
-          status,
-          reason: output.blockedReason ?? (exitCode === 0 ? undefined : stderr.trim() || `command exited with ${exitCode}`),
-          stdout: stdout.trim() || undefined,
-          stderr: stderr.trim() || undefined,
-          exitCode,
-        },
-        additionalContext: output.additionalContext,
-        blockedReason: output.blockedReason,
-      })
-    })
-    child.stdin?.end(`${JSON.stringify(hookInput)}\n`)
-  })
-}
-
-export async function runConfiguredHooks(
-  eventName: HookEventName,
-  eventInput: Record<string, unknown>,
-  context: HookRuntimeContext,
-  matcherValue?: string,
-): Promise<HookRunResult> {
-  const settings = await readSettings(context.home)
-  if (settings.features?.hooks === false) {
-    return { records: [], additionalContext: [] }
-  }
-
-  const sources = await readHookSources(context.home, context.cwd)
-  const hookInput = buildHookInput(eventName, eventInput, context)
-  const hookRuns: Array<Promise<{ record: HookRunRecord; additionalContext?: string; blockedReason?: string }>> = []
-  for (const source of sources) {
-    for (const group of getMatchingHookGroups(source, eventName, matcherValue)) {
-      for (const handler of group.hooks) {
-        hookRuns.push(runCommandHook(eventName, source, group, handler, hookInput, context.cwd))
-      }
-    }
-  }
-
-  const results = await Promise.all(hookRuns)
-  const additionalContext = results.map((result) => result.additionalContext).filter((value): value is string => Boolean(value))
-  const blockedReason = results.find((result) => result.blockedReason)?.blockedReason
-  return {
-    records: results.map((result) => result.record),
-    additionalContext,
-    blockedReason,
-  }
-}
-
-function addHookAdditionalContext(prompt: string, additionalContext: string[]): string {
-  if (additionalContext.length === 0) return prompt
-  return `Hook additional context:\n${additionalContext.map((context) => `- ${context}`).join("\n")}\n\n${prompt}`
-}
-
-function formatStopHookFeedback(result: HookRunResult): string {
-  const messages = [...result.additionalContext]
-  if (result.blockedReason) messages.push(result.blockedReason)
-  return messages.length > 0 ? `\n\nHook feedback:\n${messages.map((message) => `- ${message}`).join("\n")}` : ""
-}
-
-function createHookContext(sessionId: string, cwd: string, home: string | undefined, model?: string): HookRuntimeContext {
-  return {
-    sessionId,
-    cwd,
-    home,
-    model,
-    turnId: sessionId,
-    permissionMode: "default",
-  }
-}
-
-async function runAndRecordHooks(
-  eventName: HookEventName,
-  eventInput: Record<string, unknown>,
-  context: HookRuntimeContext,
-  matcherValue: string | undefined,
-  home: string | undefined,
-  recordType: string,
-): Promise<HookRunResult> {
-  const result = await runConfiguredHooks(eventName, eventInput, context, matcherValue)
-  if (result.records.length > 0 || result.additionalContext.length > 0 || result.blockedReason) {
-    await appendSessionRecord(context.sessionId, {
-      type: recordType,
-      eventName,
-      matcher: matcherValue,
-      records: result.records,
-      additionalContext: result.additionalContext,
-      blockedReason: result.blockedReason,
-    }, home)
-  }
-  return result
-}
-
 function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[], requirements?: RuntimeModelRequirements, policyOverride?: ModelPolicy): RuntimeWorkerPlan {
   const policy = policyOverride ?? selectModelPolicy(brain, worker.role)
   const workerRequirements = worker.role === "imageMaker" ? { requiresImageGeneration: true } : requirements
@@ -639,174 +320,6 @@ function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, mod
     policy,
     piModel: toPiModelSummary(selection),
   }
-}
-
-const CACHEABLE_EVIDENCE_TOOLS = new Set(["list_files", "read_file", "search_files", "git_diff", "get_changed_files"])
-const EVIDENCE_CACHE_SUPPRESS_CONTENT_AFTER_CONSECUTIVE = 8
-
-export function createToolEvidenceCache(): ToolEvidenceCache {
-  return {
-    entries: new Map(),
-    counts: new Map(),
-    consecutiveCount: 0,
-  }
-}
-
-function wrapToolsWithEvidenceCache(tools: AgentTool[], cache: ToolEvidenceCache): AgentTool[] {
-  return tools.map((tool) => {
-    const wrapped: AgentTool = {
-      ...tool,
-      execute: async (toolCallId, params, signal, onUpdate) => {
-        const key = toolEvidenceKey(tool.name, params)
-        const count = recordToolEvidenceCall(cache, key)
-        const cacheable = isCacheableEvidenceToolCall(tool.name, params)
-        const cached = cacheable ? cache.entries.get(key) : undefined
-        if (cached) {
-          return annotateToolEvidenceResult(cached.result, {
-            toolName: tool.name,
-            reused: true,
-            callCount: count,
-            consecutiveCount: cache.consecutiveCount,
-            cacheAgeMs: Date.now() - cached.createdAt,
-          })
-        }
-
-        const result = await tool.execute(toolCallId, params as never, signal, onUpdate as never)
-        if (toolInvalidatesEvidenceCache(tool.name, params)) {
-          resetToolEvidenceCache(cache)
-        } else if (cacheable) {
-          cache.entries.set(key, { result, createdAt: Date.now() })
-        }
-
-        return annotateToolEvidenceResult(result, {
-          toolName: tool.name,
-          reused: false,
-          callCount: count,
-          consecutiveCount: cache.consecutiveCount,
-        })
-      },
-    }
-    return wrapped
-  })
-}
-
-function recordToolEvidenceCall(cache: ToolEvidenceCache, key: string): number {
-  const count = (cache.counts.get(key) ?? 0) + 1
-  cache.counts.set(key, count)
-  cache.consecutiveCount = cache.lastKey === key ? cache.consecutiveCount + 1 : 1
-  cache.lastKey = key
-  return count
-}
-
-function resetToolEvidenceCache(cache: ToolEvidenceCache): void {
-  cache.entries.clear()
-  cache.counts.clear()
-  cache.lastKey = undefined
-  cache.consecutiveCount = 0
-}
-
-function toolEvidenceKey(toolName: string, args: unknown): string {
-  return `${toolName.toLowerCase()}:${canonicalToolArgs(args)}`
-}
-
-function canonicalToolArgs(value: unknown): string {
-  try {
-    return JSON.stringify(toStableJsonValue(value, new WeakSet())) ?? ""
-  } catch {
-    return safeStringify(value)
-  }
-}
-
-function toStableJsonValue(value: unknown, seen: WeakSet<object>): unknown {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value
-  if (typeof value === "bigint") return value.toString()
-  if (Array.isArray(value)) return value.map((item) => toStableJsonValue(item, seen))
-  if (typeof value !== "object") return String(value)
-  if (seen.has(value)) return "[Circular]"
-  seen.add(value)
-  const output: Record<string, unknown> = {}
-  for (const key of Object.keys(value).sort()) {
-    output[key] = toStableJsonValue((value as Record<string, unknown>)[key], seen)
-  }
-  seen.delete(value)
-  return output
-}
-
-function isCacheableEvidenceToolCall(toolName: string, _args: unknown): boolean {
-  const name = toolName.toLowerCase()
-  if (CACHEABLE_EVIDENCE_TOOLS.has(name)) return true
-  return false
-}
-
-function toolInvalidatesEvidenceCache(toolName: string, args: unknown): boolean {
-  if (isCacheableEvidenceToolCall(toolName, args)) return false
-  const name = toolName.toLowerCase()
-  return /(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write|shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)
-}
-
-function annotateToolEvidenceResult<TDetails>(
-  result: AgentToolResult<TDetails>,
-  evidence: {
-    toolName: string
-    reused: boolean
-    callCount: number
-    consecutiveCount: number
-    cacheAgeMs?: number
-  },
-): AgentToolResult<TDetails> {
-  const warning = formatEvidenceCacheReminder(evidence)
-  const details = addEvidenceCacheDetails(result.details, { ...evidence, warning })
-  if (!warning) return { ...result, details }
-  if (evidence.reused && evidence.consecutiveCount >= EVIDENCE_CACHE_SUPPRESS_CONTENT_AFTER_CONSECUTIVE) {
-    return {
-      ...result,
-      details,
-      content: [
-        {
-          type: "text",
-          text: `${warning}\n\nNo new tool output is included because this duplicate read-only call has already been answered in this turn.`,
-        },
-      ],
-    }
-  }
-
-  const [first, ...rest] = result.content
-  if (first && first.type === "text" && typeof first.text === "string") {
-    return {
-      ...result,
-      details,
-      content: [{ ...first, text: `${warning}\n\n${first.text}` }, ...rest],
-    }
-  }
-  return {
-    ...result,
-    details,
-    content: [{ type: "text", text: warning }, ...result.content],
-  }
-}
-
-function addEvidenceCacheDetails<TDetails>(details: TDetails, evidenceCache: Record<string, unknown>): TDetails {
-  if (details && typeof details === "object" && !Array.isArray(details)) {
-    return { ...(details as Record<string, unknown>), evidenceCache } as TDetails
-  }
-  return { value: details, evidenceCache } as TDetails
-}
-
-function formatEvidenceCacheReminder(evidence: { toolName: string; reused: boolean; callCount: number; consecutiveCount: number; cacheAgeMs?: number }): string | undefined {
-  if (evidence.callCount <= 1) return undefined
-  const age = evidence.cacheAgeMs === undefined ? "" : ` (${evidence.cacheAgeMs}ms old)`
-  if (evidence.consecutiveCount >= 8) {
-    return `[Braincode evidence cache] Repeated ${evidence.toolName} with identical arguments ${evidence.consecutiveCount} times in a row. Stop repeating this call; use the cached evidence${age} or change the arguments.`
-  }
-  if (evidence.consecutiveCount >= 5) {
-    return `[Braincode evidence cache] Strong duplicate reminder: ${evidence.toolName} has identical arguments ${evidence.consecutiveCount} times in a row. Reuse the existing evidence${age} unless inputs changed.`
-  }
-  if (evidence.consecutiveCount >= 3) {
-    return `[Braincode evidence cache] Duplicate reminder: ${evidence.toolName} has identical arguments ${evidence.consecutiveCount} times in a row. Avoid looping over the same evidence.`
-  }
-  return evidence.reused
-    ? `[Braincode evidence cache] Reusing cached read-only result for duplicate ${evidence.toolName} call${age}.`
-    : `[Braincode evidence cache] Duplicate ${evidence.toolName} call detected; reuse prior evidence unless the arguments need to change.`
 }
 
 export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOptions): BraincodeAgentRuntime {
@@ -919,186 +432,6 @@ async function recordAgentTokenUsage(
       scope.home,
     )
   }
-}
-
-function enforceHandoffContextBudget(
-  messages: AgentMessage[],
-  options: { systemPrompt: string; sessionId?: string },
-): AgentMessage[] {
-  const estimatedBytes = estimateProviderContextBytes(messages, options.systemPrompt)
-  if (estimatedBytes <= PROVIDER_MESSAGE_SIZE_GUARD_BYTES) return messages
-  const handoffSummary = buildAutomaticHandoffSummary(messages, {
-    estimatedBytes,
-    limitBytes: PROVIDER_MESSAGE_SIZE_GUARD_BYTES,
-    sessionId: options.sessionId,
-  })
-  throw new ContextHandoffRequiredError({
-    estimatedBytes,
-    limitBytes: PROVIDER_MESSAGE_SIZE_GUARD_BYTES,
-    sessionId: options.sessionId,
-    handoffSummary,
-  })
-}
-
-export function estimateProviderContextBytes(messages: AgentMessage[], systemPrompt: string): number {
-  return utf8ByteLength(safeStringify({ systemPrompt, messages: sanitizeMessagesForContextBudget(messages) }))
-}
-
-function sanitizeMessagesForContextBudget(messages: AgentMessage[]): unknown[] {
-  return messages.map((message) => sanitizeContextBudgetValue(message))
-}
-
-function sanitizeContextBudgetValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => sanitizeContextBudgetValue(item))
-  if (!value || typeof value !== "object") return value
-  const record = value as Record<string, unknown>
-  if (isImageLikeContextBlock(record)) {
-    const sanitized: Record<string, unknown> = {}
-    for (const [key, entry] of Object.entries(record)) {
-      if (key === "data" && typeof entry === "string") {
-        sanitized[key] = `[image data omitted from context budget: ${entry.length} chars]`
-      } else if (key === "image_url") {
-        sanitized[key] = summarizeImageUrlForContextBudget(entry)
-      } else if (key === "url" && typeof entry === "string" && entry.startsWith("data:image/")) {
-        sanitized[key] = `[image data URL omitted from context budget: ${entry.length} chars]`
-      } else {
-        sanitized[key] = sanitizeContextBudgetValue(entry)
-      }
-    }
-    return sanitized
-  }
-  return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, sanitizeContextBudgetValue(entry)]))
-}
-
-function isImageLikeContextBlock(record: Record<string, unknown>): boolean {
-  const type = typeof record.type === "string" ? record.type.toLowerCase() : ""
-  if (type === "image" || type === "input_image" || type === "image_url") return true
-  return typeof record.data === "string" && typeof record.mimeType === "string" && record.mimeType.startsWith("image/")
-}
-
-function summarizeImageUrlForContextBudget(value: unknown): unknown {
-  if (typeof value === "string") {
-    return value.startsWith("data:image/")
-      ? `[image data URL omitted from context budget: ${value.length} chars]`
-      : value
-  }
-  if (!value || typeof value !== "object") return value
-  const record = value as Record<string, unknown>
-  return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
-    if (key === "url" && typeof entry === "string" && entry.startsWith("data:image/")) {
-      return [key, `[image data URL omitted from context budget: ${entry.length} chars]`]
-    }
-    return [key, sanitizeContextBudgetValue(entry)]
-  }))
-}
-
-function utf8ByteLength(text: string): number {
-  return new TextEncoder().encode(text).byteLength
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes)) return "unknown size"
-  if (bytes >= 1024 * 1024) return `${trimTrailingZero((bytes / 1024 / 1024).toFixed(1))} MB`
-  if (bytes >= 1024) return `${trimTrailingZero((bytes / 1024).toFixed(1))} KB`
-  return `${Math.max(0, Math.round(bytes))} bytes`
-}
-
-function trimTrailingZero(value: string): string {
-  return value.endsWith(".0") ? value.slice(0, -2) : value
-}
-
-function buildAutomaticHandoffSummary(
-  messages: AgentMessage[],
-  input: { estimatedBytes: number; limitBytes: number; sessionId?: string },
-): string {
-  const lines = [
-    "Auto handoff generated by Braincode because the active agent context reached the provider message-size boundary.",
-    input.sessionId ? `Session: ${input.sessionId}` : "",
-    `Estimated active context: ${formatBytes(input.estimatedBytes)}; safety budget: ${formatBytes(input.limitBytes)}.`,
-    "Continue from this packet instead of copying the full transcript or raw tool output forward.",
-    "",
-    "Recent visible context:",
-  ].filter(Boolean)
-  const selected = selectMessagesForAutomaticHandoff(messages)
-  for (const message of selected) {
-    const entry = formatMessageForAutomaticHandoff(message)
-    if (!entry) continue
-    const next = [...lines, entry].join("\n")
-    if (next.length > AUTO_HANDOFF_SUMMARY_CHARS) {
-      lines.push(`- Additional context omitted from this automatic handoff after ${selected.length} selected messages.`)
-      break
-    }
-    lines.push(entry)
-  }
-  return clipTextForHandoff(lines.join("\n"), AUTO_HANDOFF_SUMMARY_CHARS)
-}
-
-function selectMessagesForAutomaticHandoff(messages: AgentMessage[]): AgentMessage[] {
-  if (messages.length <= 40) return messages
-  const firstUser = messages.find((message) => message.role === "user")
-  const recent = messages.slice(-39)
-  return firstUser && !recent.includes(firstUser) ? [firstUser, ...recent] : recent
-}
-
-function formatMessageForAutomaticHandoff(message: AgentMessage): string | undefined {
-  if (message.role === "user") {
-    return `- user: ${clipTextForHandoff(messageContentText(message.content), AUTO_HANDOFF_MESSAGE_CHARS)}`
-  }
-  if (message.role === "assistant") {
-    const text = assistantTextForHandoff(message)
-    const toolCalls = assistantToolCallsForHandoff(message)
-    const parts = [
-      text ? `text: ${clipTextForHandoff(text, AUTO_HANDOFF_MESSAGE_CHARS)}` : "",
-      toolCalls.length > 0 ? `tool calls: ${toolCalls.join("; ")}` : "",
-      message.errorMessage ? `error: ${clipTextForHandoff(message.errorMessage, 800)}` : "",
-      message.stopReason ? `stop: ${message.stopReason}` : "",
-    ].filter(Boolean)
-    return parts.length > 0 ? `- assistant: ${parts.join(" | ")}` : undefined
-  }
-  if (message.role === "toolResult") {
-    return `- tool result ${message.toolName}: ${clipTextForHandoff(messageContentText(message.content), AUTO_HANDOFF_MESSAGE_CHARS)}`
-  }
-  return undefined
-}
-
-function assistantTextForHandoff(message: Extract<AgentMessage, { role: "assistant" }>): string {
-  return message.content
-    .map((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "")
-    .filter(Boolean)
-    .join("\n")
-    .trim()
-}
-
-function assistantToolCallsForHandoff(message: Extract<AgentMessage, { role: "assistant" }>): string[] {
-  return message.content
-    .filter((block) => block && typeof block === "object" && (block as { type?: unknown }).type === "toolCall")
-    .map((block) => {
-      const record = block as unknown as Record<string, unknown>
-      const name = typeof record.name === "string" ? record.name : "tool"
-      const args = "arguments" in record ? ` ${clipTextForHandoff(safeStringify(record.arguments), 600)}` : ""
-      return `${name}${args}`
-    })
-}
-
-function messageContentText(content: unknown): string {
-  if (typeof content === "string") return content.trim()
-  if (!Array.isArray(content)) return safeStringify(content)
-  return content
-    .map((block) => {
-      if (!block || typeof block !== "object") return ""
-      const record = block as Record<string, unknown>
-      if (typeof record.text === "string") return record.text
-      if (record.type === "image") return "[image input]"
-      return ""
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim()
-}
-
-function clipTextForHandoff(text: string, limit: number): string {
-  if (text.length <= limit) return text
-  return `${text.slice(0, Math.max(0, limit - 32))}\n...[truncated ${text.length - limit} chars]`
 }
 
 async function recordAutomaticHandoffIfNeeded(error: unknown, sessionId: string, home: string | undefined): Promise<void> {
@@ -1285,50 +618,12 @@ function safeStringify(value: unknown): string {
 
 const DEFAULT_CHECK_TIMEOUT_MS = 180_000
 const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
-const MAX_REVIEW_DIFF_CHARS = 60_000
 const CHECK_SCRIPT_PRIORITY = ["check", "typecheck", "lint", "test"] as const
 
 type PackageManager = {
   name: "bun" | "pnpm" | "yarn" | "npm"
   command: string
   runArgs: (script: string) => string[]
-}
-
-export async function collectPatchBaseline(projectRoot: string): Promise<PatchBaseline | undefined> {
-  const status = await runGitCommand(projectRoot, ["status", "--short"])
-  if (status.exitCode !== 0) return undefined
-  return { changedFiles: parsePatchStatus(status.stdout) }
-}
-
-export async function collectPatchSummary(projectRoot: string, baseline?: PatchBaseline): Promise<PatchSummary | undefined> {
-  const status = await runGitCommand(projectRoot, ["status", "--short"])
-  if (status.exitCode !== 0) return undefined
-  const currentChangedFiles = parsePatchStatus(status.stdout)
-  const shortstat = await runGitCommand(projectRoot, ["diff", "--shortstat"])
-  const stagedShortstat = await runGitCommand(projectRoot, ["diff", "--cached", "--shortstat"])
-  const baselineKeys = new Set((baseline?.changedFiles ?? []).map(patchStatusKey))
-  const changedFiles = baseline
-    ? currentChangedFiles.filter((change) => !baselineKeys.has(patchStatusKey(change)))
-    : currentChangedFiles
-  const preExistingChangedFiles = baseline
-    ? currentChangedFiles.filter((change) => baselineKeys.has(patchStatusKey(change)))
-    : []
-  const unstagedRaw = shortstat.exitCode === 0 ? shortstat.stdout.trim() : ""
-  const stagedRaw = stagedShortstat.exitCode === 0 ? stagedShortstat.stdout.trim() : ""
-  const untrackedFiles = currentChangedFiles.filter((change) => change.status === "??").length
-  const diffStats = combineGitShortstats(unstagedRaw, stagedRaw, untrackedFiles)
-  return {
-    changedFiles,
-    preExistingChangedFiles,
-    diffStats,
-  }
-}
-
-function hasPatchActivity(summary: PatchSummary | undefined): summary is PatchSummary {
-  if (!summary) return false
-  if (summary.changedFiles.length > 0) return true
-  if (summary.preExistingChangedFiles.length > 0) return false
-  return summary.diffStats.filesChanged > 0 || summary.diffStats.insertions > 0 || summary.diffStats.deletions > 0 || summary.diffStats.untrackedFiles > 0
 }
 
 export async function runPatchChecks(projectRoot: string, options: PatchCheckOptions = {}): Promise<PatchCheckSummary> {
@@ -1405,30 +700,6 @@ export async function runPatchChecksWithApproval(
     }
   }
   return runPatchChecks(projectRoot, options)
-}
-
-async function collectPatchDiffSnapshot(projectRoot: string, maxChars = MAX_REVIEW_DIFF_CHARS): Promise<PatchDiffSnapshot | undefined> {
-  const unstagedStat = await runGitCommand(projectRoot, ["diff", "--stat"])
-  const stagedStat = await runGitCommand(projectRoot, ["diff", "--cached", "--stat"])
-  const unstagedDiff = await runGitCommand(projectRoot, ["diff", "--no-ext-diff"])
-  const stagedDiff = await runGitCommand(projectRoot, ["diff", "--cached", "--no-ext-diff"])
-  if ([unstagedStat, stagedStat, unstagedDiff, stagedDiff].some((result) => result.exitCode !== 0)) return undefined
-
-  const stat = [
-    unstagedStat.stdout.trim(),
-    stagedStat.stdout.trim() ? `staged:\n${stagedStat.stdout.trim()}` : "",
-  ].filter(Boolean).join("\n")
-  const rawDiff = [
-    unstagedDiff.stdout.trim(),
-    stagedDiff.stdout.trim() ? `# Staged diff\n${stagedDiff.stdout.trim()}` : "",
-  ].filter(Boolean).join("\n\n")
-  const clipped = clipText(rawDiff, maxChars)
-  return { stat, diff: clipped.text, truncated: clipped.truncated }
-}
-
-function clipText(text: string, limit: number): { text: string; truncated: boolean } {
-  if (text.length <= limit) return { text, truncated: false }
-  return { text: `${text.slice(0, limit)}\n...[truncated ${text.length - limit} chars]`, truncated: true }
 }
 
 async function readPackageScripts(projectRoot: string): Promise<Record<string, string> | undefined> {
@@ -1606,63 +877,6 @@ function terminateProcessTree(child: ReturnType<typeof spawn>, signal: NodeJS.Si
     }
   }
   try { child.kill(signal) } catch { /* ignore */ }
-}
-
-async function runGitCommand(cwd: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  return await new Promise((resolve) => {
-    const child = spawn("git", args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    })
-    let stdout = ""
-    let stderr = ""
-    child.stdout?.on("data", (chunk) => { stdout += String(chunk) })
-    child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
-    child.on("error", (error) => resolve({ exitCode: 127, stdout, stderr: error.message }))
-    child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }))
-  })
-}
-
-function parsePatchStatus(stdout: string): PatchFileChange[] {
-  return stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const status = line.slice(0, 2).trim() || "?"
-      const rawPath = line.slice(3).trim()
-      const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1) ?? rawPath : rawPath
-      return { path, status }
-    })
-}
-
-function patchStatusKey(change: PatchFileChange): string {
-  return `${change.status}\0${change.path}`
-}
-
-function combineGitShortstats(unstagedRaw: string, stagedRaw: string, untrackedFiles: number): PatchSummary["diffStats"] {
-  const unstaged = parseGitShortstat(unstagedRaw)
-  const staged = parseGitShortstat(stagedRaw)
-  const raw = [
-    unstagedRaw,
-    stagedRaw ? `staged: ${stagedRaw}` : "",
-    untrackedFiles > 0 ? `${untrackedFiles} untracked file${untrackedFiles === 1 ? "" : "s"}` : "",
-  ].filter(Boolean).join(" | ")
-  return {
-    filesChanged: unstaged.filesChanged + staged.filesChanged + untrackedFiles,
-    insertions: unstaged.insertions + staged.insertions,
-    deletions: unstaged.deletions + staged.deletions,
-    untrackedFiles,
-    raw,
-    unstagedRaw,
-    stagedRaw,
-  }
-}
-
-function parseGitShortstat(raw: string): Pick<PatchSummary["diffStats"], "filesChanged" | "insertions" | "deletions"> {
-  const filesChanged = Number(raw.match(/(\d+)\s+files?\s+changed/)?.[1] ?? 0)
-  const insertions = Number(raw.match(/(\d+)\s+insertions?\(\+\)/)?.[1] ?? 0)
-  const deletions = Number(raw.match(/(\d+)\s+deletions?\(-\)/)?.[1] ?? 0)
-  return { filesChanged, insertions, deletions }
 }
 
 function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolicy): ModelPolicy["thinkingLevel"] {

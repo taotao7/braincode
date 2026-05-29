@@ -123,22 +123,22 @@ Session:
   - [x] `selectRuntimeModel`
   - [x] `selectRuntimeModelCandidatesWithApiKey`
   - [x] vision/image generation requirement checks
-- [ ] 新建 `packages/agent-runtime/src/evidence-cache.ts`
-  - [ ] `createToolEvidenceCache`
-  - [ ] `wrapToolsWithEvidenceCache`
-  - [ ] duplicate reminder logic
-- [ ] 新建 `packages/agent-runtime/src/context-budget.ts`
-  - [ ] `estimateProviderContextBytes`
-  - [ ] `enforceHandoffContextBudget`
-  - [ ] automatic handoff summary
-- [ ] 新建 `packages/agent-runtime/src/hooks.ts`
-  - [ ] `runConfiguredHooks`
-  - [ ] `runAndRecordHooks`
-  - [ ] hook input/output parsing
-- [ ] 新建 `packages/agent-runtime/src/patch.ts`
-  - [ ] `collectPatchBaseline`
-  - [ ] `collectPatchSummary`
-  - [ ] `collectPatchDiffSnapshot`
+- [x] 新建 `packages/agent-runtime/src/evidence-cache.ts`
+  - [x] `createToolEvidenceCache`
+  - [x] `wrapToolsWithEvidenceCache`
+  - [x] duplicate reminder logic
+- [x] 新建 `packages/agent-runtime/src/context-budget.ts`
+  - [x] `estimateProviderContextBytes`
+  - [x] `enforceHandoffContextBudget`
+  - [x] automatic handoff summary
+- [x] 新建 `packages/agent-runtime/src/hooks.ts`
+  - [x] `runConfiguredHooks`
+  - [x] `runAndRecordHooks`
+  - [x] hook input/output parsing
+- [x] 新建 `packages/agent-runtime/src/patch.ts`
+  - [x] `collectPatchBaseline`
+  - [x] `collectPatchSummary`
+  - [x] `collectPatchDiffSnapshot`
   - [ ] untracked preview，见 P1-3
 - [ ] 新建 `packages/agent-runtime/src/checks.ts`
   - [ ] `runPatchChecks`
@@ -912,4 +912,3 @@ Acceptance:
 - [ ] login validation demo
 - [ ] benchmark JSON report
 - [ ] README demo section
-
