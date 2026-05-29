@@ -105,6 +105,7 @@ type TranscriptItem = {
   editPreview?: EditPreview;
   toolArgs?: Record<string, unknown>;
   toolDetail?: string;
+  streaming?: boolean;
 };
 
 type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool";
@@ -421,7 +422,10 @@ const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
-const RUN_STATUS_TICK_MS = 1000;
+const RUN_STATUS_TICK_MS = 5000;
+const DEFAULT_STREAM_FLUSH_MS = 1000;
+const STREAM_FLUSH_MIN_CHARS = 600;
+const STREAM_FLUSH_MAX_WAIT_MS = 2500;
 const PET_SNAPSHOT_FLUSH_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
 const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE !== "false";
@@ -2181,25 +2185,41 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       updateItem(statusId, { text: next });
       updateRunStatus(next);
     };
-    // Coalesce high-frequency text_delta updates to avoid Ink re-rendering the
-    // entire transcript on every token (the main source of visible flicker).
-    // The window is small enough to still feel real-time but large enough to
-    // batch the bursts that come from fast models.
+    // Coalesce high-frequency text_delta updates so Ink is not asked to
+    // repaint the full frame for every token.
+    const parsedStreamFlushMs = Number.parseInt(
+      process.env.BRAINCODE_STREAM_FLUSH_MS ?? "",
+      10,
+    );
     const STREAM_FLUSH_MS =
-      Number.parseInt(process.env.BRAINCODE_STREAM_FLUSH_MS ?? "", 10) || 128;
+      Number.isFinite(parsedStreamFlushMs) && parsedStreamFlushMs > 0
+        ? parsedStreamFlushMs
+        : DEFAULT_STREAM_FLUSH_MS;
     let streamFlushHandle: ReturnType<typeof setTimeout> | null = null;
     let streamPendingId: string | null = null;
-    const flushStream = () => {
+    let streamRenderedLength = 0;
+    let streamLastFlushAt = Date.now();
+    const shouldFlushStream = (force: boolean) => {
+      if (force) return true;
+      const pendingChars = currentAssistant.text.length - streamRenderedLength;
+      if (pendingChars <= 0) return false;
+      if (pendingChars >= STREAM_FLUSH_MIN_CHARS) return true;
+      return Date.now() - streamLastFlushAt >= STREAM_FLUSH_MAX_WAIT_MS;
+    };
+    const flushStream = (force = true): boolean => {
       if (streamFlushHandle) {
         clearTimeout(streamFlushHandle);
         streamFlushHandle = null;
       }
-      if (streamPendingId) {
-        const id = streamPendingId;
-        const text = currentAssistant.text;
-        streamPendingId = null;
-        updateItem(id, { text });
-      }
+      if (!streamPendingId) return false;
+      if (!shouldFlushStream(force)) return false;
+      const id = streamPendingId;
+      const text = currentAssistant.text;
+      streamPendingId = null;
+      streamRenderedLength = text.length;
+      streamLastFlushAt = Date.now();
+      updateItem(id, { text, streaming: true });
+      return true;
     };
     const scheduleStreamFlush = (id: string) => {
       streamPendingId = id;
@@ -2208,9 +2228,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         streamFlushHandle = null;
         if (!streamPendingId) return;
         const pendingId = streamPendingId;
-        const text = currentAssistant.text;
-        streamPendingId = null;
-        updateItem(pendingId, { text });
+        if (!flushStream(false) && streamPendingId === pendingId) {
+          scheduleStreamFlush(pendingId);
+        }
       }, STREAM_FLUSH_MS);
     };
     const finalizeStreamingBuffers = () => {
@@ -2223,12 +2243,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         const id = currentAssistant.id;
         setItems((previous) =>
           previous.map((item) =>
-            item.id === id ? normalizeTranscriptItem(item) : item,
+            item.id === id
+              ? normalizeTranscriptItem({ ...item, streaming: false })
+              : item,
           ),
         );
       }
       currentAssistant.id = null;
       currentAssistant.text = "";
+      streamRenderedLength = 0;
+      streamLastFlushAt = Date.now();
       thinkingShown = false;
     };
     const ensureAssistantItem = () => {
@@ -2236,7 +2260,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       const id = crypto.randomUUID();
       currentAssistant.id = id;
       currentAssistant.text = "";
-      appendItemRaw({ id, kind: "assistant", text: "" });
+      appendItemRaw({ id, kind: "assistant", text: "", streaming: true });
       return id;
     };
     const showThinkingStatus = () => {
@@ -4055,12 +4079,7 @@ const TranscriptSurface = React.memo(function TranscriptSurface({
     terminalRows - nonTranscriptRows - INK_RENDER_SAFETY_ROWS,
   );
   const transcriptViewportRows =
-    items.length > 0
-      ? Math.min(
-          availableTranscriptRows,
-          Math.max(1, transcriptLayout.totalRows),
-        )
-      : 0;
+    items.length > 0 ? availableTranscriptRows : 0;
   const transcriptViewport = useMemo(
     () =>
       viewportTranscriptLayout(
@@ -4227,11 +4246,8 @@ const InputSurface = React.memo(function InputSurface({
   const { stdout } = useStdout();
   const theme = useTuiTheme();
   const colors = theme.colors;
-  const draftMetrics = useTuiStoreSnapshot(draftMetricsStore);
-  const input = useMemo(
-    () => inputStore.getSnapshot(),
-    [draftMetrics, inputStore],
-  );
+  useTuiStoreSnapshot(draftMetricsStore);
+  const input = inputStore.getSnapshot();
   const runStatus = useTuiStoreSnapshot(runStatusStore);
   const draftWindow = useMemo(
     () =>
@@ -4269,6 +4285,7 @@ const InputSurface = React.memo(function InputSurface({
           running,
           contentWidth,
           footerRows: footerRowsStore.getSnapshot(),
+          runStatus: runStatusStore.getSnapshot(),
           draftWindow: currentWindow,
         });
       }
@@ -4282,6 +4299,7 @@ const InputSurface = React.memo(function InputSurface({
     inputStore,
     inputWidth,
     running,
+    runStatusStore,
     stdout,
     theme,
   ]);
@@ -4319,7 +4337,7 @@ const InputSurface = React.memo(function InputSurface({
             {draftWindow.hiddenAbove === 1 ? "" : "s"}
           </Text>
         ) : null}
-        {draftWindow.lines.map((line, index) => (
+        {draftWindowDisplayLines(draftWindow).map((line, index) => (
           <Text
             key={index}
             color={tone(theme, running ? "yellow" : "green")}
@@ -4413,6 +4431,7 @@ function paintInputSurface({
   running,
   contentWidth,
   footerRows,
+  runStatus,
   draftWindow,
 }: {
   stdout: { write: (chunk: string) => unknown };
@@ -4420,6 +4439,7 @@ function paintInputSurface({
   running: boolean;
   contentWidth: number;
   footerRows: number;
+  runStatus: RunStatusState | null;
   draftWindow: DraftWindow;
 }) {
   const color = tone(theme, running ? "yellow" : "green");
@@ -4427,6 +4447,7 @@ function paintInputSurface({
     color,
     running,
     contentWidth,
+    runStatus,
     draftWindow,
   });
   const moveUp = Math.max(0, footerRows + rows.length);
@@ -4445,11 +4466,13 @@ function renderInputSurfaceRows({
   color,
   running,
   contentWidth,
+  runStatus,
   draftWindow,
 }: {
   color: string;
   running: boolean;
   contentWidth: number;
+  runStatus: RunStatusState | null;
   draftWindow: DraftWindow;
 }): string[] {
   const inputWidth = Math.max(1, contentWidth - INPUT_BOX_HORIZONTAL_CHROME);
@@ -4458,25 +4481,60 @@ function renderInputSurfaceRows({
   const top = `${ansiColor(color)}┌${"─".repeat(Math.max(1, contentWidth - 2))}┐${ANSI_RESET}`;
   const bottom = `${ansiColor(color)}└${"─".repeat(Math.max(1, contentWidth - 2))}┘${ANSI_RESET}`;
   const rows = [` ${divider}`, ` ${top}`];
+  if (running) {
+    rows.push(renderInputBoxRow(formatRunStatusText(runStatus), inputWidth, color));
+  }
   if (draftWindow.hiddenAbove > 0) {
-    const text = `↑ ${draftWindow.hiddenAbove} more line${draftWindow.hiddenAbove === 1 ? "" : "s"}`;
     rows.push(
-      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${text}${padVisual(text, inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
+      renderInputBoxRow(
+        `↑ ${draftWindow.hiddenAbove} more line${draftWindow.hiddenAbove === 1 ? "" : "s"}`,
+        inputWidth,
+        color,
+      ),
     );
   }
-  for (const line of draftWindow.lines) {
-    rows.push(
-      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${line || " "}${padVisual(line || " ", inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
-    );
+  for (const line of draftWindowDisplayLines(draftWindow)) {
+    rows.push(renderInputBoxRow(line || " ", inputWidth, color));
   }
   if (draftWindow.hiddenBelow > 0) {
-    const text = `↓ ${draftWindow.hiddenBelow} more line${draftWindow.hiddenBelow === 1 ? "" : "s"}`;
     rows.push(
-      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${text}${padVisual(text, inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
+      renderInputBoxRow(
+        `↓ ${draftWindow.hiddenBelow} more line${draftWindow.hiddenBelow === 1 ? "" : "s"}`,
+        inputWidth,
+        color,
+      ),
     );
   }
   rows.push(` ${bottom}`);
   return rows;
+}
+
+function renderInputBoxRow(text: string, width: number, color: string): string {
+  const fitted = fitVisualWidth(text, width);
+  return ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${fitted}${padVisual(fitted, width)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`;
+}
+
+function formatRunStatusText(status: RunStatusState | null): string {
+  const effective =
+    status ??
+    ({
+      startedAt: Date.now(),
+      label: "Thinking…",
+      tokens: emptyTokenUsage(),
+      frame: 0,
+    } satisfies RunStatusState);
+  const elapsedMs = Date.now() - effective.startedAt;
+  const spinner =
+    RUN_SPINNER_FRAMES[
+      Math.floor(elapsedMs / RUN_STATUS_TICK_MS) % RUN_SPINNER_FRAMES.length
+    ];
+  const label = truncate(
+    effective.label.replace(/\s+/g, " ").trim() || "Thinking…",
+    80,
+  );
+  const elapsed = formatElapsed(elapsedMs);
+  const tokens = formatRunStatusTokens(effective.tokens);
+  return `${spinner} ${label} (${elapsed}${tokens ? ` · ${tokens}` : " · tokens pending"})`;
 }
 
 const ANSI_RESET = "\x1b[39m";
@@ -4489,6 +4547,20 @@ function ansiColor(hex: string): string {
   const g = Number.parseInt(value.slice(2, 4), 16);
   const b = Number.parseInt(value.slice(4, 6), 16);
   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function fitVisualWidth(text: string, width: number): string {
+  if (visualWidth(text) <= width) return text;
+  const limit = Math.max(1, width - 1);
+  let output = "";
+  let used = 0;
+  for (const char of text) {
+    const charWidth = isWideChar(char) ? 2 : 1;
+    if (used + charWidth > limit) break;
+    output += char;
+    used += charWidth;
+  }
+  return `${output}…`;
 }
 
 function padVisual(text: string, width: number): string {
@@ -4633,7 +4705,9 @@ function splitLongRestoredLine(line: string): string[] {
 
 function normalizeTranscriptItem(item: TranscriptItem): TranscriptItem {
   const text =
-    item.kind === "assistant" ? normalizeAssistantText(item.text) : item.text;
+    item.kind === "assistant" && !item.streaming
+      ? normalizeAssistantText(item.text)
+      : item.text;
   const next = text === item.text ? item : { ...item, text };
   if (next.collapsed !== undefined) return next;
   return isTranscriptItemAutoCollapsed(next)
@@ -4669,7 +4743,7 @@ function draftMetricsFromWindow(
 ): DraftMetrics {
   return {
     empty: draft.length === 0,
-    lineCount: draftWindow.lines.length,
+    lineCount: draftWindowDisplayLines(draftWindow).length,
     hiddenAbove: draftWindow.hiddenAbove,
     hiddenBelow: draftWindow.hiddenBelow,
   };
@@ -4703,6 +4777,7 @@ function samePetSnapshot(
 }
 
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
+  if (item.streaming) return false;
   if (item.kind === "tool") return true;
   return isTranscriptItemAutoCollapsed({
     ...item,
@@ -4712,6 +4787,7 @@ function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
 }
 
 function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
+  if (item.streaming) return false;
   if (item.kind === "tool") return true;
   if (!["assistant", "panel", "help", "error"].includes(item.kind))
     return false;
@@ -5051,7 +5127,7 @@ function transcriptPlainLine(
 }
 
 function isMarkdownTranscriptItem(item: TranscriptItem): boolean {
-  return item.kind === "assistant" || item.kind === "help";
+  return (item.kind === "assistant" && !item.streaming) || item.kind === "help";
 }
 
 function renderTranscriptMarkdown(text: string, width: number): string {
@@ -5491,6 +5567,12 @@ type DraftWindow = {
   hiddenAbove: number;
   hiddenBelow: number;
 };
+
+function draftWindowDisplayLines(draftWindow: DraftWindow): string[] {
+  const lines = draftWindow.lines.slice(0, INPUT_MAX_LINES);
+  while (lines.length < INPUT_MAX_LINES) lines.push("");
+  return lines;
+}
 
 function Badge({
   label,
