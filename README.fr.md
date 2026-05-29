@@ -62,6 +62,12 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 
 ## Notes de version
 
+### v0.2.5
+
+- La TUI passe à Ink 7 et React 19, et les lignes assistant/help du transcript rendent maintenant le Markdown via `markdansi`, afin que titres, listes, code inline, blocs de code et tableaux ne s'affichent plus comme du Markdown brut.
+- Les dépendances runtime et frontend ont été rafraîchies, notamment les packages Pi `0.77.0`, Vite `8.0.14`, React Router `7.16.0` et TypeBox `1.1.39`.
+- Le wrapper npm et les métadonnées de release sont en `0.2.5` pour correspondre aux assets GitHub de même version.
+
 ### v0.2.4
 
 - `read_file` élargit maintenant automatiquement les fenêtres `limit` trop petites sur les gros fichiers et renvoie un `nextOffset` structuré, ce qui réduit les lectures page par page qui gonflent le transcript et le contexte provider.

@@ -1,5 +1,9 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
+import {
+  render as renderMarkdown,
+  strip as stripMarkdown,
+} from "markdansi";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -4451,6 +4455,14 @@ function estimateTranscriptItemRows(
     return rightAlignTranscriptRows(item.text, width, 6).length;
   }
   if (item.kind === "tool") return 1;
+  if (isMarkdownTranscriptItem(item)) {
+    const line = transcriptPlainLine(
+      { ...item, text: renderTranscriptMarkdownPlain(item.text, width) },
+      continuation,
+      collapsible,
+    );
+    return wrapByVisualWidth(line, Math.max(20, width)).length;
+  }
   const line = transcriptPlainLine(item, continuation, collapsible);
   return wrapByVisualWidth(line, Math.max(20, width)).length;
 }
@@ -4543,6 +4555,30 @@ function transcriptPlainLine(
   }
   const badge = transcriptBadge(item);
   return `${fold}[${badge.label}] ${item.text}`;
+}
+
+function isMarkdownTranscriptItem(item: TranscriptItem): boolean {
+  return item.kind === "assistant" || item.kind === "help";
+}
+
+function renderTranscriptMarkdown(text: string, width: number): string {
+  return renderMarkdown(text, {
+    width: Math.max(20, width),
+    hyperlinks: false,
+    codeGutter: false,
+    codeWrap: true,
+    tableBorder: "unicode",
+  }).trimEnd();
+}
+
+function renderTranscriptMarkdownPlain(text: string, width: number): string {
+  return stripMarkdown(text, {
+    width: Math.max(20, width),
+    hyperlinks: false,
+    codeGutter: false,
+    codeWrap: true,
+    tableBorder: "unicode",
+  }).trimEnd();
 }
 
 function collapseTranscriptText(text: string): {
@@ -5155,6 +5191,15 @@ function TranscriptLine({
     );
   }
   const badge = transcriptBadge(item);
+  if (isMarkdownTranscriptItem(item)) {
+    return (
+      <Text>
+        {foldGlyph ? <Text color={theme.colors.gray}>{foldGlyph}</Text> : null}
+        <Badge label={badge.label} backgroundColor={badge.color} />
+        <Text> {renderTranscriptMarkdown(item.text, width)}</Text>
+      </Text>
+    );
+  }
   return (
     <Text>
       {foldGlyph ? <Text color={theme.colors.gray}>{foldGlyph}</Text> : null}

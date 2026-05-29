@@ -67,6 +67,12 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 ## 发布记录
 
+### v0.2.5
+
+- TUI 升级到 Ink 7 和 React 19，并通过 `markdansi` 渲染 assistant/help transcript 里的 Markdown，标题、列表、inline code、代码块和表格不再以原始 Markdown 形式显示。
+- 刷新运行时和前端依赖，包括 Pi packages `0.77.0`、Vite `8.0.14`、React Router `7.16.0`、TypeBox `1.1.39`。
+- npm wrapper 和发布元数据同步到 `0.2.5`，用于匹配同版本 GitHub release 资产。
+
 ### v0.2.4
 
 - `read_file` 现在会在大文件遇到过小 `limit` 时自动扩大读取窗口，并返回结构化 `nextOffset` metadata，减少一页一页碎片读取导致 transcript 和 provider context 爆炸的问题。

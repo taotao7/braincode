@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-113%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -71,6 +71,12 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. After install, run `braincode` for the TUI or `braincode config` to open the local configuration page.
 
 ## Release Notes
+
+### v0.2.5
+
+- The TUI now runs on Ink 7 and React 19, and assistant/help transcript rows render Markdown through `markdansi`, so headings, lists, inline code, code blocks, and tables no longer appear as raw Markdown.
+- Runtime and frontend dependencies were refreshed, including Pi packages `0.77.0`, Vite `8.0.14`, React Router `7.16.0`, and TypeBox `1.1.39`.
+- The npm wrapper and release metadata are versioned as `0.2.5` for the matching GitHub release assets.
 
 ### v0.2.4
 
