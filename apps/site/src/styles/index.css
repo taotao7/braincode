@@ -116,18 +116,6 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
   gap: 12px;
   min-width: 0;
 }
-.topnav-slogan {
-  max-width: 280px;
-  margin: 0;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: bold;
-  text-align: right;
-  text-transform: uppercase;
-  overflow-wrap: anywhere;
-}
 .pagefoot { padding-block: var(--gap-xl); color: var(--fg); font-size: 13px; border-top: var(--border-width) solid var(--border); }
 .pagefoot .row-between { flex-wrap: wrap; gap: var(--gap-md); }
 
@@ -231,6 +219,16 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
   text-transform: uppercase;
   color: var(--accent);
   max-width: 34ch;
+}
+.hero-slogan {
+  margin: 20px 0 0;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: bold;
+  text-transform: uppercase;
+  max-width: 44ch;
 }
 .hero .lead    { margin-bottom: var(--gap-lg); border-left: 4px solid var(--accent); padding-left: 16px; text-align: left;}
 .hero-cta      { display: inline-flex; gap: var(--gap-md); flex-wrap: wrap; }
@@ -591,7 +589,6 @@ h1, h2, h3, h4 { text-wrap: balance; text-transform: uppercase; letter-spacing: 
 @media (max-width: 640px) {
   .topnav-inner { align-items: flex-start; }
   .topnav-right { flex-direction: column; align-items: flex-end; gap: 8px; }
-  .topnav-slogan { max-width: min(52vw, 220px); font-size: 10px; }
   .topnav nav { display: none; }
   .role-carousel-controls { justify-content: flex-start; }
   .role-carousel {

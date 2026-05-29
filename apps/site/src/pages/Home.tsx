@@ -195,6 +195,7 @@ export function Home() {
               <span>{t("workflow_step_4")}</span>
               <span>{t("workflow_step_5")}</span>
             </div>
+            <p className="hero-slogan">{t("slogan")}</p>
           </div>
           <div className="ph-img wide hero-img" aria-label="Woodcut diagram of a brain routing tasks to multiple models">
             <img src={routingUrl} alt="Braincode routing diagram" />

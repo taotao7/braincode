@@ -82,7 +82,6 @@ export function Header() {
           </a>
         </nav>
         <div className="topnav-right">
-          <p className="topnav-slogan">{t("slogan")}</p>
           <div className="lang-switch" role="group" aria-label="Language">
             <button type="button" className={lang === "en" ? "active" : ""} onClick={() => switchLang("en")}>EN</button>
             <button type="button" className={lang === "zh" ? "active" : ""} onClick={() => switchLang("zh")}>中</button>
