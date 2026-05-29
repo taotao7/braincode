@@ -364,7 +364,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: review-worker artifacts include capped text previews for newly created untracked files and binary markers for untracked binary files.
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
-- Done: run-level read-only evidence cache with duplicate tool-call reminders and write/execute invalidation.
+- Done: bounded run-level read-only evidence cache with duplicate tool-call reminders, LRU/TTL/byte-limit eviction, cache-size details, and write/execute invalidation.
 - Done: Brain preset inheritance through `extends`.
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

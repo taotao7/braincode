@@ -388,7 +388,7 @@ type PatchReviewArtifacts = {
 
 ### TODO
 
-- [ ] 增加配置
+- [x] 增加配置
 
 ```ts
 type ToolEvidenceCacheOptions = {
@@ -398,17 +398,17 @@ type ToolEvidenceCacheOptions = {
 }
 ```
 
-- [ ] 写入 cache 前估算 result content bytes
-- [ ] 超出 maxEntries 时按 LRU 删除
-- [ ] 超出 maxBytes 时按 LRU 删除
-- [ ] 过期 entry 自动删除
-- [ ] cache details 里加入：`evictedEntries`、`currentEntries`、`approxBytes`
+- [x] 写入 cache 前估算 result content bytes
+- [x] 超出 maxEntries 时按 LRU 删除
+- [x] 超出 maxBytes 时按 LRU 删除
+- [x] 过期 entry 自动删除
+- [x] cache details 里加入：`evictedEntries`、`currentEntries`、`approxBytes`
 
 ### 验收标准
 
-- [ ] 长 session 下 cache 不无限增长
-- [ ] 重复 read/search 仍然复用结果
-- [ ] 写/执行工具后 cache 仍会失效
+- [x] 长 session 下 cache 不无限增长
+- [x] 重复 read/search 仍然复用结果
+- [x] 写/执行工具后 cache 仍会失效
 
 ---
 
