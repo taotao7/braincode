@@ -373,7 +373,7 @@ export async function runSupportWorkers(
     return dependencies.every((dependency) => {
       if (!workerTodoIds.has(dependency.toTodoId)) return true
       const owner = todoOwnerById.get(dependency.fromTodoId)
-      return owner === undefined || owner === index || (!pending.has(owner) && results[owner]?.status === "completed")
+      return owner !== undefined && (owner === index || (!pending.has(owner) && results[owner]?.status === "completed"))
     })
   }
 

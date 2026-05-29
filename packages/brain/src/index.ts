@@ -410,6 +410,7 @@ function buildRouteBrainSystemPrompt(): string {
     "- Never use rush for workspace actions that require tools: git status/diff/add/commit/push, shell commands, package scripts, tests, file edits, or repository inspection.",
     "- Worker goals must be self-contained because each Braincode worker owns a separate task context and never receives the full Brain context or another worker's private context.",
     "- Dependencies mean Brain should wait for one todo result before feeding that summary into dependent work; they are Brain-mediated, never direct worker-to-worker chat.",
+    "- Runtime order is support workers first, then the primary role, then review. Do not make support worker todos depend on primary-role or review todos.",
   ].join("\n")
 }
 
@@ -666,9 +667,17 @@ export function formatRoutedAgentRoleCatalog(): string {
 // `requiresReview`. The brain's actual routing is LLM-driven (see routeBrain
 // prompt in packages/agent-runtime); the patterns below intentionally do NOT
 // pick a role — they only flag risk.
-const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
-const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试)\b/
+const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete)\b|实现|开发|修复|新增|修改|重构|编辑|删除/
+const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck)\b|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试/
 const imageGenerationPattern = /\b(generate|create|make|draw|produce|render|edit)\b.{0,48}\b(image|images|picture|pictures|illustration|illustrations|poster|avatar|portrait|visual asset|art)\b|\b(generate art)\b|生成.{0,24}(图片|图像|画|海报|头像|插画|角色图)|图片生成|画一张|做图/
+const frontendWorkPattern = /\b(frontend|front-end|ui|ux|browser|client|component|components|react|vue|svelte|css|html|page|form|layout|screen|view)\b|前端|界面|页面|组件|表单|浏览器|客户端|登录页|登陆页/
+const backendWorkPattern = /\b(backend|back-end|api|apis|server|endpoint|handler|service|auth|login|session|token|oauth|validation)\b|后端|接口|服务端|服务器|认证|鉴权|登录接口|登陆接口|会话|令牌/
+const designerWorkPattern = /\b(design|designer|ux|wireframe|layout|interaction|copy|visual)\b|设计|交互|视觉|布局|文案|原型/
+const dbaWorkPattern = /\b(database|db|sql|schema|migration|migrations|index|query|queries)\b|数据库|数据表|迁移|索引|查询|表结构/
+const securityWorkPattern = /\b(security|secure|permission|permissions|vulnerability|vulnerabilities|xss|csrf|injection|secret|secrets)\b|安全|漏洞|权限|注入|密钥|风控/
+const qaWorkPattern = /\b(qa|test|tests|testing|verify|verification|coverage|regression|e2e|unit test|integration test)\b|测试|验证|回归|覆盖率/
+const reviewWorkPattern = /\b(review|code review|inspect|audit)\b|审查|评审|代码审查|复查/
+const summaryWorkPattern = /\b(summary|summarize|report|recap|handoff)\b|总结|汇总|报告|交接/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
   return `todo-${String(index + 1).padStart(2, "0")}-${role}`
@@ -732,8 +741,14 @@ export function normalizeAgentTodos(workers: AgentWorkerPlan[], todos: AgentTodo
 
 function normalizeAgentTodoDependencies(plan: Pick<AgentRoutingPlan, "primaryRole" | "workers"> & { todos: AgentTodoItem[]; dependencies?: AgentTodoDependency[] }): AgentTodoDependency[] {
   const validTodoIds = new Set(plan.todos.map((todo) => todo.id))
+  const todoRoleById = new Map(plan.todos.map((todo) => [todo.id, todo.role] as const))
   const explicit = (plan.dependencies ?? [])
     .filter((dependency) => validTodoIds.has(dependency.fromTodoId) && validTodoIds.has(dependency.toTodoId) && dependency.fromTodoId !== dependency.toTodoId)
+    .filter((dependency) => {
+      const fromRole = todoRoleById.get(dependency.fromTodoId)
+      const toRole = todoRoleById.get(dependency.toTodoId)
+      return fromRole && toRole && isExecutableDependencyEdge(plan.primaryRole, fromRole, toRole)
+    })
     .map((dependency) => ({
       fromTodoId: dependency.fromTodoId,
       toTodoId: dependency.toTodoId,
@@ -755,11 +770,28 @@ function normalizeAgentTodoDependencies(plan: Pick<AgentRoutingPlan, "primaryRol
   const reviewInputs = primaryTodoIds.length > 0 ? primaryTodoIds : plan.todos.filter((todo) => todo.role !== "review").map((todo) => todo.id)
   for (const reviewInputId of reviewInputs) {
     for (const reviewTodoId of reviewTodoIds) {
+      if (reviewInputId === reviewTodoId) continue
       dependencies.push({ fromTodoId: reviewInputId, toTodoId: reviewTodoId, reason: "Review runs after implementation output exists." })
     }
   }
 
   return dedupeAgentTodoDependencies([...explicit, ...dependencies])
+}
+
+function isSupportRoleForPrimary(role: RoutedAgentRole, primaryRole: RoutedAgentRole): boolean {
+  return role !== primaryRole && role !== "review"
+}
+
+function isExecutableDependencyEdge(primaryRole: RoutedAgentRole, fromRole: RoutedAgentRole, toRole: RoutedAgentRole): boolean {
+  if (fromRole === "review") return toRole === "review"
+  if (toRole === "review") return true
+  if (isSupportRoleForPrimary(toRole, primaryRole)) {
+    return isSupportRoleForPrimary(fromRole, primaryRole)
+  }
+  if (toRole === primaryRole) {
+    return fromRole === primaryRole || isSupportRoleForPrimary(fromRole, primaryRole)
+  }
+  return true
 }
 
 function dedupeAgentTodoDependencies(dependencies: AgentTodoDependency[]): AgentTodoDependency[] {
@@ -790,25 +822,162 @@ export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" |
 // need runtime tools.
 export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRoutingPlan {
   const normalized = prompt.toLowerCase()
-  const primaryRole: RoutedAgentRole = imageGenerationPattern.test(normalized)
-    ? "imageMaker"
-    : workspaceOperationPattern.test(normalized)
-      ? "devops"
-      : "rush"
+  const primaryRole = selectFallbackPrimaryRole(normalized)
+  const workers = createFallbackWorkers(normalized, primaryRole)
+  const todos = createFallbackTodos(normalized, primaryRole, workers)
   return normalizeAgentRoutingPlan({
     primaryRole,
-    workers: [{
-      role: primaryRole,
-      goal: primaryRole === "imageMaker"
-        ? "Generate the requested image asset when no router decision is available."
-        : primaryRole === "devops"
-        ? "Handle the workspace operation when no router decision is available; use runtime tools when exposed."
-        : "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
-      reason: "Deterministic fallback used when no router decision is available.",
-    }],
+    workers,
+    todos,
+    dependencies: createFallbackDependencies(todos),
     requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
     reason: "Deterministic fallback plan (no router decision).",
   })
+}
+
+function selectFallbackPrimaryRole(normalizedPrompt: string): RoutedAgentRole {
+  if (imageGenerationPattern.test(normalizedPrompt)) return "imageMaker"
+  if (workspaceOperationPattern.test(normalizedPrompt) && !hasDomainWork(normalizedPrompt)) return "devops"
+  if (frontendWorkPattern.test(normalizedPrompt)) return "frontend"
+  if (backendWorkPattern.test(normalizedPrompt)) return "backend"
+  if (dbaWorkPattern.test(normalizedPrompt)) return "dba"
+  if (designerWorkPattern.test(normalizedPrompt)) return "designer"
+  if (securityWorkPattern.test(normalizedPrompt)) return "security"
+  if (qaWorkPattern.test(normalizedPrompt)) return "qa"
+  if (reviewWorkPattern.test(normalizedPrompt)) return "review"
+  if (summaryWorkPattern.test(normalizedPrompt)) return "summarize"
+  if (workspaceOperationPattern.test(normalizedPrompt)) return "devops"
+  return "rush"
+}
+
+function hasDomainWork(normalizedPrompt: string): boolean {
+  return frontendWorkPattern.test(normalizedPrompt)
+    || backendWorkPattern.test(normalizedPrompt)
+    || designerWorkPattern.test(normalizedPrompt)
+    || dbaWorkPattern.test(normalizedPrompt)
+    || securityWorkPattern.test(normalizedPrompt)
+    || qaWorkPattern.test(normalizedPrompt)
+    || reviewWorkPattern.test(normalizedPrompt)
+}
+
+function createFallbackWorkers(normalizedPrompt: string, primaryRole: RoutedAgentRole): AgentWorkerPlan[] {
+  const roles: RoutedAgentRole[] = [primaryRole]
+  const add = (role: RoutedAgentRole) => {
+    if (!roles.includes(role)) roles.push(role)
+  }
+
+  if (primaryRole === "imageMaker") {
+    return roles.map((role) => ({
+      role,
+      goal: fallbackWorkerGoal(role, role === primaryRole),
+      reason: "Deterministic fallback selected this as the primary role.",
+    }))
+  }
+
+  if (fileEditRiskPattern.test(normalizedPrompt) && primaryRole !== "rush" && primaryRole !== "devops" && primaryRole !== "review" && primaryRole !== "summarize") add("librarian")
+  if (designerWorkPattern.test(normalizedPrompt) && primaryRole !== "designer") add("designer")
+  if (backendWorkPattern.test(normalizedPrompt) && primaryRole !== "backend") add("backend")
+  if (frontendWorkPattern.test(normalizedPrompt) && primaryRole !== "frontend") add("frontend")
+  if (dbaWorkPattern.test(normalizedPrompt) && primaryRole !== "dba") add("dba")
+  if (securityWorkPattern.test(normalizedPrompt) && primaryRole !== "security") add("security")
+  if (qaWorkPattern.test(normalizedPrompt) && primaryRole !== "qa") add("qa")
+  if (reviewWorkPattern.test(normalizedPrompt) && primaryRole !== "review") add("review")
+
+  return roles.map((role) => ({
+    role,
+    goal: fallbackWorkerGoal(role, role === primaryRole),
+    reason: role === primaryRole
+      ? "Deterministic fallback selected this as the primary role."
+      : "Deterministic fallback selected this support role from explicit task wording.",
+  }))
+}
+
+function fallbackWorkerGoal(role: RoutedAgentRole, primary: boolean): string {
+  const prefix = primary ? "Complete the request" : "Support the primary agent"
+  switch (role) {
+    case "frontend":
+      return `${prefix} by handling UI, browser-facing behavior, state, styling, and frontend integration.`
+    case "backend":
+      return `${prefix} by handling API contracts, server behavior, validation, persistence boundaries, and focused backend tests.`
+    case "designer":
+      return `${prefix} by defining implementable UX, layout, interaction states, accessibility requirements, and copy guidance.`
+    case "dba":
+      return `${prefix} by handling schema, migration, SQL, indexing, and data-integrity concerns.`
+    case "devops":
+      return `${prefix} by handling workspace, build, CI, release, shell, or operational tasks.`
+    case "security":
+      return `${prefix} by identifying trust-boundary, authentication, authorization, secret, and abuse-case risks.`
+    case "qa":
+      return `${prefix} by planning or adding focused verification for meaningful regression risk.`
+    case "review":
+      return `${prefix} by inspecting implementation results or existing diffs for defects and risky assumptions.`
+    case "summarize":
+      return `${prefix} by producing a concise report, handoff, or recap.`
+    case "imageMaker":
+      return `${prefix} by generating the requested image asset.`
+    case "oracle":
+      return `${prefix} by resolving ambiguous architecture, tradeoff, or deep debugging decisions.`
+    case "librarian":
+      return `${prefix} by mapping relevant files, symbols, architecture, and project conventions.`
+    case "rush":
+      return "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist."
+  }
+}
+
+function createFallbackTodos(normalizedPrompt: string, primaryRole: RoutedAgentRole, workers: AgentWorkerPlan[]): AgentTodoItem[] {
+  const todos: AgentTodoItem[] = []
+  const hasRole = (role: RoutedAgentRole) => workers.some((worker) => worker.role === role)
+  const push = (id: string, title: string, role: RoutedAgentRole, reason: string) => {
+    todos.push({ id, title, role, status: "pending", reason })
+  }
+
+  if (hasRole("librarian")) push("map-context", "Map relevant project structure, conventions, and entrypoints", "librarian", "Implementation workers need precise project context.")
+  if (hasRole("designer")) push("design-experience", "Define implementable UX, states, accessibility, and copy", "designer", "Frontend work depends on design guidance.")
+  if (hasRole("dba")) push("plan-data", "Plan schema, query, or migration changes", "dba", "Backend work may depend on data contracts.")
+  if (hasRole("security")) push("assess-security", "Identify security requirements and abuse mitigations", "security", "Implementation should incorporate security constraints.")
+  if (hasRole("backend")) push("build-backend", "Implement backend contract, validation, and server-side tests", "backend", "Backend owns API and service behavior.")
+  if (hasRole("frontend")) push("build-frontend", "Implement frontend UI, state handling, and integration checks", "frontend", "Frontend owns the user-facing feature surface.")
+  if (hasRole("devops")) push("handle-workspace", "Handle workspace, build, command, CI, or release work", "devops", "The request mentions operational or command work.")
+  if (hasRole("qa")) push("verify-behavior", "Verify behavior and identify regression coverage", "qa", "The request asks for tests or validation.")
+  if (hasRole("review")) push("review-result", "Review the result for defects, regressions, and risky assumptions", "review", "The request asks for review or the task is review-like.")
+  if (hasRole("imageMaker")) push("generate-image", "Generate the requested image artifact", "imageMaker", "The request asks for image generation.")
+
+  const shouldReport = summaryWorkPattern.test(normalizedPrompt) && primaryRole !== "summarize"
+  if (shouldReport) push("final-report", "Produce a final report with changes, validation, and remaining risks", primaryRole, "The request asks for a final consolidated report.")
+  if (todos.length === 0) push(createAgentTodoId(primaryRole, 0), workers[0]?.goal ?? fallbackWorkerGoal(primaryRole, true), primaryRole, "Deterministic fallback used when no router decision is available.")
+  return todos
+}
+
+function createFallbackDependencies(todos: AgentTodoItem[]): AgentTodoDependency[] {
+  const byRole = new Map<RoutedAgentRole, string[]>()
+  for (const todo of todos) {
+    byRole.set(todo.role, [...(byRole.get(todo.role) ?? []), todo.id])
+  }
+  const dependencies: AgentTodoDependency[] = []
+  const add = (fromTodoId: string | undefined, toTodoId: string | undefined, reason: string) => {
+    if (!fromTodoId || !toTodoId || fromTodoId === toTodoId) return
+    dependencies.push({ fromTodoId, toTodoId, reason })
+  }
+  const first = (role: RoutedAgentRole) => byRole.get(role)?.[0]
+  const allImplementationTodoIds = todos
+    .filter((todo) => todo.role !== "librarian" && todo.role !== "designer" && todo.role !== "qa" && todo.role !== "review" && todo.id !== "final-report")
+    .map((todo) => todo.id)
+  const reportTodoId = first("summarize") ?? todos.find((todo) => todo.id === "final-report")?.id
+
+  for (const todoId of allImplementationTodoIds) {
+    add(first("librarian"), todoId, "Implementation should follow discovered project conventions.")
+  }
+  add(first("designer"), first("frontend"), "Frontend implementation depends on design guidance.")
+  add(first("dba"), first("backend"), "Backend implementation depends on data-contract guidance.")
+  add(first("security"), first("backend"), "Backend implementation should incorporate security requirements.")
+  add(first("backend"), first("frontend"), "Frontend integration depends on the backend API contract.")
+  for (const todoId of allImplementationTodoIds) {
+    add(todoId, first("qa"), "QA should verify implementation output.")
+    add(todoId, first("review"), "Review should inspect implementation output.")
+    add(todoId, reportTodoId, "Final reporting needs implementation output.")
+  }
+  add(first("qa"), reportTodoId, "Final reporting should include verification results.")
+  return dependencies
 }
 
 export function selectAgentRole(prompt: string): RoutedAgentRole {

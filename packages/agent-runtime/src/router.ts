@@ -270,6 +270,7 @@ Routing principles (read these before deciding):
 - Route by role responsibility and by each role's configured model policy. Braincode executes the primary role and workers with their own role policy chains.
 - Do not invent execution engines or rebind model ids. You may not assign the planner model or another role's model to a selected role unless that model is already in the selected role's own chain.
 - Dependencies are Brain-mediated: add one only when the downstream todo should receive the upstream todo's summarized result before it runs.
+- Runtime order is support workers first, then the primary role, then optional review. Support-worker todos cannot depend on primary-role or review todos.
 
 Return ONLY a single JSON object matching this schema exactly:
 {"role":${roleEnum},"workers":[{"role":${roleEnum},"goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":${roleEnum},"reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
@@ -285,6 +286,7 @@ Output constraints:
 - Assign every todo to the agent role that should complete it.
 - Use short lowercase todo ids with letters, numbers, dashes, or underscores.
 - Include dependencies only when one todo materially needs another todo's output.
+- Do not create primary-role-to-support-worker dependencies; if support work needs planning or constraints, assign that upstream todo to another support role.
 - Do not include routeBrain or pet as a worker role.
 - Prefer no more than ${routingLimits.maxWorkerAgents} workers.
 - "confidence" is a number in [0,1] reflecting how confident you are in the routing decision.

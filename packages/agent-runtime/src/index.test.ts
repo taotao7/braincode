@@ -1517,11 +1517,10 @@ test("planRuntimeFromConfig supports routeBrain previews and heuristic diagnosti
     const plan = await planRuntimeFromConfig("review this patch", home, { useRouterBrain: false })
 
     expect(plan.mode).toBe("radical")
-    // No LLM router available in tests → planAgentRouting falls back to rush.
-    // The real LLM-driven routeBrain (in production) picks the right specialist.
-    expect(plan.role).toBe("rush")
-    expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
-    expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["rush", "pending"]])
+    // Heuristic diagnostics now route obvious patch review work to the review specialist.
+    expect(plan.role).toBe("review")
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["review"])
+    expect(plan.todos.map((todo) => [todo.role, todo.status])).toEqual([["review", "pending"]])
     expect(plan.context.layer).toBe("brain")
     expect(plan.context.childContextIds).toEqual(plan.workers.map((worker) => worker.contextId))
     expect(plan.toolExecution).toBe("parallel")
@@ -1608,20 +1607,25 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
 
     const plan = await planRuntimeFromConfig("implement a secure frontend login flow", home)
 
-    // No LLM router in tests → deterministic rush fallback. Because the prompt
-    // contains "implement" (file-edit risk pattern), brain policy injects a
-    // review worker automatically.
-    expect(plan.role).toBe("rush")
-    expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["rush"])
-    expect(plan.workers.map((worker) => worker.role)).toEqual(["rush", "review"])
+    // No usable router in tests → deterministic fallback still decomposes the
+    // cross-domain login task into primary/support/review contexts.
+    expect(plan.role).toBe("frontend")
+    expect(plan.agentPlan.workers.map((worker) => worker.role)).toEqual(["frontend", "librarian", "backend", "security"])
+    expect(plan.workers.map((worker) => worker.role)).toEqual(["frontend", "librarian", "backend", "security", "review"])
     expect(plan.context.childContextIds).toEqual(plan.workers.map((worker) => worker.contextId))
     expect(new Set(plan.context.childContextIds).size).toBe(plan.workers.length)
-    expect(plan.todos.map((todo) => todo.role)).toEqual(["rush", "review"])
-    expect(plan.dependencies.map((dependency) => [dependency.fromTodoId, dependency.toTodoId])).toEqual([
-      ["todo-01-rush", "todo-02-review"],
+    expect(plan.todos.map((todo) => [todo.id, todo.role])).toEqual([
+      ["map-context", "librarian"],
+      ["assess-security", "security"],
+      ["build-backend", "backend"],
+      ["build-frontend", "frontend"],
+      ["todo-05-review", "review"],
     ])
-    expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-02-review"])
-    expect(plan.workers.find((worker) => worker.role === "rush")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
+    expect(plan.dependencies).toContainEqual({ fromTodoId: "build-backend", toTodoId: "build-frontend", reason: "Frontend integration depends on the backend API contract." })
+    expect(plan.dependencies).toContainEqual({ fromTodoId: "build-frontend", toTodoId: "todo-05-review", reason: "Review runs after implementation output exists." })
+    expect(plan.dependencies.some((dependency) => dependency.fromTodoId === "build-frontend" && dependency.toTodoId === "build-backend")).toBe(false)
+    expect(plan.workers.find((worker) => worker.role === "review")?.todoIds).toEqual(["todo-05-review"])
+    expect(plan.workers.find((worker) => worker.role === "frontend")?.model.id).toBe("anthropic/claude-sonnet-4-5-20250929")
     expect(plan.routing.maxParallelAgents).toBe(2)
     expect(plan.routing.maxWorkerAgents).toBe(2)
     expect(plan.routing.maxTodos).toBe(6)

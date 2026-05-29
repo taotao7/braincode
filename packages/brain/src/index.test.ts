@@ -60,10 +60,16 @@ test("mode routing limits make radical materially more parallel", () => {
   })
 })
 
-test("planAgentRouting falls back to rush deterministically (LLM-driven routing lives in agent-runtime)", () => {
-  const plan = planAgentRouting("review this patch", brain)
+test("planAgentRouting keeps tiny direct replies in rush", () => {
+  const plan = planAgentRouting("hello there", brain)
   expect(plan.primaryRole).toBe("rush")
   expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
+})
+
+test("planAgentRouting fallback routes obvious reviews to review", () => {
+  const plan = planAgentRouting("review this patch", brain)
+  expect(plan.primaryRole).toBe("review")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["review"])
 })
 
 test("planAgentRouting fallback avoids rush for obvious workspace tool operations", () => {
@@ -76,6 +82,23 @@ test("planAgentRouting fallback routes obvious image generation to imageMaker", 
   const plan = planAgentRouting("生成一张前端角色图，用在网站轮播里", brain)
   expect(plan.primaryRole).toBe("imageMaker")
   expect(plan.workers.map((worker) => worker.role)).toEqual(["imageMaker"])
+})
+
+test("planAgentRouting fallback decomposes cross-stack UI/API/report work", () => {
+  const plan = planAgentRouting("实现一个登录页，前端需要设计，后端需要接口，最后汇总报告", brain)
+
+  expect(plan.primaryRole).toBe("frontend")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["frontend", "librarian", "designer", "backend"])
+  expect(plan.todos.map((todo) => [todo.id, todo.role])).toEqual([
+    ["map-context", "librarian"],
+    ["design-experience", "designer"],
+    ["build-backend", "backend"],
+    ["build-frontend", "frontend"],
+    ["final-report", "frontend"],
+  ])
+  expect(plan.dependencies).toContainEqual({ fromTodoId: "design-experience", toTodoId: "build-frontend", reason: "Frontend implementation depends on design guidance." })
+  expect(plan.dependencies).toContainEqual({ fromTodoId: "build-backend", toTodoId: "build-frontend", reason: "Frontend integration depends on the backend API contract." })
+  expect(plan.dependencies).toContainEqual({ fromTodoId: "build-frontend", toTodoId: "final-report", reason: "Final reporting needs implementation output." })
 })
 
 test("planAgentRouting flags requiresReview when file-edit risk words appear", () => {
@@ -108,6 +131,7 @@ test("agent role prompts cover every routed role and the router", () => {
   expect(agentRoleSystemPrompts.routeBrain).toContain("intelligent routing")
   expect(agentRoleSystemPrompts.routeBrain).toContain("Agent role catalog")
   expect(agentRoleSystemPrompts.routeBrain).toContain("Never use rush for workspace actions")
+  expect(agentRoleSystemPrompts.routeBrain).toContain("Runtime order is support workers first")
   expect(agentRoleSystemPrompts.rush).toContain("it is not rush work")
   for (const role of routedAgentRoles) {
     expect(agentRoleSystemPrompts[role]).toContain("Braincode")
@@ -223,6 +247,29 @@ test("normalizeAgentRoutingPlan filters invalid dependencies and derives support
   expect(plan.dependencies).toEqual([
     { fromTodoId: "support", toTodoId: "primary", reason: "explicit" },
     { fromTodoId: "primary", toTodoId: "review", reason: "Review runs after implementation output exists." },
+  ])
+})
+
+test("normalizeAgentRoutingPlan drops primary-to-support dependencies the runtime cannot satisfy", () => {
+  const plan = normalizeAgentRoutingPlan({
+    primaryRole: "frontend",
+    workers: [
+      { role: "frontend", goal: "Implement UI", reason: "primary" },
+      { role: "backend", goal: "Implement API", reason: "support" },
+    ],
+    todos: [
+      { id: "frontend-plan", title: "Plan frontend", role: "frontend", status: "pending" },
+      { id: "backend-api", title: "Build API", role: "backend", status: "pending" },
+    ],
+    dependencies: [
+      { fromTodoId: "frontend-plan", toTodoId: "backend-api", reason: "unsupported reverse edge" },
+    ],
+    requiresReview: false,
+    reason: "test",
+  })
+
+  expect(plan.dependencies).toEqual([
+    { fromTodoId: "backend-api", toTodoId: "frontend-plan", reason: "Support worker output feeds the primary task." },
   ])
 })
 
