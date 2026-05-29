@@ -93,6 +93,7 @@ braincode/
         mcp.ts
         model-selection.ts
         patch.ts
+        prompt-references.ts
         review.ts
     tools/
       src/

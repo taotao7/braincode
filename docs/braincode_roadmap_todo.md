@@ -158,11 +158,11 @@ Session:
   - [x] `normalizeReviewDecisionText`
   - [x] `applyCheckGateToReviewDecision`
   - [x] `mergeReviewResult`
-- [ ] 新建 `packages/agent-runtime/src/prompt-references.ts`
-  - [ ] `expandPromptReferences`
-  - [ ] `@file`
-  - [ ] `@@session`
-  - [ ] image references
+- [x] 新建 `packages/agent-runtime/src/prompt-references.ts`
+  - [x] `expandPromptReferences`
+  - [x] `@file`
+  - [x] `@@session`
+  - [x] image references
 - [ ] 新建 `packages/agent-runtime/src/image-maker.ts`
   - [ ] image model selection
   - [ ] image generation artifact save
