@@ -66,6 +66,7 @@ Où vivent réellement les choses (points d'entrée à marquer) :
 
 - Routage : `packages/brain/src/index.ts` — `planAgentRouting`, `agentRoleProfiles`, `agentRoleSystemPrompts`.
 - Construction du plan : `packages/agent-runtime/src/index.ts` — `buildRuntimePlan`, `routePromptWithBrain`.
+- Sélection de modèle : `packages/agent-runtime/src/model-selection.ts` — `selectRuntimeModel`, `selectRuntimeModelCandidatesWithApiKey`.
 - Exécution des workers : `packages/agent-runtime/src/index.ts` — `runWorkerFromPlan`, `runSupportWorkers`.
 - Formes de contexte : `packages/context/src/index.ts` — tous les types qui traversent la frontière Brain/agent.
 - Références de prompt : `packages/agent-runtime/src/index.ts` — `expandPromptReferences` pour `@path` et `@@session`.

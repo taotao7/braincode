@@ -66,6 +66,7 @@ packages/
 
 - 路由：`packages/brain/src/index.ts` —— `planAgentRouting`、`agentRoleProfiles`、`agentRoleSystemPrompts`。
 - Plan 构建：`packages/agent-runtime/src/index.ts` —— `buildRuntimePlan`、`routePromptWithBrain`。
+- 模型选择：`packages/agent-runtime/src/model-selection.ts` —— `selectRuntimeModel`、`selectRuntimeModelCandidatesWithApiKey`。
 - Worker 执行：`packages/agent-runtime/src/index.ts` —— `runWorkerFromPlan`、`runSupportWorkers`。
 - 上下文形状：`packages/context/src/index.ts` —— 所有跨越 Brain/agent 边界的类型。
 - Prompt 引用：`packages/agent-runtime/src/index.ts` —— `expandPromptReferences` 处理 `@path` 与 `@@session`。

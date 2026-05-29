@@ -101,7 +101,7 @@ plan un worker  -->  createWorkerHandoff(worker, parentId, phase)
 hook SubagentStart   (peut ajouter du contexte, peut bloquer)
                         |
                         v
-selectRuntimeModelCandidatesWithApiKey(policy)   <-- liste ordonnée
+selectRuntimeModelCandidatesWithApiKey(policy)   <-- liste ordonnée depuis model-selection.ts
                         |
                         v
 pour chaque candidat (jusqu'à ce que l'un réussisse) :
@@ -207,7 +207,7 @@ Si vous avez besoin d'une nouvelle façon de présenter les résultats, étendez
 
 ## Fiabilité : fallback modèle + provider
 
-Chaque worker (et le primaire) tire une liste ordonnée de candidats depuis `selectRuntimeModelCandidatesWithApiKey` :
+Chaque worker (et le primaire) tire une liste ordonnée de candidats depuis `selectRuntimeModelCandidatesWithApiKey` dans `packages/agent-runtime/src/model-selection.ts` :
 
 1. Le `modelId` de la politique, puis `fallbackModelIds`, dans l'ordre.
 
@@ -300,6 +300,6 @@ Les étapes 1–3 sont le contrat. Les étapes 4–6 sont comment le reste de Br
 - Pilote worker : `runWorkerFromPlan` dans `packages/agent-runtime/src/index.ts`.
 - Composition du plan : `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision`.
 - Constructeurs de prompt : `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`.
-- Fiabilité : `selectRuntimeModelCandidatesWithApiKey`.
+- Fiabilité : `selectRuntimeModelCandidatesWithApiKey` dans `packages/agent-runtime/src/model-selection.ts`.
 - Hooks : `runConfiguredHooks`, `runAndRecordHooks`, `parseHookOutput`.
 - Événements UI : `WorkerLifecycleEvent`, `AgentRunRequest.onEvent` / `onWorkerEvent` / `onMcpReport`.

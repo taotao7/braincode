@@ -104,7 +104,7 @@ append agent_message(handoff)
 SubagentStart hook  --(may add context, may block)
                        |
                        v
-selectRuntimeModelCandidatesWithApiKey(policy)   <-- ordered list
+selectRuntimeModelCandidatesWithApiKey(policy)   <-- ordered list from model-selection.ts
                        |
                        v
 for each candidate (until one succeeds):
@@ -217,7 +217,7 @@ If you need a new way to present results, extend the formatter — do not pass t
 
 ## Reliability: model + provider fallback
 
-Each worker (and the primary) pulls an ordered list of candidates from `selectRuntimeModelCandidatesWithApiKey`:
+Each worker (and the primary) pulls an ordered list of candidates from `selectRuntimeModelCandidatesWithApiKey` in `packages/agent-runtime/src/model-selection.ts`:
 
 1. The policy's `modelId`, then `fallbackModelIds`, in order.
 
@@ -315,6 +315,6 @@ Steps 1–3 are the contract. Steps 4–6 are how the rest of Braincode stays co
 - Worker driver: `runWorkerFromPlan` in `packages/agent-runtime/src/index.ts`.
 - Plan composition: `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision`.
 - Prompt builders: `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`.
-- Reliability: `selectRuntimeModelCandidatesWithApiKey`.
+- Reliability: `selectRuntimeModelCandidatesWithApiKey` in `packages/agent-runtime/src/model-selection.ts`.
 - Hooks: `runConfiguredHooks`, `runAndRecordHooks`, `parseHookOutput`.
 - UI events: `WorkerLifecycleEvent`, `AgentRunRequest.onEvent` / `onWorkerEvent` / `onMcpReport`.

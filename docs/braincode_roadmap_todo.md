@@ -119,10 +119,10 @@ Session:
 
 ### TODO
 
-- [ ] 新建 `packages/agent-runtime/src/model-selection.ts`
-  - [ ] `selectRuntimeModel`
-  - [ ] `selectRuntimeModelCandidatesWithApiKey`
-  - [ ] vision/image generation requirement checks
+- [x] 新建 `packages/agent-runtime/src/model-selection.ts`
+  - [x] `selectRuntimeModel`
+  - [x] `selectRuntimeModelCandidatesWithApiKey`
+  - [x] vision/image generation requirement checks
 - [ ] 新建 `packages/agent-runtime/src/evidence-cache.ts`
   - [ ] `createToolEvidenceCache`
   - [ ] `wrapToolsWithEvidenceCache`

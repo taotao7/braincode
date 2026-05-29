@@ -85,6 +85,7 @@ braincode/
     agent-runtime/
       src/
         index.ts
+        model-selection.ts
     tools/
       src/
         index.ts
@@ -214,6 +215,7 @@ Responsibilities:
 
 - Start and run agent sessions.
 - Expand routing plans into runtime worker plans with model selections.
+- Resolve ordered runtime model candidates, API-key availability, and vision/image-generation requirements from Brain Model policies.
 - Run isolated support workers from compact handoff packets.
 - Give selected support/review roles read-only project tools for evidence gathering without edit/execute capability.
 - Run the primary agent with only structured worker results as additional context.

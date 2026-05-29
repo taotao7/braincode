@@ -104,7 +104,7 @@ append agent_message(handoff)
 SubagentStart hook       （可能追加上下文，可能阻断）
                             |
                             v
-selectRuntimeModelCandidatesWithApiKey(policy)   <-- 有序候选列表
+selectRuntimeModelCandidatesWithApiKey(policy)   <-- 来自 model-selection.ts 的有序候选列表
                             |
                             v
 逐个尝试候选（直到某个成功）:
@@ -211,7 +211,7 @@ Open questions:
 
 ## 可靠性：模型 + provider 兜底
 
-每个 worker（以及主 agent）都从 `selectRuntimeModelCandidatesWithApiKey` 拿一个有序候选列表：
+每个 worker（以及主 agent）都从 `packages/agent-runtime/src/model-selection.ts` 里的 `selectRuntimeModelCandidatesWithApiKey` 拿一个有序候选列表：
 
 1. policy 的 `modelId`，然后是 `fallbackModelIds`（按序）。
 
@@ -308,6 +308,6 @@ Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后
 - Worker 驱动：`packages/agent-runtime/src/index.ts` 里的 `runWorkerFromPlan`。
 - Plan 组成：`buildRuntimePlan`、`routePromptWithBrain`、`normalizeRouterDecision`。
 - Prompt 构造器：`buildSupportWorkerPrompt`、`buildPrimaryPrompt`、`buildReviewPrompt`、`formatWorkerResults`。
-- 可靠性：`selectRuntimeModelCandidatesWithApiKey`。
+- 可靠性：`packages/agent-runtime/src/model-selection.ts` 里的 `selectRuntimeModelCandidatesWithApiKey`。
 - Hooks：`runConfiguredHooks`、`runAndRecordHooks`、`parseHookOutput`。
 - UI 事件：`WorkerLifecycleEvent`、`AgentRunRequest.onEvent` / `onWorkerEvent` / `onMcpReport`。
