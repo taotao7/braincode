@@ -1090,7 +1090,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     switch (command) {
       case "help":
       case "?":
-        appendItem({ kind: "help", text: formatHelp() });
+        appendItem({ kind: "help", text: formatHelp(dynamicCommands) });
         return true;
       case "clear":
         setItems([]);
@@ -1303,6 +1303,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       env,
       url: entry.entry.url,
       type: entry.entry.type,
+      httpHeaders: entry.entry.http_headers,
     });
     updateMcpEntry(entry.name, entry.filePath, () => mergeHealth(result));
   }
@@ -3840,7 +3841,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                   {entry.handler.enabled === false ? "○" : "●"}{" "}
                   {entry.scope === "user" ? "user" : "proj"} · {entry.eventName}
                   {entry.matcher ? `[${entry.matcher}]` : ""}
-                  {entry.handler.trusted ? " · trusted" : ""}
+                  {entry.handler.trusted ? " · trusted" : " · untrusted"}
                 </Text>
                 <Text color={colors.gray}>
                   {" "}
@@ -4313,6 +4314,9 @@ const TranscriptEntryView = React.memo(function TranscriptEntryView({
       {item.plan ? (
         <>
           <Text color={colors.gray}>{formatPlanMetadataLine(item.plan)}</Text>
+          <Text color={colors.gray}>
+            {formatPlanWorkersBudgetLine(item.plan)}
+          </Text>
           {item.plan.routing.reason ? (
             <Text color={colors.gray}>
               reason: {truncate(cleanInline(item.plan.routing.reason), 140)}
@@ -5381,6 +5385,7 @@ function estimateTranscriptSupplementRows(
   }
   if (item.plan) {
     rows += countWrappedRows(formatPlanMetadataLine(item.plan), width);
+    rows += countWrappedRows(formatPlanWorkersBudgetLine(item.plan), width);
     if (item.plan.routing.reason) {
       rows += countWrappedRows(
         `reason: ${truncate(cleanInline(item.plan.routing.reason), 140)}`,
@@ -6497,12 +6502,34 @@ function formatRoutingDescriptor(plan: RuntimePlan): string {
   return parts.join(" · ");
 }
 
-function formatPlanPreviewSummary(plan: RuntimePlan): string {
-  return `${plan.brain.id} → ${plan.role} → ${plan.piModel.provider}/${plan.piModel.id} · ${formatRoutingDescriptor(plan)}`;
+export function formatPlanPreviewSummary(plan: RuntimePlan): string {
+  return `${plan.brain.id} → primary ${plan.role} → ${plan.piModel.provider}/${plan.piModel.id} · ${formatRoutingDescriptor(plan)}`;
 }
 
-function formatPlanMetadataLine(plan: RuntimePlan): string {
-  return `mode=${plan.mode} · routing=${formatRoutingDescriptor(plan)} · tools=${plan.toolExecution}`;
+export function formatPlanMetadataLine(plan: RuntimePlan): string {
+  return `mode=${plan.mode} · primary=${plan.role} · model=${plan.piModel.provider}/${plan.piModel.id} · routing=${formatRoutingDescriptor(plan)} · tools=${plan.toolExecution}`;
+}
+
+export function formatPlanWorkersBudgetLine(plan: RuntimePlan): string {
+  const workers = plan.workers
+    .map((worker) =>
+      worker.role === plan.role ? `${worker.role} (primary)` : worker.role,
+    )
+    .join(", ");
+  const budget = [
+    typeof plan.routing.maxWorkerAgents === "number"
+      ? `workers ${plan.routing.maxWorkerAgents}`
+      : "",
+    typeof plan.routing.maxParallelAgents === "number"
+      ? `parallel ${plan.routing.maxParallelAgents}`
+      : "",
+    typeof plan.routing.maxTodos === "number"
+      ? `todos ${plan.routing.maxTodos}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `workers: ${workers || "(none)"}${budget ? ` · budget: ${budget}` : ""}`;
 }
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
@@ -6890,10 +6917,10 @@ function todoGlyph(
   }
 }
 
-function formatHelp(): string {
+export function formatHelp(commands: CommandDefinition[] = COMMANDS): string {
   return [
     "Commands:",
-    ...COMMANDS.map(
+    ...commands.map(
       (command) => `  ${command.label.padEnd(10)} — ${command.hint}`,
     ),
     "",

@@ -321,6 +321,27 @@ test("read_file expands tiny windows for large files", async () => {
   }
 })
 
+test("read_file can seek into large files without returning the prefix", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-seek-test-"))
+  try {
+    await Bun.write(join(projectRoot, "large.txt"), `${"a".repeat(600_000)}needle-window${"z".repeat(600_000)}`)
+    const readFile = createLocalCodingTools({ projectRoot, maxReadBytes: 128 }).find((tool) => tool.name === "read_file")
+    if (!readFile) throw new Error("Missing read_file")
+
+    const result = await readFile.execute("read-large-seek", { path: "large.txt", offset: 600_000, limit: 32 } as never)
+    const details = result.details as { chars: number; totalChars: number; offset: number; nextOffset?: number }
+
+    expect(textContent(result)).toContain("needle-window")
+    expect(textContent(result)).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    expect(details.offset).toBe(600_000)
+    expect(details.chars).toBeLessThanOrEqual(128)
+    expect(details.totalChars).toBe(1_200_013)
+    expect(details.nextOffset).toBe(600_128)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("edit_file writes new files and replaces all matches", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-write-test-"))
   try {

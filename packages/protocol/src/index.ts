@@ -1,5 +1,3 @@
-import type { AuthStatus, BraincodeBrains, BraincodeModels, BraincodeSettings, BraincodeTools } from "@braincode/config"
-
 export type ApiSuccess<T> = {
   ok: true
   data: T
@@ -17,11 +15,11 @@ export type HealthResponse = {
   status: "ok"
 }
 
-export type SettingsResponse = ApiResult<BraincodeSettings>
-export type BrainsResponse = ApiResult<BraincodeBrains>
-export type ModelsResponse = ApiResult<BraincodeModels>
-export type ToolsResponse = ApiResult<BraincodeTools>
-export type AuthStatusResponse = ApiResult<AuthStatus>
+export type SettingsResponse<T = unknown> = ApiResult<T>
+export type BrainsResponse<T = unknown> = ApiResult<T>
+export type ModelsResponse<T = unknown> = ApiResult<T>
+export type ToolsResponse<T = unknown> = ApiResult<T>
+export type AuthStatusResponse<T = unknown> = ApiResult<T>
 
 export type ContextRef = {
   kind: "file" | "thread" | "summary" | "artifact"

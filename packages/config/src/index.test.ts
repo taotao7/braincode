@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat, utimes } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, listSessions, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -230,7 +230,7 @@ test("readHookSources discovers user and project hook config", async () => {
 
   expect(sources.map((source) => source.kind)).toEqual(["user", "project"])
   expect(sources[0]?.document.hooks.UserPromptSubmit?.[0]?.hooks[0]?.trusted).toBe(true)
-  expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(false)
+  expect(sources[1]?.document.hooks.Stop?.[0]?.hooks[0]?.trusted).toBe(true)
 })
 
 test("setHookHandlerEnabled toggles handlers and validates indexes", async () => {
@@ -614,6 +614,51 @@ test("token usage records aggregate by model, role, and phase", async () => {
   expect(stats.recent[0]?.prompt).toBe("implement stats")
   expect(stats.recent[0]?.brainId).toBe("brain")
   expect(stats.recent[0]?.primaryRole).toBe("backend")
+})
+
+test("listSessions limits after sorting by recent session file time", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+  const oldDate = new Date("2020-01-01T00:00:00.000Z")
+  const latestDate = new Date("2026-01-01T00:00:00.000Z")
+
+  for (let index = 0; index < 80; index++) {
+    const filePath = join(paths.sessions, `old-${index}.jsonl`)
+    await Bun.write(filePath, `${JSON.stringify({ type: "run_start", prompt: `old ${index}` })}\n`)
+    await utimes(filePath, oldDate, oldDate)
+  }
+  const latestPath = join(paths.sessions, "latest.jsonl")
+  await Bun.write(latestPath, `${JSON.stringify({ type: "run_start", prompt: "latest prompt" })}\n`)
+  await utimes(latestPath, latestDate, latestDate)
+
+  const sessions = await listSessions(home, 1)
+
+  expect(sessions.map((session) => session.sessionId)).toEqual(["latest"])
+  expect(sessions[0]?.prompt).toBe("latest prompt")
+})
+
+test("readUsageStats can limit parsing to recent session files", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+  const oldPath = join(paths.sessions, "old-usage.jsonl")
+  const latestPath = join(paths.sessions, "latest-usage.jsonl")
+  await Bun.write(oldPath, [
+    JSON.stringify({ type: "run_start", prompt: "old usage" }),
+    JSON.stringify({ type: "token_usage", modelId: "old-model", role: "backend", phase: "primary", usage: { total: 1 } }),
+  ].join("\n"))
+  await Bun.write(latestPath, [
+    JSON.stringify({ type: "run_start", prompt: "latest usage" }),
+    JSON.stringify({ type: "token_usage", modelId: "latest-model", role: "backend", phase: "primary", usage: { total: 9 } }),
+  ].join("\n"))
+  await utimes(oldPath, new Date("2020-01-01T00:00:00.000Z"), new Date("2020-01-01T00:00:00.000Z"))
+  await utimes(latestPath, new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"))
+
+  const stats = await readUsageStats(home, { sessionLimit: 1 })
+
+  expect(stats.sessions).toBe(1)
+  expect(stats.totals.total).toBe(9)
+  expect(stats.byModel.map((bucket) => bucket.id)).toEqual(["latest-model"])
+  expect(stats.recent[0]?.sessionId).toBe("latest-usage")
 })
 
 test("readSessionContext returns compact session records", async () => {

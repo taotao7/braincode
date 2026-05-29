@@ -986,7 +986,7 @@ test("runDemoBenchmarkSuite records plan runner failures", async () => {
   expect(result.results[0]?.error).toBe("no planner")
 })
 
-test("runConfiguredHooks skips project hooks that self-declare trusted", async () => {
+test("runConfiguredHooks runs explicitly trusted project hooks", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-home-test-"))
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-hook-project-test-"))
   try {
@@ -1030,9 +1030,9 @@ test("runConfiguredHooks skips project hooks that self-declare trusted", async (
     )
 
     expect(result.blockedReason).toBeUndefined()
-    expect(result.additionalContext).toEqual([])
-    expect(result.records[0]?.status).toBe("skipped")
-    expect(result.records[0]?.reason).toBe("untrusted")
+    expect(result.additionalContext).toEqual(["checked hello"])
+    expect(result.records[0]?.status).toBe("completed")
+    expect(result.records[0]?.reason).toBeUndefined()
   } finally {
     await rm(home, { recursive: true, force: true })
     await rm(projectRoot, { recursive: true, force: true })

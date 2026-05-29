@@ -92,9 +92,6 @@
     },
     "packages/protocol": {
       "name": "@braincode/protocol",
-      "dependencies": {
-        "@braincode/config": "workspace:*",
-      },
     },
     "packages/server": {
       "name": "@braincode/server",

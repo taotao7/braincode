@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { access, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises"
+import { access, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve, dirname } from "node:path"
 import { Type } from "typebox"
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
@@ -62,6 +62,7 @@ const DEFAULT_MAX_OUTPUT_BYTES = 96_000
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
 const LARGE_FILE_READ_THRESHOLD_CHARS = 24_000
 const MIN_LARGE_FILE_READ_CHARS = 32_000
+const BINARY_FILE_PROBE_BYTES = 4096
 const ALL_EXIT_CODES = Array.from({ length: 256 }, (_, code) => code)
 
 export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTool[] {
@@ -216,31 +217,27 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
     execute: async (_toolCallId, params) => {
       const input = params as { path: string; offset?: number; limit?: number }
       const target = await resolveProjectPath(context.projectRoot, input.path)
-      const content = await readCompleteUtf8TextFile(target.absolutePath)
-      const offset = clampInteger(input.offset, 0, content.length, 0)
-      const { limit, requestedLimit, expanded } = readFileWindowLimit(input.limit, content.length, context.maxReadBytes)
-      const end = Math.min(content.length, offset + limit)
-      const slice = content.slice(offset, end)
-      const truncated = end < content.length
+      const window = await readUtf8TextWindow(target.absolutePath, input.offset, input.limit, context.maxReadBytes)
+      const truncated = window.end < window.total
       const header = `# ${target.relativePath}${formatReadFileWindowHeader({
-        offset,
-        end,
-        total: content.length,
-        requestedLimit,
-        limit,
-        expanded,
+        offset: window.offset,
+        end: window.end,
+        total: window.total,
+        requestedLimit: window.requestedLimit,
+        limit: window.limit,
+        expanded: window.expanded,
         truncated,
       })}`
-      return textResult(`${header}\n${slice}`, {
+      return textResult(`${header}\n${window.content}`, {
         tool: "read_file",
         path: target.relativePath,
-        chars: slice.length,
-        totalChars: content.length,
-        offset,
-        limit,
-        requestedLimit,
-        limitExpanded: expanded,
-        nextOffset: truncated ? end : undefined,
+        chars: window.content.length,
+        totalChars: window.total,
+        offset: window.offset,
+        limit: window.limit,
+        requestedLimit: window.requestedLimit,
+        limitExpanded: window.expanded,
+        nextOffset: truncated ? window.end : undefined,
         truncated,
       })
     },
@@ -706,18 +703,57 @@ function ensureInsideProject(projectRoot: string, absolutePath: string) {
 async function readTextFile(path: string, maxBytes: number): Promise<string> {
   const info = await stat(path)
   if (!info.isFile()) throw new Error(`Not a file: ${path}`)
-  const bytes = await readFile(path)
-  const slice = bytes.byteLength > maxBytes ? bytes.subarray(0, maxBytes) : bytes
+  const slice = await readFileBytes(path, 0, Math.min(info.size, maxBytes))
   if (slice.includes(0)) throw new Error(`File appears to be binary: ${path}`)
   return slice.toString("utf8")
 }
 
-async function readCompleteUtf8TextFile(path: string): Promise<string> {
+async function readUtf8TextWindow(
+  path: string,
+  inputOffset: number | undefined,
+  inputLimit: number | undefined,
+  maxReadBytes: number,
+): Promise<{
+  content: string
+  offset: number
+  end: number
+  total: number
+  limit: number
+  requestedLimit: number
+  expanded: boolean
+}> {
   const info = await stat(path)
   if (!info.isFile()) throw new Error(`Not a file: ${path}`)
-  const bytes = await readFile(path)
-  if (bytes.includes(0)) throw new Error(`File appears to be binary: ${path}`)
-  return bytes.toString("utf8")
+  const total = info.size
+  const offset = clampInteger(inputOffset, 0, total, 0)
+  const { limit, requestedLimit, expanded } = readFileWindowLimit(inputLimit, total, maxReadBytes)
+  const end = Math.min(total, offset + limit)
+  const [probe, bytes] = await Promise.all([
+    offset === 0 ? Promise.resolve(Buffer.alloc(0)) : readFileBytes(path, 0, Math.min(total, BINARY_FILE_PROBE_BYTES)),
+    readFileBytes(path, offset, end - offset),
+  ])
+  if (probe.includes(0) || bytes.includes(0)) throw new Error(`File appears to be binary: ${path}`)
+  return {
+    content: bytes.toString("utf8"),
+    offset,
+    end,
+    total,
+    limit,
+    requestedLimit,
+    expanded,
+  }
+}
+
+async function readFileBytes(path: string, offset: number, length: number): Promise<Buffer> {
+  if (length <= 0) return Buffer.alloc(0)
+  const file = await open(path, "r")
+  try {
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await file.read(buffer, 0, length, offset)
+    return bytesRead === buffer.byteLength ? buffer : buffer.subarray(0, bytesRead)
+  } finally {
+    await file.close()
+  }
 }
 
 async function readCompleteTextFile(path: string, maxBytes: number): Promise<string> {

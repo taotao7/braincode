@@ -1,4 +1,5 @@
-import { appendFile, chmod, mkdir, readdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { appendFile, chmod, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { agentRoleSystemPrompts, type AgentRole } from "@braincode/brain";
@@ -252,6 +253,7 @@ export type UsageStats = {
 
 export type UsageStatsOptions = {
   detailLimit?: number;
+  sessionLimit?: number;
 };
 
 export type BraincodePaths = {
@@ -535,8 +537,21 @@ export function getUserSupportPaths(home = getBraincodeHome()): UserSupportPaths
   };
 }
 
-async function writeJsonFile(path: string, value: unknown) {
-  await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`);
+async function writeJsonFile(path: string, value: unknown, mode?: number) {
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await Bun.write(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+    if (mode !== undefined) {
+      await chmod(tempPath, mode);
+    }
+    await rename(tempPath, path);
+    if (mode !== undefined) {
+      await chmod(path, mode);
+    }
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
@@ -826,20 +841,6 @@ export function normalizeHooks(value: unknown): BraincodeHooks {
   return { hooks };
 }
 
-function stripTrustedHooks(document: BraincodeHooks): BraincodeHooks {
-  const hooks: BraincodeHooks["hooks"] = {};
-  for (const [eventName, groups] of Object.entries(document.hooks) as Array<
-    [HookEventName, HookMatcherGroup[] | undefined]
-  >) {
-    if (!groups) continue;
-    hooks[eventName] = groups.map((group) => ({
-      ...group,
-      hooks: group.hooks.map((handler) => ({ ...handler, trusted: false })),
-    }));
-  }
-  return { hooks };
-}
-
 async function readProjectSkills(skillsPath: string): Promise<ProjectSkill[]> {
   let entries;
   try {
@@ -958,7 +959,7 @@ export async function readProjectHooks(
   return {
     kind: "project",
     path: paths.hooks,
-    document: stripTrustedHooks(hooks),
+    document: hooks,
   };
 }
 
@@ -1069,20 +1070,11 @@ export async function listSessions(
   limit = 25,
 ): Promise<SessionSummary[]> {
   const paths = await ensureBraincodeHome(home);
-  let entries;
-  try {
-    entries = await readdir(paths.sessions, { withFileTypes: true });
-  } catch (error) {
-    if ((error as { code?: unknown }).code === "ENOENT") return [];
-    throw error;
-  }
+  const safeLimit = Math.max(1, Math.floor(limit));
+  const candidates = await listSessionFiles(paths, safeLimit * 4);
   const records: Array<SessionSummary & { sortKey: number }> = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-    const fullPath = join(paths.sessions, entry.name);
-    const file = Bun.file(fullPath);
-    const updatedAt = file.lastModified;
-    if (records.length >= limit * 4) break;
+  for (const candidate of candidates) {
+    const file = Bun.file(candidate.path);
     let prompt: string | undefined;
     let brainId: string | undefined;
     let role: string | undefined;
@@ -1115,11 +1107,38 @@ export async function listSessions(
     } catch {
       // ignore unreadable session
     }
-    const sessionId = entry.name.replace(/\.jsonl$/, "");
-    records.push({ sessionId, path: fullPath, updatedAt, prompt, brainId, role, summary, status, sortKey: updatedAt });
+    records.push({ sessionId: candidate.sessionId, path: candidate.path, updatedAt: candidate.updatedAt, prompt, brainId, role, summary, status, sortKey: candidate.updatedAt });
   }
   records.sort((left, right) => right.sortKey - left.sortKey);
-  return records.slice(0, limit).map(({ sortKey: _drop, ...rest }) => rest);
+  return records.slice(0, safeLimit).map(({ sortKey: _drop, ...rest }) => rest);
+}
+
+type SessionFileCandidate = {
+  sessionId: string;
+  path: string;
+  updatedAt: number;
+};
+
+async function listSessionFiles(paths: BraincodePaths, limit?: number): Promise<SessionFileCandidate[]> {
+  let entries;
+  try {
+    entries = await readdir(paths.sessions, { withFileTypes: true });
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return [];
+    throw error;
+  }
+  const candidates = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+    .map((entry) => {
+      const path = join(paths.sessions, entry.name);
+      return {
+        sessionId: entry.name.replace(/\.jsonl$/, ""),
+        path,
+        updatedAt: Bun.file(path).lastModified,
+      };
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt || right.sessionId.localeCompare(left.sessionId));
+  return limit === undefined ? candidates : candidates.slice(0, Math.max(0, Math.floor(limit)));
 }
 
 export async function appendTokenUsageRecord(
@@ -1142,15 +1161,7 @@ export async function readUsageStats(
   options: UsageStatsOptions = {},
 ): Promise<UsageStats> {
   const paths = await ensureBraincodeHome(home);
-  let entries;
-  try {
-    entries = await readdir(paths.sessions, { withFileTypes: true });
-  } catch (error) {
-    if ((error as { code?: unknown }).code === "ENOENT") {
-      return createEmptyUsageStats();
-    }
-    throw error;
-  }
+  const sessionFiles = await listSessionFiles(paths, options.sessionLimit);
 
   const stats = createEmptyUsageStats();
   const modelBuckets = new Map<string, UsageStatsBucket>();
@@ -1158,28 +1169,11 @@ export async function readUsageStats(
   const phaseBuckets = new Map<string, UsageStatsBucket>();
   const detailLimit = Math.max(1, Math.floor(options.detailLimit ?? 500));
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-    const path = join(paths.sessions, entry.name);
-    const sessionId = entry.name.replace(/\.jsonl$/, "");
-    const file = Bun.file(path);
-    let parsedRecords: Record<string, unknown>[] = [];
+  for (const sessionFile of sessionFiles) {
+    let lines: string[] = [];
     try {
-      const text = await file.text();
-      parsedRecords = text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .flatMap((line) => {
-          try {
-            const parsed = JSON.parse(line);
-            return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-              ? [parsed as Record<string, unknown>]
-              : [];
-          } catch {
-            return [];
-          }
-        });
+      const text = await Bun.file(sessionFile.path).text();
+      lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
     } catch {
       continue;
     }
@@ -1188,7 +1182,9 @@ export async function readUsageStats(
     let brainId: string | undefined;
     let primaryRole: string | undefined;
     let sessionHasUsage = false;
-    for (const record of parsedRecords) {
+    for (const line of lines) {
+      const record = parseSessionRecordLine(line);
+      if (!record) continue;
       if (record.type !== "run_start") continue;
       prompt = prompt ?? stringField(record, "prompt");
       const plan = planFields(record.plan);
@@ -1196,8 +1192,9 @@ export async function readUsageStats(
       primaryRole = primaryRole ?? plan.role;
     }
 
-    for (const record of parsedRecords) {
-      if (record.type !== "token_usage") continue;
+    for (const line of lines) {
+      const record = parseSessionRecordLine(line);
+      if (!record || record.type !== "token_usage") continue;
       const usage = normalizeTokenUsage(record.usage);
       if (!usage) continue;
       sessionHasUsage = true;
@@ -1207,8 +1204,8 @@ export async function readUsageStats(
       const role = stringField(record, "role") ?? "unknown";
       const phase = stringField(record, "phase") ?? "unknown";
       const detail: UsageStatsDetail = {
-        sessionId,
-        path,
+        sessionId: sessionFile.sessionId,
+        path: sessionFile.path,
         timestamp,
         prompt,
         brainId: brainId ?? stringField(record, "brainId"),
@@ -1254,6 +1251,17 @@ export async function readUsageStats(
   stats.recent.sort((left, right) => (right.timestamp ?? 0) - (left.timestamp ?? 0));
   stats.recent = stats.recent.slice(0, detailLimit);
   return stats;
+}
+
+function parseSessionRecordLine(line: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(line);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function createEmptyUsageStats(): UsageStats {
@@ -1719,7 +1727,7 @@ export function normalizeBraincodeTheme(value: unknown): BraincodeTheme {
 async function ensureJsonFile(path: string, value: unknown, mode?: number) {
   const file = Bun.file(path);
   if (!(await file.exists())) {
-    await writeJsonFile(path, value);
+    await writeJsonFile(path, value, mode);
   }
   if (mode !== undefined) {
     await chmod(path, mode);
@@ -1795,7 +1803,7 @@ export async function writeProviderApiKey(
   const paths = await ensureBraincodeHome(home);
   const auth = await readAuth(home);
   auth.providers[normalizedProvider] = { apiKey: apiKey.trim() };
-  await writeJsonFile(paths.auth, auth);
+  await writeJsonFile(paths.auth, auth, 0o600);
   await chmod(paths.auth, 0o600);
 }
 
@@ -1819,7 +1827,7 @@ export async function writeProviderOAuthCredentials(
       credentials,
     },
   };
-  await writeJsonFile(paths.auth, auth);
+  await writeJsonFile(paths.auth, auth, 0o600);
   await chmod(paths.auth, 0o600);
 }
 

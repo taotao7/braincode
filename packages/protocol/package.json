@@ -7,8 +7,5 @@
   },
   "scripts": {
     "check": "bunx tsc --noEmit -p ../../tsconfig.json"
-  },
-  "dependencies": {
-    "@braincode/config": "workspace:*"
   }
 }

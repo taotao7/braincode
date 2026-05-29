@@ -384,7 +384,7 @@ async function handleRequest(request: Request): Promise<Response> {
     }
 
     if (request.method === "GET" && url.pathname === "/api/usage-stats") {
-      return json(ok(await readUsageStats(undefined, { detailLimit: 1000 })))
+      return json(ok(await readUsageStats(undefined, { detailLimit: 1000, sessionLimit: 500 })))
     }
 
     return json<ApiResult<never>>({ ok: false, error: "Not found" }, 404)

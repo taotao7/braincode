@@ -2540,21 +2540,29 @@ function formatProjectSupportPromptSection(projectSupport?: ProjectSupport): str
 
   const sections = [`Project support context from ${projectSupport.root}:`]
   if (projectSupport.agents) {
-    sections.push(`AGENTS.md (${projectSupport.agents.path}):\n${projectSupport.agents.content}`)
+    sections.push(`AGENTS.md (${projectSupport.agents.path}):\n${clipPromptText(projectSupport.agents.content, "AGENTS.md", MAX_INLINE_AGENTS_CHARS)}`)
   }
   if (projectSupport.mcp) {
     const servers = projectSupport.mcp.serverNames.length > 0 ? projectSupport.mcp.serverNames.join(", ") : "(none declared)"
     sections.push(`MCP config (${projectSupport.mcp.path}):\nAvailable server names: ${servers}\nUse MCP servers only when Braincode exposes them as runtime tools; do not assume access from config metadata alone.`)
   }
   if (projectSupport.skills.length > 0) {
+    const inlineSkills = projectSupport.skills.slice(0, MAX_INLINE_SKILLS)
+    const omittedCount = projectSupport.skills.length - inlineSkills.length
     sections.push(
       [
         "Local skills (.agents/skill):",
-        ...projectSupport.skills.map((skill) => `### ${skill.id} (${skill.path})\n${skill.content}`),
+        ...inlineSkills.map((skill) => `### ${skill.id} (${skill.path})\n${clipPromptText(skill.content, `skill:${skill.id}`, MAX_INLINE_SKILL_CHARS)}`),
+        omittedCount > 0 ? `[${omittedCount} additional local skill file(s) omitted from inline prompt context. Use project files/tools if their full content is needed.]` : "",
       ].join("\n\n"),
     )
   }
-  return `${sections.join("\n\n")}\n`
+  return `${clipPromptText(sections.join("\n\n"), "project support context", MAX_INLINE_PROJECT_SUPPORT_CHARS)}\n`
+}
+
+function clipPromptText(text: string, label: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}\n\n[${label} truncated at ${maxChars}/${text.length} chars; use project files/tools to inspect the remaining content if needed.]`
 }
 
 function summarizeProjectSupport(projectSupport: ProjectSupport) {
@@ -2567,6 +2575,10 @@ function summarizeProjectSupport(projectSupport: ProjectSupport) {
 }
 
 const readOnlyToolWorkerRoles = new Set<RoutedAgentRole>(["librarian", "qa", "security", "review"])
+const MAX_INLINE_PROJECT_SUPPORT_CHARS = 64_000
+const MAX_INLINE_AGENTS_CHARS = 32_000
+const MAX_INLINE_SKILLS = 12
+const MAX_INLINE_SKILL_CHARS = 8_000
 
 function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = []): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
@@ -2923,6 +2935,40 @@ function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, e
   }
 }
 
+function blockedWorkerResult(worker: RuntimeWorkerPlan, parentId: string, reason: string): ExecutedWorkerResult {
+  return {
+    ...agentToBrainContextTransfer,
+    handoffId: `blocked:${crypto.randomUUID()}`,
+    taskId: worker.contextId,
+    parentId,
+    progress: {
+      status: "blocked",
+      summary: reason,
+    },
+    role: worker.role,
+    goal: worker.goal,
+    todoIds: worker.todoIds ?? [],
+    status: "blocked",
+    summary: `${worker.role} worker blocked: ${reason}`,
+    artifacts: [],
+    risks: [reason],
+    nextQuestions: [],
+    error: reason,
+  }
+}
+
+async function emitWorkerLifecycleEvent(
+  onWorkerEvent: ((event: WorkerLifecycleEvent) => void | Promise<void>) | undefined,
+  event: WorkerLifecycleEvent,
+): Promise<void> {
+  if (!onWorkerEvent) return
+  try {
+    await onWorkerEvent(event)
+  } catch {
+    // ignore listener errors
+  }
+}
+
 function imageExtension(mimeType: string): string {
   if (/jpe?g/i.test(mimeType)) return "jpg"
   if (/webp/i.test(mimeType)) return "webp"
@@ -3230,7 +3276,6 @@ async function runSupportWorkers(
     : workers.length
   const results: ExecutedWorkerResult[] = new Array(workers.length)
   const pending = new Set(workers.map((_, index) => index))
-  const completedTodoIds = new Set<string>()
   const todoOwnerById = new Map<string, number>()
   for (const [index, worker] of workers.entries()) {
     for (const todoId of worker.todoIds ?? []) {
@@ -3244,7 +3289,7 @@ async function runSupportWorkers(
     return dependencies.every((dependency) => {
       if (!workerTodoIds.has(dependency.toTodoId)) return true
       const owner = todoOwnerById.get(dependency.fromTodoId)
-      return owner === undefined || owner === index || !pending.has(owner) || completedTodoIds.has(dependency.fromTodoId)
+      return owner === undefined || owner === index || (!pending.has(owner) && results[owner]?.status === "completed")
     })
   }
 
@@ -3252,7 +3297,32 @@ async function runSupportWorkers(
     throwIfRunAborted(signal)
     const pendingIndexes = Array.from(pending)
     const readyIndexes = pendingIndexes.filter(workerIsReady)
-    const wave = (readyIndexes.length > 0 ? readyIndexes : pendingIndexes).slice(0, limit)
+    if (readyIndexes.length === 0) {
+      const reason = "Worker dependency graph is blocked or cyclic; no pending worker has all upstream todos completed successfully."
+      await Promise.all(pendingIndexes.map(async (index) => {
+        pending.delete(index)
+        const worker = workers[index]!
+        const result = blockedWorkerResult(worker, sessionId, reason)
+        results[index] = result
+        await appendSessionRecord(sessionId, { type: "agent_message", phase: "support", worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
+        await appendSessionRecord(sessionId, { type: "worker_end", phase: "support", worker: worker.role, result }, home)
+        await onTodoStatus?.(worker, "support", "blocked", { error: reason })
+        await emitWorkerLifecycleEvent(onWorkerEvent, {
+          type: "worker_end",
+          role: worker.role,
+          phase: "support",
+          status: "blocked",
+          handoffId: result.handoffId,
+          taskId: result.taskId,
+          parentId: result.parentId,
+          progress: result.progress,
+          error: result.error,
+          todoIds: worker.todoIds,
+        })
+      }))
+      break
+    }
+    const wave = readyIndexes.slice(0, limit)
     await Promise.all(wave.map(async (index) => {
       pending.delete(index)
       const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
@@ -3276,9 +3346,6 @@ async function runSupportWorkers(
         workerTools.length > 0 ? onEvent : undefined,
         signal,
       )
-      for (const todoId of worker.todoIds ?? []) {
-        completedTodoIds.add(todoId)
-      }
     }))
   }
 
