@@ -325,6 +325,11 @@ export const defaultBrains: BraincodeBrains = {
           thinkingLevel: "medium",
           systemPrompt: agentRoleSystemPrompts.designer,
         },
+        imageMaker: {
+          modelId: "openai/gpt-image-2",
+          thinkingLevel: "off",
+          systemPrompt: agentRoleSystemPrompts.imageMaker,
+        },
         dba: {
           modelId: "google/gemini-3.1-pro-preview",
           fallbackModelIds: [
@@ -464,6 +469,19 @@ export const defaultModels: BraincodeModels = {
       contextWindow: 1000000,
       supportsTools: true,
       defaultThinkingLevel: "low",
+    },
+    {
+      id: "openai/gpt-image-2",
+      provider: "openai",
+      modelId: "gpt-image-2",
+      name: "GPT Image 2",
+      api: "openai-images",
+      baseUrl: "https://api.openai.com/v1",
+      contextWindow: 32000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsImageGeneration: true,
+      defaultThinkingLevel: "off",
     },
   ],
 };
@@ -1897,6 +1915,7 @@ const legacySystemPromptPatterns: Partial<Record<AgentRole, readonly RegExp[]>> 
   frontend: [/Own user-facing UI behavior: components, state, accessibility/],
   backend: [/Own server-side behavior: APIs, services, validation/],
   designer: [/Own UX quality: task flow, information architecture/],
+  imageMaker: [/Own image creation requests, visual asset prompt construction/],
   dba: [/Own database safety and performance: schema design/],
   devops: [/Own build and runtime operations: CI\/CD/],
   security: [/Own security posture: authentication, authorization/],
@@ -1964,6 +1983,14 @@ function migrateBrains(document: BraincodeBrains): boolean {
           changed = true;
         }
       }
+      if (!roles.imageMaker) {
+        roles.imageMaker = {
+          modelId: "openai/gpt-image-2",
+          thinkingLevel: "off",
+          systemPrompt: agentRoleSystemPrompts.imageMaker,
+        };
+        changed = true;
+      }
       // v0.2.0: drop the obsolete `coding`, `fastReply`, and `research` roles.
       // `coding` is subsumed by frontend/backend specialists. `fastReply` folds
       // into `rush`. `research` folds into `librarian`.
@@ -2010,6 +2037,11 @@ export async function writeModels(
 
 function migrateModels(document: BraincodeModels): boolean {
   let changed = false;
+  const imageModel = defaultModels.models.find((model) => (model as Record<string, unknown>).id === "openai/gpt-image-2");
+  if (imageModel && !document.models.some((model) => (model as Record<string, unknown>)?.id === "openai/gpt-image-2")) {
+    document.models.push(imageModel);
+    changed = true;
+  }
   for (const model of document.models) {
     if (!model || typeof model !== "object") continue;
     const record = model as Record<string, unknown>;

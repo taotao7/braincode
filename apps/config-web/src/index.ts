@@ -478,11 +478,12 @@ export const configWebHtml = `<!doctype html>
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
-          roleLabel_routeBrain: "Router Brain", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
+          roleLabel_routeBrain: "Router Brain", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_imageMaker: "Image Maker", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "Main router: reads user intent, creates the todo/dependency plan, and decides which role handles the task.",
           roleDesc_frontend: "Frontend: UI, browser behavior, CSS, components, accessibility, and user-facing polish. There is no generic coding role — code work is split by domain.",
           roleDesc_backend: "Backend: APIs, services, validation, persistence boundaries, and server behavior.",
           roleDesc_designer: "Designer: UX flows, visual direction, interaction design, and implementable product layout guidance.",
+          roleDesc_imageMaker: "Image Maker: generates raster image assets through a configured OpenAI-compatible Images API provider, such as OpenAI, Minimax, or a compatible proxy.",
           roleDesc_dba: "DBA: schema design, migrations, indexes, query plans, data integrity, and database performance.",
           roleDesc_devops: "DevOps: CI/CD, deployment, containers, infrastructure, observability, and operations.",
           roleDesc_security: "Security: auth, permissions, secrets, vulnerabilities, threat models, and secure defaults.",
@@ -505,11 +506,12 @@ export const configWebHtml = `<!doctype html>
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
-          roleLabel_routeBrain: "路由大脑", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
+          roleLabel_routeBrain: "路由大脑", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_imageMaker: "图片制造者", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "主控路由：读取用户意图，生成 todo / 依赖计划，并决定交给哪个角色处理。",
           roleDesc_frontend: "前端：负责 UI、浏览器行为、CSS、组件、可访问性和用户侧打磨。已经没有通用的 coding 角色，代码工作按领域细分。",
           roleDesc_backend: "后端：负责 API、服务、校验、持久化边界和服务端行为。",
           roleDesc_designer: "设计师：负责 UX 流程、视觉方向、交互设计和可落地的产品布局建议。",
+          roleDesc_imageMaker: "图片制造者：通过用户配置的 OpenAI-compatible Images API 生成图片资产，可接 OpenAI、Minimax 或兼容代理。",
           roleDesc_dba: "DBA：负责表结构、迁移、索引、查询计划、数据完整性和数据库性能。",
           roleDesc_devops: "DevOps：负责 CI/CD、部署、容器、基础设施、可观测性和运维。",
           roleDesc_security: "安全：负责认证、权限、密钥、漏洞、威胁建模和安全默认值。",
@@ -523,9 +525,9 @@ export const configWebHtml = `<!doctype html>
         }
       }
 
-      const roles = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
+      const roles = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
-      const apiTypes = ["openai", "anthropic"]
+      const apiTypes = ["openai", "anthropic", "openai-images"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
       const status = document.querySelector("#status")
@@ -815,11 +817,13 @@ export const configWebHtml = `<!doctype html>
 
       function apiChoice(value) {
         const normalized = String(value || "").trim()
+        if (normalized === "openai-images") return "openai-images"
         return normalized === "anthropic" || normalized === "anthropic-messages" ? "anthropic" : "openai"
       }
 
       function isOpenAICompatibleApi(apiType) {
-        return normalizeApiType(apiType) === "openai-completions"
+        const api = normalizeApiType(apiType)
+        return api === "openai-completions" || api === "openai-images"
       }
 
       function normalizeBaseUrl(value, apiType = "openai") {
@@ -831,7 +835,9 @@ export const configWebHtml = `<!doctype html>
       }
 
       function normalizeApiType(value) {
-        if (apiChoice(value) === "anthropic") return "anthropic-messages"
+        const choice = apiChoice(value)
+        if (choice === "anthropic") return "anthropic-messages"
+        if (choice === "openai-images") return "openai-images"
         return "openai-completions"
       }
 
@@ -842,6 +848,7 @@ export const configWebHtml = `<!doctype html>
         const api = normalizeApiType(manualApiInput.value)
         const baseUrl = normalizeBaseUrl(manualBaseUrlInput.value, api)
         const contextWindow = Number(manualContextWindowInput.value) || 128000
+        const imageGeneration = api === "openai-images"
         return {
           id: provider + "/" + modelId,
           provider,
@@ -850,9 +857,10 @@ export const configWebHtml = `<!doctype html>
           api,
           ...(baseUrl ? { baseUrl } : {}),
           contextWindow,
-          supportsTools: true,
-          supportsVision: manualVisionInput.checked,
-          defaultThinkingLevel: manualThinkingInput.value,
+          supportsTools: !imageGeneration,
+          supportsVision: imageGeneration ? false : manualVisionInput.checked,
+          supportsImageGeneration: imageGeneration,
+          defaultThinkingLevel: imageGeneration ? "off" : manualThinkingInput.value,
         }
       }
 
@@ -922,6 +930,7 @@ export const configWebHtml = `<!doctype html>
         const api = normalizeApiType(controls.api.value)
         const baseUrl = normalizeBaseUrl(controls.baseUrl.value, api)
         const contextWindow = Number(controls.contextWindow.value) || 128000
+        const imageGeneration = api === "openai-images"
         const nextModel = {
           ...previousModel,
           id: provider + "/" + modelId,
@@ -930,9 +939,10 @@ export const configWebHtml = `<!doctype html>
           name,
           api,
           contextWindow,
-          supportsTools: true,
-          supportsVision: controls.vision.checked,
-          defaultThinkingLevel: controls.thinking.value,
+          supportsTools: !imageGeneration,
+          supportsVision: imageGeneration ? false : controls.vision.checked,
+          supportsImageGeneration: imageGeneration,
+          defaultThinkingLevel: imageGeneration ? "off" : controls.thinking.value,
         }
         if (baseUrl) nextModel.baseUrl = baseUrl
         else delete nextModel.baseUrl

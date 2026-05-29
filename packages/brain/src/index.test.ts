@@ -11,6 +11,7 @@ const brain: BrainModel = {
     frontend: { modelId: "frontend", thinkingLevel: "medium" },
     backend: { modelId: "backend", thinkingLevel: "medium" },
     designer: { modelId: "designer", thinkingLevel: "medium" },
+    imageMaker: { modelId: "image", thinkingLevel: "off" },
     dba: { modelId: "dba", thinkingLevel: "high" },
     devops: { modelId: "devops", thinkingLevel: "medium" },
     security: { modelId: "security", thinkingLevel: "high" },
@@ -71,6 +72,12 @@ test("planAgentRouting fallback avoids rush for obvious workspace tool operation
   expect(plan.workers.map((worker) => worker.role)).toEqual(["devops"])
 })
 
+test("planAgentRouting fallback routes obvious image generation to imageMaker", () => {
+  const plan = planAgentRouting("生成一张前端角色图，用在网站轮播里", brain)
+  expect(plan.primaryRole).toBe("imageMaker")
+  expect(plan.workers.map((worker) => worker.role)).toEqual(["imageMaker"])
+})
+
 test("planAgentRouting flags requiresReview when file-edit risk words appear", () => {
   const edit = planAgentRouting("implement a new feature", brain)
   expect(edit.requiresReview).toBe(true)
@@ -85,9 +92,9 @@ test("planAgentRouting honors requireReviewForFileEdits=false", () => {
   expect(plan.requiresReview).toBe(false)
 })
 
-test("routedAgentRoles contains exactly the 12 routed roles (no coding/fastReply/research)", () => {
+test("routedAgentRoles contains exactly the 13 routed roles (no coding/fastReply/research)", () => {
   expect(routedAgentRoles).toEqual([
-    "frontend", "backend", "designer", "dba", "devops", "security", "qa",
+    "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa",
     "review", "summarize", "oracle", "librarian", "rush",
   ])
   for (const role of routedAgentRoles) {

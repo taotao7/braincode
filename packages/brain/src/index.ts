@@ -12,6 +12,7 @@ export type BrainRolePolicies = {
   frontend: ModelPolicy
   backend: ModelPolicy
   designer: ModelPolicy
+  imageMaker: ModelPolicy
   dba: ModelPolicy
   devops: ModelPolicy
   security: ModelPolicy
@@ -67,6 +68,7 @@ export const routedAgentRoles = [
   "frontend",
   "backend",
   "designer",
+  "imageMaker",
   "dba",
   "devops",
   "security",
@@ -156,6 +158,24 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
       "Do not drift into backend or infrastructure details except to describe user-facing requirements.",
     ],
     output: "Return implementable design decisions, state requirements, layout guidance, and unresolved product questions.",
+  },
+  imageMaker: {
+    label: "Image Maker",
+    identity: "Visual asset generator focused on turning user intent, brand constraints, and role handoffs into concrete image-generation prompts and generated image artifacts.",
+    responsibility: "Own image creation requests, visual asset prompt construction, generation constraints, output format notes, and artifact handoff paths.",
+    capabilities: [
+      "Generate or refine prompts for raster images, role portraits, website assets, illustrations, and product visuals.",
+      "Call the configured image-generation engine only when the user needs a new visual asset or an image variation/edit.",
+      "Preserve explicit style, brand, safety, sizing, format, and destination constraints in generated-image work.",
+      "Return generated artifact references and enough prompt detail for reproducibility.",
+    ],
+    boundaries: [
+      "Do not handle ordinary visual critique, UX strategy, or layout work when no new image asset is needed; that belongs to designer or frontend.",
+      "Do not replace frontend implementation work; hand generated assets back with file paths and usage notes.",
+      "Do not invent brand claims, copyrighted characters, or identity-sensitive details that the user did not request.",
+      "Do not call text/code models as a substitute for the configured image-generation engine.",
+    ],
+    output: "Return generated image artifacts, prompt used, file or asset references, constraints honored, and any generation caveats.",
   },
   dba: {
     label: "DBA",
@@ -399,6 +419,12 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "- Include states, hierarchy, interaction details, and prioritization tradeoffs.",
     "- Keep guidance practical enough for an engineer to implement.",
   ]),
+  imageMaker: buildAgentRoleSystemPrompt("imageMaker", [
+    "ImageMaker-specific working rules:",
+    "- Use this role only for new generated visual assets or requested image variations/edits, not for ordinary UI layout or design critique.",
+    "- Preserve the user's visual requirements, target surface, size/format constraints, and safety constraints in the generation prompt.",
+    "- Return generated artifact paths or image references and the prompt used; if generation cannot run, state the missing configuration or provider error clearly.",
+  ]),
   dba: buildAgentRoleSystemPrompt("dba", [
     "DBA-specific working rules:",
     "- Prefer concrete SQL/schema observations, migration ordering, and verification queries.",
@@ -631,6 +657,7 @@ export function formatRoutedAgentRoleCatalog(): string {
 // pick a role — they only flag risk.
 const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
 const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试)\b/
+const imageGenerationPattern = /\b(image|images|picture|pictures|illustration|illustrations|poster|avatar|portrait|visual asset|generate art|生成图片|图片生成|画一张|做图|海报|头像|插画|角色图)\b/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
   return `todo-${String(index + 1).padStart(2, "0")}-${role}`
@@ -752,12 +779,18 @@ export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" |
 // need runtime tools.
 export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRoutingPlan {
   const normalized = prompt.toLowerCase()
-  const primaryRole: RoutedAgentRole = workspaceOperationPattern.test(normalized) ? "devops" : "rush"
+  const primaryRole: RoutedAgentRole = imageGenerationPattern.test(normalized)
+    ? "imageMaker"
+    : workspaceOperationPattern.test(normalized)
+      ? "devops"
+      : "rush"
   return normalizeAgentRoutingPlan({
     primaryRole,
     workers: [{
       role: primaryRole,
-      goal: primaryRole === "devops"
+      goal: primaryRole === "imageMaker"
+        ? "Generate the requested image asset when no router decision is available."
+        : primaryRole === "devops"
         ? "Handle the workspace operation when no router decision is available; use runtime tools when exposed."
         : "Handle the request when no specialist role has been chosen; escalate via handoff if it clearly belongs to a specialist.",
       reason: "Deterministic fallback used when no router decision is available.",

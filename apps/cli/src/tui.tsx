@@ -1,4 +1,11 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
 import {
   render as renderMarkdown,
@@ -117,6 +124,18 @@ type RunStatusState = {
   frame: number;
 };
 
+type InputState = {
+  draft: string;
+  cursor: number;
+};
+
+type DraftMetrics = {
+  empty: boolean;
+  lineCount: number;
+  hiddenAbove: number;
+  hiddenBelow: number;
+};
+
 type QueuedTask = {
   id: string;
   prompt: string;
@@ -135,6 +154,49 @@ type TranscriptRenderEntry = {
   rowStart: number;
   rowEnd: number;
 };
+
+type StoreUpdate<T> = T | ((previous: T) => T);
+
+type TuiStore<T> = {
+  getSnapshot: () => T;
+  setSnapshot: (update: StoreUpdate<T>) => void;
+  subscribe: (listener: () => void) => () => void;
+};
+
+function createTuiStore<T>(initial: T): TuiStore<T> {
+  let snapshot = initial;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    setSnapshot: (update) => {
+      const next =
+        typeof update === "function"
+          ? (update as (previous: T) => T)(snapshot)
+          : update;
+      if (Object.is(next, snapshot)) return;
+      snapshot = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+function useStableTuiStore<T>(initial: T): TuiStore<T> {
+  const store = useRef<TuiStore<T> | null>(null);
+  if (!store.current) store.current = createTuiStore(initial);
+  return store.current;
+}
+
+function useTuiStoreSnapshot<T>(store: TuiStore<T>): T {
+  return useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+}
 
 type CommandDefinition = {
   name: string;
@@ -360,6 +422,7 @@ const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
 const RUN_STATUS_TICK_MS = 1000;
+const PET_SNAPSHOT_FLUSH_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
 const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE !== "false";
 
@@ -525,10 +588,31 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }, [stdout]);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const projectRoot = useMemo(() => process.cwd(), []);
-  const [draft, setDraft] = useState(initialPrompt ?? "");
-  const [cursor, setCursor] = useState((initialPrompt ?? "").length);
+  const initialDraft = initialPrompt ?? "";
+  const initialCursor = initialDraft.length;
   const [running, setRunning] = useState(false);
-  const [items, setItems] = useState<TranscriptItem[]>([]);
+  const inputStore = useStableTuiStore<InputState>({
+    draft: initialDraft,
+    cursor: initialCursor,
+  });
+  const draftMetricsStore = useStableTuiStore<DraftMetrics>(
+    draftMetricsFromWindow(
+      initialDraft,
+      clipDraftToWindow(
+        initialDraft,
+        initialCursor,
+        inputTextWidth(stdout?.columns ?? 80),
+        INPUT_MAX_LINES,
+      ),
+    ),
+  );
+  const transcriptStore = useStableTuiStore<TranscriptItem[]>([]);
+  const transcriptScrollStore = useStableTuiStore<number | null>(null);
+  const runStatusStore = useStableTuiStore<RunStatusState | null>(null);
+  const toastStore = useStableTuiStore<ToastState | null>(null);
+  const queueLengthStore = useStableTuiStore(0);
+  const footerRowsStore = useStableTuiStore(3);
+  const petSnapshotStore = useStableTuiStore<PetWatcherSnapshotItem[]>([]);
   const [mode, setMode] = useState<BraincodeMode>("auto");
   const [themeName, setThemeName] = useState<BraincodeTheme>(() =>
     detectSystemTheme(),
@@ -555,11 +639,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const [decisionPanel, setDecisionPanel] = useState<DecisionPanelState | null>(
     null,
   );
-  const [runStatus, setRunStatus] = useState<RunStatusState | null>(null);
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const [transcriptScrollTop, setTranscriptScrollTop] = useState<number | null>(
-    null,
-  );
   const initialRan = useRef(false);
   const lastEscapeAt = useRef(0);
   const DOUBLE_ESC_MS = 500;
@@ -583,23 +662,51 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     scrollAnchors: [0],
   });
   const mouseInputBuffer = useRef("");
-  const [queueVersion, setQueueVersion] = useState(0);
-  const bumpQueue = () => setQueueVersion((value) => value + 1);
+  const petSnapshotFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const getItems = () => transcriptStore.getSnapshot();
+  const getInputState = () => inputStore.getSnapshot();
+  const publishPetSnapshot = () => {
+    const snapshot = getItems()
+      .slice(-12)
+      .map((item) => ({
+        kind: item.kind,
+        text: item.text,
+        toolName: item.toolName,
+        toolStatus: item.toolStatus,
+        workerStatus: item.workerStatus,
+      }));
+    petSnapshotStore.setSnapshot((previous) =>
+      samePetSnapshot(previous, snapshot) ? previous : snapshot,
+    );
+  };
+  const schedulePetSnapshot = () => {
+    if (petSnapshotFlush.current) return;
+    petSnapshotFlush.current = setTimeout(() => {
+      petSnapshotFlush.current = null;
+      publishPetSnapshot();
+    }, PET_SNAPSHOT_FLUSH_MS);
+  };
+  const setItems = (update: StoreUpdate<TranscriptItem[]>) => {
+    const previous = transcriptStore.getSnapshot();
+    const next =
+      typeof update === "function"
+        ? (update as (previous: TranscriptItem[]) => TranscriptItem[])(previous)
+        : update;
+    if (Object.is(previous, next)) return;
+    transcriptStore.setSnapshot(next);
+    if (next.length === 0 || previous.length === 0) {
+      publishPetSnapshot();
+    } else {
+      schedulePetSnapshot();
+    }
+  };
+  const bumpQueue = () => queueLengthStore.setSnapshot(queueRef.current.length);
 
-  const petSnapshotItems = useMemo<PetWatcherSnapshotItem[]>(() => {
-    return items.slice(-12).map((item) => ({
-      kind: item.kind,
-      text: item.text,
-      toolName: item.toolName,
-      toolStatus: item.toolStatus,
-      workerStatus: item.workerStatus,
-    }));
-  }, [items]);
-  const petState = usePetWatcher({
-    thinking: running,
-    recentItems: petSnapshotItems,
-    queueLength: queueRef.current.length,
-  });
+  useEffect(() => {
+    return () => {
+      if (petSnapshotFlush.current) clearTimeout(petSnapshotFlush.current);
+    };
+  }, []);
 
   const dynamicCommands = useMemo<CommandDefinition[]>(() => {
     const skills: CommandDefinition[] = [];
@@ -758,7 +865,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const { maxScrollTop } = transcriptViewportState.current;
     if (maxScrollTop <= 0 || !Number.isFinite(deltaRows) || deltaRows === 0)
       return;
-    setTranscriptScrollTop((current) => {
+    transcriptScrollStore.setSnapshot((current) => {
       const currentTop =
         current === null
           ? maxScrollTop
@@ -775,11 +882,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   function scrollTranscriptTo(position: "top" | "bottom") {
     const { maxScrollTop } = transcriptViewportState.current;
-    setTranscriptScrollTop(position === "top" && maxScrollTop > 0 ? 0 : null);
+    transcriptScrollStore.setSnapshot(
+      position === "top" && maxScrollTop > 0 ? 0 : null,
+    );
   }
 
   function toggleTranscriptFolds() {
-    const foldable = items
+    const foldable = getItems()
       .map(normalizeTranscriptItem)
       .filter(isTranscriptItemCollapsible);
     if (foldable.length === 0) {
@@ -802,9 +911,12 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   function flash(text: string, tone: ToastTone = "info", durationMs = 2500) {
     const next: ToastState = { id: crypto.randomUUID(), text, tone };
-    setToast(next);
+    toastStore.setSnapshot(next);
     setTimeout(
-      () => setToast((current) => (current?.id === next.id ? null : current)),
+      () =>
+        toastStore.setSnapshot((current) =>
+          current?.id === next.id ? null : current,
+        ),
       durationMs,
     );
   }
@@ -813,7 +925,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     usageByTurn.current = new Map();
     activeUsageKey.current = null;
     runUsage.current = emptyTokenUsage();
-    setRunStatus({
+    runStatusStore.setSnapshot({
       startedAt: Date.now(),
       label,
       tokens: runUsage.current,
@@ -822,7 +934,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function updateRunStatus(label: string) {
-    setRunStatus((previous) =>
+    runStatusStore.setSnapshot((previous) =>
       previous
         ? previous.label === label &&
           sameTokenUsage(previous.tokens, runUsage.current)
@@ -840,7 +952,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   function stopRunStatus() {
     activeUsageKey.current = null;
-    setRunStatus(null);
+    runStatusStore.setSnapshot(null);
   }
 
   function showRuntimeErrorPanel(
@@ -871,7 +983,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (!usage || !key) return;
     usageByTurn.current.set(key, usage);
     runUsage.current = sumTokenUsage(Array.from(usageByTurn.current.values()));
-    setRunStatus((previous) =>
+    runStatusStore.setSnapshot((previous) =>
       previous && !sameTokenUsage(previous.tokens, runUsage.current)
         ? { ...previous, tokens: runUsage.current }
         : previous,
@@ -904,7 +1016,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
 
   function showIntentPanel() {
     const plan =
-      intentPlan ?? [...items].reverse().find((item) => item.plan)?.plan;
+      intentPlan ?? [...getItems()].reverse().find((item) => item.plan)?.plan;
     if (!plan) {
       appendItem({
         kind: "status",
@@ -1500,7 +1612,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }
     }
 
-    if (mode === "current" && items.length === 0) {
+    if (mode === "current" && getItems().length === 0) {
       appendItem({
         kind: "error",
         text: "Nothing to hand off yet — current session is empty.",
@@ -1813,6 +1925,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     "frontend",
     "backend",
     "designer",
+    "imageMaker",
     "dba",
     "devops",
     "security",
@@ -2675,12 +2788,19 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     const cursorPosition = clamp(nextCursor ?? next.length, 0, next.length);
     verticalCursorColumn.current = null;
-    setDraft(next);
-    setCursor(cursorPosition);
-    setOverlay(computeOverlay(next, cursorPosition, overlay));
+    inputStore.setSnapshot((previous) =>
+      previous.draft === next && previous.cursor === cursorPosition
+        ? previous
+        : { draft: next, cursor: cursorPosition },
+    );
+    setOverlay((current) => {
+      const nextOverlay = computeOverlay(next, cursorPosition, current);
+      return sameOverlay(current, nextOverlay) ? current : nextOverlay;
+    });
   }
 
   function insertAtCursor(insertion: string) {
+    const { draft, cursor } = getInputState();
     const before = draft.slice(0, cursor);
     const after = draft.slice(cursor);
     applyDraftChange(
@@ -2690,6 +2810,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function deleteBeforeCursor() {
+    const { draft, cursor } = getInputState();
     if (cursor === 0) return;
     const before = draft.slice(0, cursor - 1);
     const after = draft.slice(cursor);
@@ -2697,6 +2818,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function deleteAfterCursor() {
+    const { draft, cursor } = getInputState();
     if (cursor >= draft.length) return;
     const before = draft.slice(0, cursor);
     const after = draft.slice(cursor + 1);
@@ -2704,11 +2826,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   function moveCursor(delta: number) {
+    const { draft } = getInputState();
     verticalCursorColumn.current = null;
-    setCursor((current) => clamp(current + delta, 0, draft.length));
+    inputStore.setSnapshot((current) => ({
+      draft: current.draft,
+      cursor: clamp(current.cursor + delta, 0, draft.length),
+    }));
   }
 
   function moveCursorVertical(delta: -1 | 1): boolean {
+    const { draft, cursor } = getInputState();
     const width = inputTextWidth(terminalCols);
     const result = moveDraftCursorVertically({
       draft,
@@ -2720,7 +2847,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     });
     if (!result.moved) return false;
     verticalCursorColumn.current = result.desiredColumn;
-    setCursor(result.cursor);
+    inputStore.setSnapshot((current) =>
+      current.cursor === result.cursor ? current : { ...current, cursor: result.cursor },
+    );
     return true;
   }
 
@@ -2744,7 +2873,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const currentIndex = promptHistoryIndex.current;
     if (currentIndex === null) {
       if (delta > 0) return false;
-      draftBeforePromptHistory.current = draft;
+      draftBeforePromptHistory.current = getInputState().draft;
       const nextIndex = history.length - 1;
       promptHistoryIndex.current = nextIndex;
       applyDraftChange(history[nextIndex]!, undefined, {
@@ -2780,6 +2909,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const target = join(dir, `pasted-${Date.now()}.png`);
     const result = await readClipboardImageOrText(target);
     if (result.kind === "image") {
+      const { draft, cursor } = getInputState();
       const token = `@${result.path}`;
       insertAtCursor(
         `${draft.length === 0 || draft.slice(0, cursor).endsWith(" ") ? "" : " "}${token} `,
@@ -2816,6 +2946,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return true;
     }
     if (overlay.kind === "file") {
+      const { draft } = getInputState();
       const matches = fuzzyFilter(
         projectFiles,
         overlay.filter,
@@ -2833,6 +2964,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return true;
     }
     if (overlay.kind === "session") {
+      const { draft } = getInputState();
       const matches = filterSessions(
         sessionSuggestions,
         overlay.filter,
@@ -2933,6 +3065,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       exit();
       return;
     }
+
+    const { draft, cursor } = getInputState();
 
     const scrollKey = key as typeof key & {
       pageUp?: boolean;
@@ -3226,7 +3360,8 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       if (moved) return;
       if (
         transcriptViewportState.current.maxScrollTop > 0 &&
-        (draft.trim().length === 0 || transcriptScrollTop !== null)
+        (draft.trim().length === 0 ||
+          transcriptScrollStore.getSnapshot() !== null)
       ) {
         scrollTranscriptBy(direction);
         return;
@@ -3253,12 +3388,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
     if (key.ctrl && input === "a") {
       verticalCursorColumn.current = null;
-      setCursor(0);
+      inputStore.setSnapshot((current) =>
+        current.cursor === 0 ? current : { ...current, cursor: 0 },
+      );
       return;
     }
     if (key.ctrl && input === "e") {
       verticalCursorColumn.current = null;
-      setCursor(draft.length);
+      inputStore.setSnapshot((current) =>
+        current.cursor === current.draft.length
+          ? current
+          : { ...current, cursor: current.draft.length },
+      );
       return;
     }
     if (key.ctrl && input === "u") {
@@ -3311,10 +3452,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSkillCount = userSupport?.skills.length ?? 0;
   const contentWidth = frameContentWidth(terminalCols);
   const inputWidth = inputTextWidth(terminalCols);
-  const transcriptLayout = useMemo(
-    () => layoutTranscriptItems(items, contentWidth),
-    [items, contentWidth],
-  );
   const projectPath = relative(homedir(), projectRoot) || projectRoot;
   const headerRootLimit = Math.max(18, Math.min(54, terminalCols - 92));
   const headerRoot = truncate(projectPath, headerRootLimit);
@@ -3324,12 +3461,6 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const userSummary = userSupport
     ? `mcp ${userMcpCount} · skills ${userSkillCount}`
     : "loading…";
-  const draftWindow = clipDraftToWindow(
-    draft,
-    cursor,
-    inputWidth,
-    INPUT_MAX_LINES,
-  );
   const tuiTheme = TUI_THEMES[themeName];
   const colors = tuiTheme.colors;
   const desiredPetPanelWidth = Math.max(
@@ -3346,71 +3477,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     ? "PageUp/PageDown/wheel/Ctrl+↑↓ scroll"
     : "PageUp/PageDown/Ctrl+↑↓ scroll";
   const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · Ctrl+T folds · ${scrollHelp} · select content to copy · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
-  const showEmptyIntro = items.length === 0 && draft.length === 0;
-  const nonTranscriptRows = estimateNonTranscriptRows({
-    hasTranscript: items.length > 0,
-    emptyLogoRows: showEmptyIntro ? BRAIN_LOGO.length + 4 : 0,
-    brainPanel,
-    intentPanel,
-    sessionPanel,
-    hookPanel,
-    mcpPanel,
-    overlay,
-    commandMatchRows: Math.max(1, commandMatches.length),
-    fileMatchRows: Math.max(1, fileMatches.length),
-    sessionMatchRows:
-      sessionMatches.length === 0
-        ? 1
-        : sessionMatches.reduce(
-            (sum, entry) => sum + (entry.prompt ? 2 : 1),
-            0,
-          ),
-    decisionPanel,
-    runtimeErrorPanel,
-    draftWindow,
-    running,
-    queueLength: queueRef.current.length,
-    toast,
-  });
-  const availableTranscriptRows = Math.max(
-    1,
-    terminalRows - nonTranscriptRows - INK_RENDER_SAFETY_ROWS,
-  );
-  const transcriptViewportRows =
-    items.length > 0
-      ? Math.min(
-          availableTranscriptRows,
-          Math.max(1, transcriptLayout.totalRows),
-        )
-      : 0;
-  const transcriptViewport = useMemo(
-    () =>
-      viewportTranscriptLayout(
-        transcriptLayout,
-        transcriptViewportRows,
-        transcriptScrollTop,
-      ),
-    [items.length, transcriptLayout, transcriptScrollTop, transcriptViewportRows],
-  );
-  const transcriptAnchors = useMemo(
-    () =>
-      transcriptScrollAnchors(
-        transcriptLayout,
-        transcriptViewport.maxScrollTop,
-      ),
-    [transcriptLayout, transcriptViewport.maxScrollTop],
-  );
-  transcriptViewportState.current = {
-    totalRows: transcriptLayout.totalRows,
-    viewportRows: transcriptViewport.viewportRows,
-    scrollTop: transcriptViewport.scrollTop,
-    maxScrollTop: transcriptViewport.maxScrollTop,
-    scrollAnchors: transcriptAnchors,
-  };
-  const transcriptScrollSummary =
-    transcriptScrollTop !== null && transcriptViewport.maxScrollTop > 0
-      ? `${Math.round(transcriptViewport.scrollTop + transcriptViewport.viewportRows)}/${transcriptLayout.totalRows} rows`
-      : "";
+  const sessionMatchRows =
+    sessionMatches.length === 0
+      ? 1
+      : sessionMatches.reduce(
+          (sum, entry) => sum + (entry.prompt ? 2 : 1),
+          0,
+        );
 
   return (
     <TuiThemeContext.Provider value={tuiTheme}>
@@ -3460,111 +3533,28 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           </Box>
         </Box>
 
-        {items.length === 0 && showEmptyIntro ? (
-          <Box flexDirection="column" alignItems="center" marginY={1}>
-            {BRAIN_LOGO.map((line, index) => (
-              <Text key={`logo-${index}`} color={colors.cyan} bold>
-                {line}
-              </Text>
-            ))}
-            <Box marginTop={1}>
-              <Text color={colors.gray}>
-                type a prompt to begin · / for commands · @ for files · @@ for
-                sessions
-              </Text>
-            </Box>
-          </Box>
-        ) : items.length > 0 ? (
-          <Box flexDirection="column">
-            <SectionDivider
-              label={
-                transcriptScrollSummary
-                  ? `TRANSCRIPT ${transcriptScrollSummary}`
-                  : "TRANSCRIPT"
-              }
-              color="cyan"
-              width={contentWidth}
-            />
-            <Box
-              flexDirection="column"
-              height={transcriptViewport.viewportRows}
-              overflow="hidden"
-            >
-              {transcriptViewport.entries.map(
-                ({ item, index, continuation, showDivider, collapsible }) => (
-                  <Box key={item.id} flexDirection="column" marginBottom={1}>
-                    {showDivider ? <ThinDivider width={contentWidth} /> : null}
-                    <TranscriptLine
-                      item={item}
-                      width={contentWidth}
-                      continuation={continuation}
-                      collapsible={collapsible}
-                    />
-                    {item.kind === "tool" &&
-                    !item.collapsed &&
-                    item.toolArgs ? (
-                      <Box flexDirection="column" marginLeft={2}>
-                        {Object.entries(item.toolArgs).map(([key, value]) => (
-                          <Text key={key} color={colors.gray}>
-                            ↳ {formatToolArgLine(key, value)}
-                          </Text>
-                        ))}
-                      </Box>
-                    ) : null}
-                    {item.kind === "tool" &&
-                    !item.collapsed &&
-                    item.toolDetail ? (
-                      <Box flexDirection="column" marginLeft={2}>
-                        <Text color={colors.gray}>↳ {item.toolDetail}</Text>
-                      </Box>
-                    ) : null}
-                    {item.plan ? (
-                      <>
-                        <Text color={colors.gray}>
-                          {formatPlanMetadataLine(item.plan)}
-                        </Text>
-                        {item.plan.routing.reason ? (
-                          <Text color={colors.gray}>
-                            reason:{" "}
-                            {truncate(
-                              cleanInline(item.plan.routing.reason),
-                              140,
-                            )}
-                          </Text>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {item.plan?.todos.length ? (
-                      <Box flexDirection="column" marginLeft={2}>
-                        {item.plan.todos.map((todo) => (
-                          <Text
-                            key={todo.id}
-                            color={tone(
-                              tuiTheme,
-                              todo.status === "completed"
-                                ? "green"
-                                : todo.status === "failed" ||
-                                    todo.status === "blocked"
-                                  ? "red"
-                                  : todo.status === "running"
-                                    ? "yellow"
-                                    : "gray",
-                            )}
-                          >
-                            {todoGlyph(todo.status)} {todo.role} · {todo.title}
-                          </Text>
-                        ))}
-                      </Box>
-                    ) : null}
-                    {item.editPreview ? (
-                      <EditPreviewView preview={item.editPreview} />
-                    ) : null}
-                  </Box>
-                ),
-              )}
-            </Box>
-          </Box>
-        ) : null}
+        <TranscriptSurface
+          transcriptStore={transcriptStore}
+          transcriptScrollStore={transcriptScrollStore}
+          toastStore={toastStore}
+          queueLengthStore={queueLengthStore}
+          draftMetricsStore={draftMetricsStore}
+          viewportState={transcriptViewportState}
+          contentWidth={contentWidth}
+          terminalRows={terminalRows}
+          brainPanel={brainPanel}
+          intentPanel={intentPanel}
+          sessionPanel={sessionPanel}
+          hookPanel={hookPanel}
+          mcpPanel={mcpPanel}
+          overlay={overlay}
+          commandMatchRows={Math.max(1, commandMatches.length)}
+          fileMatchRows={Math.max(1, fileMatches.length)}
+          sessionMatchRows={sessionMatchRows}
+          decisionPanel={decisionPanel}
+          runtimeErrorPanel={runtimeErrorPanel}
+          running={running}
+        />
 
         {brainPanel ? (
           <Box
@@ -3953,86 +3943,556 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           </Box>
         ) : null}
 
-        <SectionDivider
-          label={running ? "RUNNING" : "INPUT"}
-          color={running ? "yellow" : "green"}
-          width={contentWidth}
+        <InputSurface
+          inputStore={inputStore}
+          draftMetricsStore={draftMetricsStore}
+          footerRowsStore={footerRowsStore}
+          runStatusStore={runStatusStore}
+          running={running}
+          inputWidth={inputWidth}
+          contentWidth={contentWidth}
         />
-        <Box
-          borderStyle="single"
-          borderColor={tone(tuiTheme, running ? "yellow" : "green")}
-          paddingX={1}
-          flexDirection="column"
-          width={contentWidth}
-          overflow="hidden"
-        >
-          {running ? (
-            <RuntimeStatusLine
-              status={
-                runStatus ?? {
-                  startedAt: Date.now(),
-                  label: "Thinking…",
-                  tokens: runUsage.current,
-                  frame: 0,
-                }
-              }
-            />
-          ) : null}
-          {draftWindow.hiddenAbove > 0 ? (
-            <Text color={colors.gray}>
-              ↑ {draftWindow.hiddenAbove} more line
-              {draftWindow.hiddenAbove === 1 ? "" : "s"}
-            </Text>
-          ) : null}
-          {draftWindow.lines.map((line, index) => (
-            <Text
-              key={index}
-              color={tone(tuiTheme, running ? "yellow" : "green")}
-              wrap="truncate-end"
-            >
-              {line || " "}
-            </Text>
-          ))}
-          {draftWindow.hiddenBelow > 0 ? (
-            <Text color={colors.gray}>
-              ↓ {draftWindow.hiddenBelow} more line
-              {draftWindow.hiddenBelow === 1 ? "" : "s"}
-            </Text>
-          ) : null}
-        </Box>
-        <Box
-          width={contentWidth}
-          flexDirection="row"
-          justifyContent="space-between"
-          alignItems="flex-end"
-        >
-          <Box flexDirection="column" width={footerTextWidth}>
-            <Text color={colors.gray} wrap="truncate-end">
-              {helpText}
-            </Text>
-            {queueRef.current.length > 0 ? (
-              <Text color={colors.yellow} wrap="truncate-end">
-                {queueRef.current.length} task
-                {queueRef.current.length === 1 ? "" : "s"} queued · Ctrl+Y edits
-                the most recent
-              </Text>
-            ) : null}
-            {toast ? <ToastView toast={toast} /> : null}
-          </Box>
-          <BrainPet
-            thinking={running}
-            status={petState.status}
-            lines={petState.lines}
-            width={petPanelWidth}
-            animate={TUI_ANIMATIONS_ENABLED}
-            activeColor={colors.magenta}
-            activeStatusColor={colors.yellow}
-            idleColor={colors.gray}
-          />
-        </Box>
+        <FooterSurface
+          toastStore={toastStore}
+          queueLengthStore={queueLengthStore}
+          footerRowsStore={footerRowsStore}
+          petSnapshotStore={petSnapshotStore}
+          running={running}
+          contentWidth={contentWidth}
+          footerTextWidth={footerTextWidth}
+          petPanelWidth={petPanelWidth}
+          helpText={helpText}
+        />
       </Box>
     </TuiThemeContext.Provider>
   );
+}
+
+const TranscriptSurface = React.memo(function TranscriptSurface({
+  transcriptStore,
+  transcriptScrollStore,
+  toastStore,
+  queueLengthStore,
+  draftMetricsStore,
+  viewportState,
+  contentWidth,
+  terminalRows,
+  brainPanel,
+  intentPanel,
+  sessionPanel,
+  hookPanel,
+  mcpPanel,
+  overlay,
+  commandMatchRows,
+  fileMatchRows,
+  sessionMatchRows,
+  decisionPanel,
+  runtimeErrorPanel,
+  running,
+}: {
+  transcriptStore: TuiStore<TranscriptItem[]>;
+  transcriptScrollStore: TuiStore<number | null>;
+  toastStore: TuiStore<ToastState | null>;
+  queueLengthStore: TuiStore<number>;
+  draftMetricsStore: TuiStore<DraftMetrics>;
+  viewportState: React.MutableRefObject<{
+    totalRows: number;
+    viewportRows: number;
+    scrollTop: number;
+    maxScrollTop: number;
+    scrollAnchors: number[];
+  }>;
+  contentWidth: number;
+  terminalRows: number;
+  brainPanel: BrainPanelState | null;
+  intentPanel: IntentPanelState | null;
+  sessionPanel: SessionPanelState | null;
+  hookPanel: HookPanelState | null;
+  mcpPanel: McpPanelState | null;
+  overlay: Overlay;
+  commandMatchRows: number;
+  fileMatchRows: number;
+  sessionMatchRows: number;
+  decisionPanel: DecisionPanelState | null;
+  runtimeErrorPanel: RuntimeErrorPanelState | null;
+  running: boolean;
+}) {
+  const theme = useTuiTheme();
+  const colors = theme.colors;
+  const items = useTuiStoreSnapshot(transcriptStore);
+  const transcriptScrollTop = useTuiStoreSnapshot(transcriptScrollStore);
+  const toast = useTuiStoreSnapshot(toastStore);
+  const queueLength = useTuiStoreSnapshot(queueLengthStore);
+  const draftMetrics = useTuiStoreSnapshot(draftMetricsStore);
+  const fixedRows = estimateFixedFrameRows({
+    brainPanel,
+    intentPanel,
+    sessionPanel,
+    hookPanel,
+    mcpPanel,
+    overlay,
+    commandMatchRows,
+    fileMatchRows,
+    sessionMatchRows,
+    decisionPanel,
+    runtimeErrorPanel,
+    draftMetrics,
+    running,
+  });
+  const showEmptyIntro = items.length === 0 && draftMetrics.empty;
+  const transcriptChromeRows =
+    items.length > 0 ? 1 : showEmptyIntro ? BRAIN_LOGO.length + 4 : 0;
+  const nonTranscriptRows =
+    fixedRows +
+    transcriptChromeRows +
+    estimateFooterRows(queueLength, toast);
+  const transcriptLayout = useMemo(
+    () => layoutTranscriptItems(items, contentWidth),
+    [items, contentWidth],
+  );
+  const availableTranscriptRows = Math.max(
+    1,
+    terminalRows - nonTranscriptRows - INK_RENDER_SAFETY_ROWS,
+  );
+  const transcriptViewportRows =
+    items.length > 0
+      ? Math.min(
+          availableTranscriptRows,
+          Math.max(1, transcriptLayout.totalRows),
+        )
+      : 0;
+  const transcriptViewport = useMemo(
+    () =>
+      viewportTranscriptLayout(
+        transcriptLayout,
+        transcriptViewportRows,
+        transcriptScrollTop,
+      ),
+    [transcriptLayout, transcriptScrollTop, transcriptViewportRows],
+  );
+  const transcriptAnchors = useMemo(
+    () =>
+      transcriptScrollAnchors(
+        transcriptLayout,
+        transcriptViewport.maxScrollTop,
+      ),
+    [transcriptLayout, transcriptViewport.maxScrollTop],
+  );
+  viewportState.current = {
+    totalRows: transcriptLayout.totalRows,
+    viewportRows: transcriptViewport.viewportRows,
+    scrollTop: transcriptViewport.scrollTop,
+    maxScrollTop: transcriptViewport.maxScrollTop,
+    scrollAnchors: transcriptAnchors,
+  };
+  const transcriptScrollSummary =
+    transcriptScrollTop !== null && transcriptViewport.maxScrollTop > 0
+      ? `${Math.round(transcriptViewport.scrollTop + transcriptViewport.viewportRows)}/${transcriptLayout.totalRows} rows`
+      : "";
+
+  if (showEmptyIntro) {
+    return (
+      <Box flexDirection="column" alignItems="center" marginY={1}>
+        {BRAIN_LOGO.map((line, index) => (
+          <Text key={`logo-${index}`} color={colors.cyan} bold>
+            {line}
+          </Text>
+        ))}
+        <Box marginTop={1}>
+          <Text color={colors.gray}>
+            type a prompt to begin · / for commands · @ for files · @@ for
+            sessions
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <Box flexDirection="column">
+      <SectionDivider
+        label={
+          transcriptScrollSummary
+            ? `TRANSCRIPT ${transcriptScrollSummary}`
+            : "TRANSCRIPT"
+        }
+        color="cyan"
+        width={contentWidth}
+      />
+      <Box
+        flexDirection="column"
+        height={transcriptViewport.viewportRows}
+        overflow="hidden"
+      >
+        {transcriptViewport.entries.map((entry) => (
+          <TranscriptEntryView
+            key={entry.item.id}
+            entry={entry}
+            width={contentWidth}
+          />
+        ))}
+      </Box>
+    </Box>
+  );
+});
+
+const TranscriptEntryView = React.memo(function TranscriptEntryView({
+  entry,
+  width,
+}: {
+  entry: TranscriptRenderEntry;
+  width: number;
+}) {
+  const theme = useTuiTheme();
+  const colors = theme.colors;
+  const { item, continuation, showDivider, collapsible } = entry;
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      {showDivider ? <ThinDivider width={width} /> : null}
+      <TranscriptLine
+        item={item}
+        width={width}
+        continuation={continuation}
+        collapsible={collapsible}
+      />
+      {item.kind === "tool" && !item.collapsed && item.toolArgs ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {Object.entries(item.toolArgs).map(([key, value]) => (
+            <Text key={key} color={colors.gray}>
+              ↳ {formatToolArgLine(key, value)}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {item.kind === "tool" && !item.collapsed && item.toolDetail ? (
+        <Box flexDirection="column" marginLeft={2}>
+          <Text color={colors.gray}>↳ {item.toolDetail}</Text>
+        </Box>
+      ) : null}
+      {item.plan ? (
+        <>
+          <Text color={colors.gray}>{formatPlanMetadataLine(item.plan)}</Text>
+          {item.plan.routing.reason ? (
+            <Text color={colors.gray}>
+              reason: {truncate(cleanInline(item.plan.routing.reason), 140)}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
+      {item.plan?.todos.length ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {item.plan.todos.map((todo) => (
+            <Text
+              key={todo.id}
+              color={tone(
+                theme,
+                todo.status === "completed"
+                  ? "green"
+                  : todo.status === "failed" || todo.status === "blocked"
+                    ? "red"
+                    : todo.status === "running"
+                      ? "yellow"
+                      : "gray",
+              )}
+            >
+              {todoGlyph(todo.status)} {todo.role} · {todo.title}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {item.editPreview ? <EditPreviewView preview={item.editPreview} /> : null}
+    </Box>
+  );
+});
+
+const InputSurface = React.memo(function InputSurface({
+  inputStore,
+  draftMetricsStore,
+  footerRowsStore,
+  runStatusStore,
+  running,
+  inputWidth,
+  contentWidth,
+}: {
+  inputStore: TuiStore<InputState>;
+  draftMetricsStore: TuiStore<DraftMetrics>;
+  footerRowsStore: TuiStore<number>;
+  runStatusStore: TuiStore<RunStatusState | null>;
+  running: boolean;
+  inputWidth: number;
+  contentWidth: number;
+}) {
+  const { stdout } = useStdout();
+  const theme = useTuiTheme();
+  const colors = theme.colors;
+  const draftMetrics = useTuiStoreSnapshot(draftMetricsStore);
+  const input = useMemo(
+    () => inputStore.getSnapshot(),
+    [draftMetrics, inputStore],
+  );
+  const runStatus = useTuiStoreSnapshot(runStatusStore);
+  const draftWindow = useMemo(
+    () =>
+      clipDraftToWindow(
+        input.draft,
+        input.cursor,
+        inputWidth,
+        INPUT_MAX_LINES,
+      ),
+    [input, inputWidth],
+  );
+
+  useEffect(() => {
+    const syncInput = (mode: "paint" | "measure") => {
+      const current = inputStore.getSnapshot();
+      const currentWindow = clipDraftToWindow(
+        current.draft,
+        current.cursor,
+        inputWidth,
+        INPUT_MAX_LINES,
+      );
+      const nextMetrics = draftMetricsFromWindow(
+        current.draft,
+        currentWindow,
+      );
+      const previousMetrics = draftMetricsStore.getSnapshot();
+      if (!sameDraftMetrics(previousMetrics, nextMetrics)) {
+        draftMetricsStore.setSnapshot(nextMetrics);
+        return;
+      }
+      if (mode === "paint" && stdout) {
+        paintInputSurface({
+          stdout,
+          theme,
+          running,
+          contentWidth,
+          footerRows: footerRowsStore.getSnapshot(),
+          draftWindow: currentWindow,
+        });
+      }
+    };
+    syncInput("measure");
+    return inputStore.subscribe(() => syncInput("paint"));
+  }, [
+    contentWidth,
+    draftMetricsStore,
+    footerRowsStore,
+    inputStore,
+    inputWidth,
+    running,
+    stdout,
+    theme,
+  ]);
+
+  return (
+    <>
+      <SectionDivider
+        label={running ? "RUNNING" : "INPUT"}
+        color={running ? "yellow" : "green"}
+        width={contentWidth}
+      />
+      <Box
+        borderStyle="single"
+        borderColor={tone(theme, running ? "yellow" : "green")}
+        paddingX={1}
+        flexDirection="column"
+        width={contentWidth}
+        overflow="hidden"
+      >
+        {running ? (
+          <RuntimeStatusLine
+            status={
+              runStatus ?? {
+                startedAt: Date.now(),
+                label: "Thinking…",
+                tokens: emptyTokenUsage(),
+                frame: 0,
+              }
+            }
+          />
+        ) : null}
+        {draftWindow.hiddenAbove > 0 ? (
+          <Text color={colors.gray}>
+            ↑ {draftWindow.hiddenAbove} more line
+            {draftWindow.hiddenAbove === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+        {draftWindow.lines.map((line, index) => (
+          <Text
+            key={index}
+            color={tone(theme, running ? "yellow" : "green")}
+            wrap="truncate-end"
+          >
+            {line || " "}
+          </Text>
+        ))}
+        {draftWindow.hiddenBelow > 0 ? (
+          <Text color={colors.gray}>
+            ↓ {draftWindow.hiddenBelow} more line
+            {draftWindow.hiddenBelow === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+      </Box>
+    </>
+  );
+});
+
+const FooterSurface = React.memo(function FooterSurface({
+  toastStore,
+  queueLengthStore,
+  footerRowsStore,
+  petSnapshotStore,
+  running,
+  contentWidth,
+  footerTextWidth,
+  petPanelWidth,
+  helpText,
+}: {
+  toastStore: TuiStore<ToastState | null>;
+  queueLengthStore: TuiStore<number>;
+  footerRowsStore: TuiStore<number>;
+  petSnapshotStore: TuiStore<PetWatcherSnapshotItem[]>;
+  running: boolean;
+  contentWidth: number;
+  footerTextWidth: number;
+  petPanelWidth: number;
+  helpText: string;
+}) {
+  const theme = useTuiTheme();
+  const colors = theme.colors;
+  const toast = useTuiStoreSnapshot(toastStore);
+  const queueLength = useTuiStoreSnapshot(queueLengthStore);
+  const petSnapshotItems = useTuiStoreSnapshot(petSnapshotStore);
+  useEffect(() => {
+    footerRowsStore.setSnapshot(estimateFooterRows(queueLength, toast));
+  }, [footerRowsStore, queueLength, toast]);
+  const petState = usePetWatcher({
+    thinking: running,
+    recentItems: petSnapshotItems,
+    queueLength,
+  });
+
+  return (
+    <Box
+      width={contentWidth}
+      flexDirection="row"
+      justifyContent="space-between"
+      alignItems="flex-end"
+    >
+      <Box flexDirection="column" width={footerTextWidth}>
+        <Text color={colors.gray} wrap="truncate-end">
+          {helpText}
+        </Text>
+        {queueLength > 0 ? (
+          <Text color={colors.yellow} wrap="truncate-end">
+            {queueLength} task{queueLength === 1 ? "" : "s"} queued · Ctrl+Y
+            edits the most recent
+          </Text>
+        ) : null}
+        {toast ? <ToastView toast={toast} /> : null}
+      </Box>
+      <BrainPet
+        thinking={running}
+        status={petState.status}
+        lines={petState.lines}
+        width={petPanelWidth}
+        animate={TUI_ANIMATIONS_ENABLED}
+        activeColor={colors.magenta}
+        activeStatusColor={colors.yellow}
+        idleColor={colors.gray}
+      />
+    </Box>
+  );
+});
+
+function paintInputSurface({
+  stdout,
+  theme,
+  running,
+  contentWidth,
+  footerRows,
+  draftWindow,
+}: {
+  stdout: { write: (chunk: string) => unknown };
+  theme: TuiTheme;
+  running: boolean;
+  contentWidth: number;
+  footerRows: number;
+  draftWindow: DraftWindow;
+}) {
+  const color = tone(theme, running ? "yellow" : "green");
+  const rows = renderInputSurfaceRows({
+    color,
+    running,
+    contentWidth,
+    draftWindow,
+  });
+  const moveUp = Math.max(0, footerRows + rows.length);
+  const output = [
+    "\x1b7",
+    moveUp > 0 ? `\x1b[${moveUp}A` : "",
+    ...rows.map((row, index) =>
+      index === rows.length - 1 ? `\r\x1b[2K${row}` : `\r\x1b[2K${row}\n`,
+    ),
+    "\x1b8",
+  ].join("");
+  stdout.write(output);
+}
+
+function renderInputSurfaceRows({
+  color,
+  running,
+  contentWidth,
+  draftWindow,
+}: {
+  color: string;
+  running: boolean;
+  contentWidth: number;
+  draftWindow: DraftWindow;
+}): string[] {
+  const inputWidth = Math.max(1, contentWidth - INPUT_BOX_HORIZONTAL_CHROME);
+  const label = running ? "RUNNING" : "INPUT";
+  const divider = `${ansiColor(color)}[${label}] ${"─".repeat(Math.max(1, contentWidth - label.length - 4))}${ANSI_RESET}`;
+  const top = `${ansiColor(color)}┌${"─".repeat(Math.max(1, contentWidth - 2))}┐${ANSI_RESET}`;
+  const bottom = `${ansiColor(color)}└${"─".repeat(Math.max(1, contentWidth - 2))}┘${ANSI_RESET}`;
+  const rows = [` ${divider}`, ` ${top}`];
+  if (draftWindow.hiddenAbove > 0) {
+    const text = `↑ ${draftWindow.hiddenAbove} more line${draftWindow.hiddenAbove === 1 ? "" : "s"}`;
+    rows.push(
+      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${text}${padVisual(text, inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
+    );
+  }
+  for (const line of draftWindow.lines) {
+    rows.push(
+      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${line || " "}${padVisual(line || " ", inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
+    );
+  }
+  if (draftWindow.hiddenBelow > 0) {
+    const text = `↓ ${draftWindow.hiddenBelow} more line${draftWindow.hiddenBelow === 1 ? "" : "s"}`;
+    rows.push(
+      ` ${ansiColor(color)}│${ANSI_RESET} ${ansiColor(color)}${text}${padVisual(text, inputWidth)}${ANSI_RESET} ${ansiColor(color)}│${ANSI_RESET}`,
+    );
+  }
+  rows.push(` ${bottom}`);
+  return rows;
+}
+
+const ANSI_RESET = "\x1b[39m";
+
+function ansiColor(hex: string): string {
+  const match = hex.match(/^#?([0-9a-f]{6})$/i);
+  if (!match) return "";
+  const value = match[1]!;
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function padVisual(text: string, width: number): string {
+  return " ".repeat(Math.max(0, width - visualWidth(text)));
 }
 
 function filteredCommands(filter: string): CommandDefinition[] {
@@ -4203,6 +4663,45 @@ function sameTokenUsage(
   );
 }
 
+function draftMetricsFromWindow(
+  draft: string,
+  draftWindow: DraftWindow,
+): DraftMetrics {
+  return {
+    empty: draft.length === 0,
+    lineCount: draftWindow.lines.length,
+    hiddenAbove: draftWindow.hiddenAbove,
+    hiddenBelow: draftWindow.hiddenBelow,
+  };
+}
+
+function sameDraftMetrics(left: DraftMetrics, right: DraftMetrics): boolean {
+  return (
+    left.empty === right.empty &&
+    left.lineCount === right.lineCount &&
+    left.hiddenAbove === right.hiddenAbove &&
+    left.hiddenBelow === right.hiddenBelow
+  );
+}
+
+function samePetSnapshot(
+  left: ReadonlyArray<PetWatcherSnapshotItem>,
+  right: ReadonlyArray<PetWatcherSnapshotItem>,
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return (
+      !!other &&
+      item.kind === other.kind &&
+      item.text === other.text &&
+      item.toolName === other.toolName &&
+      item.toolStatus === other.toolStatus &&
+      item.workerStatus === other.workerStatus
+    );
+  });
+}
+
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
   if (item.kind === "tool") return true;
   return isTranscriptItemAutoCollapsed({
@@ -4340,9 +4839,7 @@ function nextTranscriptScrollTop(
   return orderedAnchors.filter((anchor) => anchor < current).at(-1) ?? 0;
 }
 
-function estimateNonTranscriptRows({
-  hasTranscript,
-  emptyLogoRows,
+function estimateFixedFrameRows({
   brainPanel,
   intentPanel,
   sessionPanel,
@@ -4354,13 +4851,9 @@ function estimateNonTranscriptRows({
   sessionMatchRows,
   decisionPanel,
   runtimeErrorPanel,
-  draftWindow,
+  draftMetrics,
   running,
-  queueLength,
-  toast,
 }: {
-  hasTranscript: boolean;
-  emptyLogoRows: number;
   brainPanel: BrainPanelState | null;
   intentPanel: IntentPanelState | null;
   sessionPanel: SessionPanelState | null;
@@ -4372,16 +4865,11 @@ function estimateNonTranscriptRows({
   sessionMatchRows: number;
   decisionPanel: DecisionPanelState | null;
   runtimeErrorPanel: RuntimeErrorPanelState | null;
-  draftWindow: DraftWindow;
+  draftMetrics: DraftMetrics;
   running: boolean;
-  queueLength: number;
-  toast: ToastState | null;
 }): number {
   // Header border with two metadata rows plus the bottom margin.
   let rows = 5;
-
-  if (hasTranscript) rows += 1;
-  else rows += emptyLogoRows;
 
   if (brainPanel)
     rows += borderedPanelRows(
@@ -4421,14 +4909,19 @@ function estimateNonTranscriptRows({
   rows += 1;
   rows += 2;
   if (running) rows += 1;
-  if (draftWindow.hiddenAbove > 0) rows += 1;
-  rows += draftWindow.lines.length;
-  if (draftWindow.hiddenBelow > 0) rows += 1;
-
-  const footerLeftRows = 1 + (queueLength > 0 ? 1 : 0) + (toast ? 3 : 0);
-  rows += Math.max(3, footerLeftRows);
+  if (draftMetrics.hiddenAbove > 0) rows += 1;
+  rows += draftMetrics.lineCount;
+  if (draftMetrics.hiddenBelow > 0) rows += 1;
 
   return rows;
+}
+
+function estimateFooterRows(
+  queueLength: number,
+  toast: ToastState | null,
+): number {
+  const footerLeftRows = 1 + (queueLength > 0 ? 1 : 0) + (toast ? 3 : 0);
+  return Math.max(3, footerLeftRows);
 }
 
 function borderedPanelRows(contentRows: number): number {
@@ -4775,6 +5268,20 @@ function computeOverlay(
     }
   }
   return null;
+}
+
+function sameOverlay(left: Overlay, right: Overlay): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (left.kind !== right.kind) return false;
+  if (left.filter !== right.filter || left.selected !== right.selected)
+    return false;
+  if (left.kind === "command" && right.kind === "command") return true;
+  if (left.kind === "file" && right.kind === "file")
+    return left.anchor === right.anchor;
+  if (left.kind === "session" && right.kind === "session")
+    return left.anchor === right.anchor;
+  return false;
 }
 
 function lastReferenceTrigger(

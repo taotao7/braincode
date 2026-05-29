@@ -7,7 +7,7 @@ import { Type } from "typebox"
 import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
 import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, normalizeRouterDecision, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
-const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
+const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
 function createTestBrainDocument(modelId: string, fallbackModelIds: string[] = []) {
   const policy = { modelId, fallbackModelIds, thinkingLevel: "medium" }
@@ -1003,6 +1003,7 @@ test("planRuntimeFromConfig supports routeBrain previews and heuristic diagnosti
               frontend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               backend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               designer: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              imageMaker: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "off" },
               dba: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
               devops: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               security: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
@@ -1094,6 +1095,7 @@ test("planRuntimeFromConfig exposes isolated worker plans and mandatory review",
               frontend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               backend: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               designer: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
+              imageMaker: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "off" },
               dba: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },
               devops: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "medium" },
               security: { modelId: "anthropic/claude-sonnet-4-5-20250929", thinkingLevel: "high" },

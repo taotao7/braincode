@@ -259,6 +259,7 @@ type WorkerLifecycleEvent =
 
 Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后发 `worker_end`。CLI 用它们填充 BrainPet 进度片段，并驱动任务队列列表。BrainPet 只是只读 UI：可以基于可见上下文总结或吐槽，但不会影响路由或执行。
 
+- **渲染数据流** —— TUI 把 input draft/cursor、transcript/scroll、实时运行状态、toast/queue、BrainPet snapshot 拆成独立 store，并由不同 Ink surface 分别订阅。普通打字直接用 ANSI patch 输入框，不要求 Ink 重画整帧；只有输入高度变化等布局更新才走 Ink。高频 token flush 只更新 transcript surface，状态行和 BrainPet footer 维持自己的刷新节奏。
 - **实时运行状态** —— TUI 的 elapsed 时间由本地 1 秒计时器驱动，token 总量仍来自 provider 的 `AgentEvent` usage 数据；这样长时间没有流式事件时，用时显示也不会停住。
 - **Transcript 折叠** —— 带 `▸` / `▾` 标记的工具或 agent 行使用 `Ctrl+T` 统一展开/收起。鼠标捕获仅用于滚轮滚动；需要保留终端选择文本时可设 `BRAINCODE_TUI_MOUSE=false`。
 - **Intent graph 视图** —— `Ctrl+O` 或 `/intent` 会打开最新 `RuntimePlan` 的任务拆解和依赖路径，并显示路由来源、置信度、原因、worker 和 mode 预算。

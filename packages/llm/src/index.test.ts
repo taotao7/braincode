@@ -132,7 +132,9 @@ mock.module("@earendil-works/pi-ai/oauth", () => ({
 
 const {
   callPetCompletion,
+  generateImage,
   getBraincodeOAuthProvider,
+  isImageGenerationModel,
   listBuiltInModelCatalog,
   listBuiltInProviders,
   listOAuthProviderSummaries,
@@ -478,6 +480,91 @@ test("testModelConnection handles OpenAI-compatible vision and Kimi coding behav
   const testedKimiModel = completeSimpleCalls.at(-1)?.[0] as { baseUrl?: string; headers?: Record<string, string> }
   expect(testedKimiModel.baseUrl).toBe("https://api.kimi.com/coding")
   expect(testedKimiModel.headers).toEqual({ "User-Agent": "KimiCLI/1.5" })
+})
+
+test("image generation models use the OpenAI-compatible Images API shape", async () => {
+  const model: BraincodeModel = {
+    id: "minimax/image-model",
+    provider: "minimax",
+    modelId: "image-model",
+    name: "Minimax Image Model",
+    api: "openai-images",
+    baseUrl: "https://api.minimax.example",
+    contextWindow: 32000,
+    supportsTools: false,
+    supportsVision: false,
+    supportsImageGeneration: true,
+  }
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
+  const requests: Array<{ url: string; body: unknown }> = []
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ url: String(input), body: JSON.parse(String(init?.body)) })
+    return new Response(JSON.stringify({ data: [{ b64_json: pngBase64, revised_prompt: "ok" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }) as unknown as typeof fetch
+
+  expect(isImageGenerationModel(model)).toBe(true)
+  const generated = await generateImage(model, "key", { prompt: "Generate a role poster." })
+  expect(generated).toMatchObject({
+    provider: "minimax",
+    modelId: "minimax/image-model",
+    mimeType: "image/png",
+    revisedPrompt: "ok",
+  })
+  expect(generated.bytes).toBeGreaterThan(0)
+  expect(requests[0]).toEqual({
+    url: "https://api.minimax.example/v1/images/generations",
+    body: { model: "image-model", prompt: "Generate a role poster.", n: 1 },
+  })
+
+  await expect(testModelConnection(model, "key")).resolves.toMatchObject({
+    reachable: true,
+    generatedImage: { mimeType: "image/png" },
+  })
+  expect(requests[1]?.body).toEqual({
+    model: "image-model",
+    prompt: "A simple black square centered on a plain white background. No text, no watermark.",
+    n: 1,
+  })
+})
+
+test("image generation accepts URL image responses from compatible providers", async () => {
+  const model: BraincodeModel = {
+    id: "proxy/image",
+    provider: "proxy",
+    modelId: "image",
+    name: "Proxy Image",
+    api: "openai-images",
+    baseUrl: "https://proxy.example/v1/",
+    contextWindow: 32000,
+    supportsTools: false,
+  }
+  const requests: string[] = []
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    const url = String(input)
+    requests.push(url)
+    if (url.endsWith("/images/generations")) {
+      return new Response(JSON.stringify({ data: [{ url: "https://cdn.proxy.example/result.jpg" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+    })
+  }) as unknown as typeof fetch
+
+  const generated = await generateImage(model, "key", { prompt: "poster" })
+
+  expect(requests).toEqual([
+    "https://proxy.example/v1/images/generations",
+    "https://cdn.proxy.example/result.jpg",
+  ])
+  expect(generated.mimeType).toBe("image/jpeg")
+  expect(generated.base64).toBe("/9j/2Q==")
 })
 
 test("callPetCompletion handles OpenAI-compatible success and errors", async () => {

@@ -8,13 +8,14 @@ export type BraincodeModel = {
   provider: string
   modelId: string
   name: string
-  api?: Api
+  api?: Api | "openai-images"
   baseUrl?: string
   headers?: Record<string, string>
   builtIn?: boolean
   contextWindow: number
   supportsTools: boolean
   supportsVision?: boolean
+  supportsImageGeneration?: boolean
   defaultThinkingLevel?: ModelThinkingLevel
 }
 
@@ -31,6 +32,10 @@ export type ModelConnectionTestResult = {
   message: string
   failureKind?: ModelConnectionFailureKind
   detail?: string
+  generatedImage?: {
+    bytes: number
+    mimeType: string
+  }
 }
 
 export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "unsupported-client" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
@@ -49,6 +54,28 @@ export type OAuthProviderSummary = {
   id: string
   name: string
   usesCallbackServer: boolean
+}
+
+export type ImageGenerationOptions = {
+  prompt?: string
+  size?: string
+  quality?: "low" | "medium" | "high" | "auto"
+  outputFormat?: "png" | "jpeg" | "webp"
+  timeoutMs?: number
+}
+
+export type ImageGenerationResult = {
+  modelId: string
+  provider: string
+  base64: string
+  bytes: number
+  mimeType: string
+  url?: string
+  revisedPrompt?: string
+}
+
+export function isImageGenerationModel(model: BraincodeModel): boolean {
+  return model.supportsImageGeneration === true || model.api === "openai-images"
 }
 
 export function listBuiltInProviders(): string[] {
@@ -178,6 +205,10 @@ export async function testModelConnection(model: BraincodeModel, apiKey?: string
     return connectionFailure(model, `Missing API key for provider '${model.provider}'`)
   }
 
+  if (isImageGenerationModel(model)) {
+    return testImageGenerationConnection(model, apiKey)
+  }
+
   const reasoning = thinkingLevel && thinkingLevel !== "off" ? (thinkingLevel as Exclude<ModelThinkingLevel, "off">) : undefined
   const maxTokens = reasoning ? 128 : 16
 
@@ -220,6 +251,111 @@ function connectionSuccess(model: BraincodeModel, thinkingLevel?: ModelThinkingL
     reachable: true,
     message: thinkingLevel ? `Model generated a test response successfully (thinking=${thinkingLevel}).` : "Model generated a test response successfully.",
   }
+}
+
+function imageConnectionSuccess(model: BraincodeModel, result: ImageGenerationResult): ModelConnectionTestResult {
+  return {
+    modelId: model.id,
+    provider: model.provider,
+    reachable: true,
+    message: `Image generated successfully (${formatBytes(result.bytes)} ${result.mimeType}).`,
+    generatedImage: {
+      bytes: result.bytes,
+      mimeType: result.mimeType,
+    },
+  }
+}
+
+async function testImageGenerationConnection(model: BraincodeModel, apiKey: string): Promise<ModelConnectionTestResult> {
+  try {
+    const result = await generateImage(model, apiKey, {
+      prompt: "A simple black square centered on a plain white background. No text, no watermark.",
+      timeoutMs: 120000,
+    })
+    return imageConnectionSuccess(model, result)
+  } catch (error) {
+    return connectionFailure(model, error)
+  }
+}
+
+export async function generateImage(model: BraincodeModel, apiKey: string, options: ImageGenerationOptions = {}): Promise<ImageGenerationResult> {
+  if (!apiKey) throw new Error(`Missing API key for provider '${model.provider}'`)
+  if (!isImageGenerationModel(model)) throw new Error(`Model ${model.id} is not configured for image generation`)
+
+  const baseUrl = normalizeImageGenerationBaseUrl(model.baseUrl)
+  const controller = new AbortController()
+  const timeoutHandle = setTimeout(() => controller.abort(), options.timeoutMs ?? 120000)
+  const prompt = options.prompt?.trim() || "A simple abstract technical poster image. No text, no watermark."
+  const requestBody: Record<string, unknown> = {
+    model: model.modelId,
+    prompt,
+    n: 1,
+  }
+  if (options.size) requestBody.size = options.size
+  if (options.quality) requestBody.quality = options.quality
+  if (options.outputFormat) requestBody.output_format = options.outputFormat
+  try {
+    const response = await fetch(`${baseUrl}/images/generations`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "user-agent": "BrainCode",
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+    const body = await response.json().catch(() => undefined) as {
+      data?: Array<{ b64_json?: unknown; url?: unknown; revised_prompt?: unknown }>
+      error?: { message?: unknown }
+    } | undefined
+    if (!response.ok) {
+      const message = typeof body?.error?.message === "string" ? body.error.message : `HTTP ${response.status}`
+      throw new Error(`Image generation failed: ${message}`)
+    }
+    const first = body?.data?.[0]
+    const sourceUrl = typeof first?.url === "string" ? first.url : undefined
+    const base64 = typeof first?.b64_json === "string" && first.b64_json.trim()
+      ? first.b64_json
+      : sourceUrl
+        ? await fetchImageUrlAsBase64(sourceUrl)
+        : ""
+    if (!base64.trim()) {
+      throw new Error("Image generation returned no base64 image data or fetchable image URL")
+    }
+    const bytes = Buffer.from(base64, "base64").byteLength
+    if (bytes <= 0) {
+      throw new Error("Image generation returned invalid base64 image data")
+    }
+    return {
+      modelId: model.id,
+      provider: model.provider,
+      base64,
+      bytes,
+      mimeType: inferImageMimeType(base64, sourceUrl, options.outputFormat),
+      url: sourceUrl,
+      revisedPrompt: typeof first?.revised_prompt === "string" ? first.revised_prompt : undefined,
+    }
+  } finally {
+    clearTimeout(timeoutHandle)
+  }
+}
+
+async function fetchImageUrlAsBase64(url: string): Promise<string> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Image generation returned a URL, but image download failed: HTTP ${response.status}`)
+  const bytes = Buffer.from(await response.arrayBuffer())
+  return bytes.toString("base64")
+}
+
+function inferImageMimeType(base64: string, url: string | undefined, outputFormat: ImageGenerationOptions["outputFormat"] | undefined): string {
+  if (outputFormat) return `image/${outputFormat === "jpeg" ? "jpeg" : outputFormat}`
+  if (base64.startsWith("/9j/")) return "image/jpeg"
+  if (base64.startsWith("UklGR")) return "image/webp"
+  const extension = url?.split("?")[0]?.split(".").pop()?.toLowerCase()
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg"
+  if (extension === "webp") return "image/webp"
+  return "image/png"
 }
 
 function connectionFailure(model: BraincodeModel, error: unknown): ModelConnectionTestResult {
@@ -279,6 +415,17 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`
 }
 
+function normalizeImageGenerationBaseUrl(baseUrl: string | undefined): string {
+  const trimmed = (baseUrl ?? "https://api.openai.com/v1").trim().replace(/\/+$/, "")
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
+}
+
 const OPENAI_COMPATIBLE_APIS = new Set<string>(["openai-responses", "openai-completions", "openai-codex-responses", "azure-openai-responses"])
 
 function normalizeBaseUrlForApi(baseUrl: string | undefined, api: string): string | undefined {
@@ -306,6 +453,9 @@ function mergeModelHeaders(...headers: Array<Record<string, string> | undefined>
 }
 
 function toOpenAICompatiblePiModel(model: BraincodeModel): Model<Api> {
+  if (isImageGenerationModel(model)) {
+    throw new Error(`Model ${model.id} uses the Image API and cannot be resolved as a text agent model`)
+  }
   const api = (normalizeModelApi(model.api) ?? defaultApiForProvider(model.provider)) as Api
   const input: ("text" | "image")[] = model.supportsVision === true ? ["text", "image"] : ["text"]
   const headers = mergeModelHeaders(providerStaticHeaders(model.provider), model.headers)

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
-import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
+import { mkdir } from "node:fs/promises"
+import { join, resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path"
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
@@ -9,10 +10,10 @@ export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTask
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
 import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, normalizeTokenUsage, readAuth, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
+import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, getBraincodeHome, normalizeTokenUsage, readAuth, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
-import type { BraincodeModel } from "@braincode/llm"
-import { readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
+import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
+import { generateImage, isImageGenerationModel, readProviderRuntimeApiKey, resolveBuiltInPiModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
 import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode } from "@braincode/tools"
@@ -237,6 +238,7 @@ export type RuntimeModelSelection = {
 
 export type RuntimeModelRequirements = {
   requiresVision?: boolean
+  requiresImageGeneration?: boolean
 }
 
 type ToolEvidenceCacheEntry = {
@@ -617,6 +619,12 @@ function runtimeModelSupportsVision(selection: RuntimeModelSelection): boolean {
 }
 
 function runtimeModelRequirementError(selection: RuntimeModelSelection, requirements?: RuntimeModelRequirements): string | undefined {
+  if (requirements?.requiresImageGeneration) {
+    return isImageGenerationModel(selection.configured) ? undefined : "image generation requires an OpenAI Images API model"
+  }
+  if (isImageGenerationModel(selection.configured)) {
+    return "image generation models cannot run text agent turns"
+  }
   if (requirements?.requiresVision && !runtimeModelSupportsVision(selection)) {
     return "image input requires a vision-capable model"
   }
@@ -625,6 +633,11 @@ function runtimeModelRequirementError(selection: RuntimeModelSelection, requirem
 
 function runtimeModelRequirementsForImages(images: ImageContent[]): RuntimeModelRequirements | undefined {
   return images.length > 0 ? { requiresVision: true } : undefined
+}
+
+function runtimeModelRequirementsForRole(role: AgentRole | RoutedAgentRole, images: ImageContent[]): RuntimeModelRequirements | undefined {
+  if (role === "imageMaker") return { requiresImageGeneration: true }
+  return runtimeModelRequirementsForImages(images)
 }
 
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeModelSelection {
@@ -640,7 +653,16 @@ export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]
     }
 
     try {
-      const { piModel } = resolveBuiltInPiModel(configured)
+      const piModel = isImageGenerationModel(configured)
+        ? ({
+            id: configured.modelId,
+            name: configured.name,
+            provider: configured.provider,
+            api: configured.api ?? "openai-images",
+            contextWindow: configured.contextWindow,
+            maxTokens: 0,
+          } as unknown as Model<any>)
+        : resolveBuiltInPiModel(configured).piModel
       const selection = {
         requested: policy,
         configured,
@@ -671,7 +693,8 @@ function toPiModelSummary(selection: RuntimeModelSelection): RuntimePiModelSumma
 
 function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeWorkerPlan {
   const policy = selectModelPolicy(brain, worker.role)
-  const selection = selectRuntimeModel(policy, models, requirements)
+  const workerRequirements = worker.role === "imageMaker" ? { requiresImageGeneration: true } : requirements
+  const selection = selectRuntimeModel(policy, models, workerRequirements)
   return {
     ...worker,
     contextId: crypto.randomUUID(),
@@ -1674,7 +1697,7 @@ function isRoutedAgentRole(value: unknown): value is RoutedAgentRole {
 }
 
 function isAgentRole(value: unknown): value is AgentRole {
-  return value === "frontend" || value === "backend" || value === "designer" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
+  return value === "frontend" || value === "backend" || value === "designer" || value === "imageMaker" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
 export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">): RouterPlanDecision {
@@ -1843,6 +1866,7 @@ ${formatRoutedAgentRoleCatalog()}
 Routing principles (read these before deciding):
 - There is no generic "coding" role. Pick the matching specialist for code work: frontend for UI/CSS/components, backend for APIs/services, dba for schema/SQL, devops for CI/infra, security for auth/vuln, qa for tests, designer for UX without code.
 - Use librarian when the task needs codebase mapping, symbol lookup, or fact finding (it absorbs what would have been a "research" role).
+- Use imageMaker when the user asks to generate, edit, or produce raster image assets, role portraits, illustrations, marketing visuals, or other image files.
 - Use oracle only for hard architecture/tradeoff/debugging reasoning, high uncertainty, or cross-domain technical judgment.
 - Use review for defect inspection of existing code; use qa for forward-looking test strategy. They are not interchangeable.
 - Use rush for short conversational replies or tiny chores that need no tools (it absorbs what would have been a "fastReply" role).
@@ -1935,7 +1959,7 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     : baseAgentPlan)
   const role = agentPlan.primaryRole
   const policy = selectModelPolicy(brain, role)
-  const selection = selectRuntimeModel(policy, models as BraincodeModel[], requirements)
+  const selection = selectRuntimeModel(policy, models as BraincodeModel[], runtimeModelRequirementsForRole(role, images))
   const runtimeWorkerInputs = [...agentPlan.workers]
   if (agentPlan.requiresReview && role !== "review" && !runtimeWorkerInputs.some((worker) => worker.role === "review")) {
     runtimeWorkerInputs.push({
@@ -2558,6 +2582,71 @@ function failedWorkerResult(worker: RuntimeWorkerPlan, handoff: HandoffPacket, e
   }
 }
 
+function imageExtension(mimeType: string): string {
+  if (/jpe?g/i.test(mimeType)) return "jpg"
+  if (/webp/i.test(mimeType)) return "webp"
+  return "png"
+}
+
+async function saveGeneratedImageArtifact(sessionId: string, result: ImageGenerationResult, home?: string): Promise<string> {
+  const root = join(home ?? getBraincodeHome(), "generated-images", sessionId)
+  await mkdir(root, { recursive: true })
+  const path = join(root, `image-${Date.now()}.${imageExtension(result.mimeType)}`)
+  await Bun.write(path, Buffer.from(result.base64, "base64"))
+  return path
+}
+
+function buildImageMakerPrompt(input: { request: string; workerResults?: ExecutedWorkerResult[]; projectSupport?: ProjectSupport }): string {
+  const sections = [
+    "Create a raster image asset for this Braincode request.",
+    "Use the user's requested subject, style, and constraints. Avoid adding visible text unless the user explicitly asked for text in the image.",
+    "",
+    "User request:",
+    input.request,
+  ]
+  if (input.workerResults && input.workerResults.length > 0) {
+    sections.push("", "Brain-supplied worker guidance:", formatWorkerResults(input.workerResults))
+  }
+  if (input.projectSupport?.agents) {
+    sections.push("", "Project visual constraints from AGENTS.md may apply; honor explicit brand or safety constraints when they are relevant.")
+  }
+  return sections.join("\n")
+}
+
+function imageMakerWorkerResult(
+  worker: RuntimeWorkerPlan,
+  handoff: HandoffPacket,
+  artifactPath: string,
+  generation: ImageGenerationResult,
+  prompt: string,
+): ExecutedWorkerResult {
+  const summary = [
+    `Generated image artifact: ${artifactPath}`,
+    `Model: ${generation.provider}/${generation.modelId}`,
+    `Bytes: ${generation.bytes}`,
+    "Prompt:",
+    prompt,
+  ].join("\n")
+  return {
+    ...agentToBrainContextTransfer,
+    handoffId: handoff.id,
+    taskId: handoff.task.id,
+    parentId: handoff.task.parentId,
+    progress: {
+      status: "completed",
+      summary: `Generated image artifact at ${artifactPath}.`,
+    },
+    role: worker.role,
+    goal: worker.goal,
+    todoIds: worker.todoIds ?? [],
+    status: "completed",
+    summary,
+    artifacts: [{ kind: "artifact", uri: artifactPath, label: "Generated image" }],
+    risks: generation.revisedPrompt ? [`Provider revised prompt: ${generation.revisedPrompt}`] : [],
+    nextQuestions: [],
+  }
+}
+
 function workerResultStatus(result: WorkerResult): ExecutedWorkerResult["status"] {
   if (result.progress.status === "failed") return "failed"
   if (result.progress.status === "blocked") return "blocked"
@@ -2588,7 +2677,7 @@ async function runWorkerFromPlan(
   const handoff = createWorkerHandoff(worker, sessionId, phase, projectSupport)
   await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createHandoffAgentMessage(handoff) }, home)
   let candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }>
-  const requirements = runtimeModelRequirementsForImages(promptImages)
+  const requirements = runtimeModelRequirementsForRole(worker.role, promptImages)
 
   try {
     candidates = await selectRuntimeModelCandidatesWithApiKey(worker.policy, models, home, requirements)
@@ -2599,6 +2688,36 @@ async function runWorkerFromPlan(
     await onTodoStatus?.(worker, phase, "failed", { error: result.error })
     await emit({ type: "worker_end", role: worker.role, phase, status: "failed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: result.progress, error: result.error, todoIds: worker.todoIds })
     return result
+  }
+
+  if (worker.role === "imageMaker") {
+    const prompt = buildImageMakerPrompt({ request: worker.goal, projectSupport })
+    for (const [attempt, { selection, apiKey }] of candidates.entries()) {
+      const agentSessionId = `${handoff.task.id}-${attempt + 1}`
+      await onTodoStatus?.(worker, phase, "running")
+      await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: { ...handoff.task.progress, status: "running" }, todoIds: worker.todoIds })
+      await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
+      try {
+        const generation = await generateImage(selection.configured, apiKey, { prompt })
+        const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
+        const result = imageMakerWorkerResult(worker, handoff, artifactPath, generation, prompt)
+        await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }), attempt: attempt + 1 }, home)
+        await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result, attempt: attempt + 1 }, home)
+        await onTodoStatus?.(worker, phase, "completed", { summary: result.summary })
+        await emit({ type: "worker_end", role: worker.role, phase, status: "completed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: result.progress, summary: result.summary, todoIds: worker.todoIds })
+        return result
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        await appendSessionRecord(sessionId, { type: "worker_error", phase, worker: worker.role, error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+        if (attempt === candidates.length - 1) {
+          const failure = failedWorkerResult(worker, handoff, error)
+          await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(failure, { from: worker.role }) }, home)
+          await onTodoStatus?.(worker, phase, "failed", { error: failure.error })
+          await emit({ type: "worker_end", role: worker.role, phase, status: "failed", handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: failure.progress, error: failure.error, todoIds: worker.todoIds })
+          return failure
+        }
+      }
+    }
   }
 
   let lastError: unknown
@@ -2921,7 +3040,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
-  const requirements = runtimeModelRequirementsForImages(promptImages)
+  const requirements = runtimeModelRequirementsForRole(plan.role, promptImages)
   const candidates = await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
 
   const projectSupport = await readProjectSupport(cwd)
@@ -2978,6 +3097,89 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
     const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent)
+    if (plan.role === "imageMaker") {
+      const primaryTodoIds = todoIdsForRole(plan, plan.role)
+      const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
+      const primaryHandoffId = `primary:${primaryTaskId}`
+      const primaryGoal = primaryWorker?.goal ?? request.prompt
+      const imagePrompt = buildImageMakerPrompt({ request: effectivePrompt, workerResults, projectSupport })
+      let lastError: unknown
+      for (const [attempt, { selection, apiKey }] of candidates.entries()) {
+        plan.model = selection.configured
+        plan.piModel = toPiModelSummary(selection)
+        await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
+        await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
+        await emitWorkerEvent({
+          type: "worker_start",
+          role: plan.role,
+          goal: primaryGoal,
+          phase: "primary",
+          modelId: selection.configured.id,
+          handoffId: primaryHandoffId,
+          taskId: primaryTaskId,
+          parentId: plan.context.id,
+          progress: { status: "running", summary: primaryGoal },
+          todoIds: primaryTodoIds,
+        })
+        try {
+          const generation = await generateImage(selection.configured, apiKey, { prompt: imagePrompt })
+          const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
+          const primarySummary = [
+            `Generated image artifact: ${artifactPath}`,
+            `Model: ${generation.provider}/${generation.modelId}`,
+            `Bytes: ${generation.bytes}`,
+            "Prompt:",
+            imagePrompt,
+          ].join("\n")
+          await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary })
+          await emitWorkerEvent({
+            type: "worker_end",
+            role: plan.role,
+            phase: "primary",
+            status: "completed",
+            handoffId: primaryHandoffId,
+            taskId: primaryTaskId,
+            parentId: plan.context.id,
+            progress: { status: "completed", summary: primarySummary },
+            summary: primarySummary,
+            todoIds: primaryTodoIds,
+          })
+          const stopHooks = await runAndRecordHooks(
+            "Stop",
+            {
+              stop_hook_active: false,
+              last_assistant_message: primarySummary || null,
+            },
+            { ...hookContext, model: plan.model.id },
+            undefined,
+            home,
+            "hook_stop",
+          )
+          const summary = `${primarySummary}${formatStopHookFeedback(stopHooks)}`
+          const patch = await collectPatchSummary(cwd, patchBaseline)
+          await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, attempt: attempt + 1 }, home)
+          return { sessionId, summary, plan, workerResults, mcp: mcpReport, patch }
+        } catch (error) {
+          lastError = error
+          const message = error instanceof Error ? error.message : String(error)
+          await emitWorkerEvent({
+            type: "worker_end",
+            role: plan.role,
+            phase: "primary",
+            status: "failed",
+            handoffId: primaryHandoffId,
+            taskId: primaryTaskId,
+            parentId: plan.context.id,
+            progress: { status: "failed", summary: message },
+            error: message,
+            todoIds: primaryTodoIds,
+          })
+          await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
+        }
+      }
+      await updateTodoStatus(plan, todoIdsForRole(plan, plan.role), "failed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, error: lastError instanceof Error ? lastError.message : String(lastError) })
+      throw lastError instanceof Error ? lastError : new Error(String(lastError))
+    }
     const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name))
     let lastError: unknown
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
