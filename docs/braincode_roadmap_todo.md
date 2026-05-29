@@ -85,11 +85,11 @@ Session:
 
 - [ ] 不再优先堆新角色、新面板、新概念
 - [ ] 优先打磨完整 patch engine 链路
-- [ ] runtime 负责事实报告，模型只负责自然语言总结
+- [x] runtime 负责事实报告，模型只负责自然语言总结
 - [ ] 本地工具默认安全，危险动作必须清晰可控
 - [ ] benchmark 必须能证明 routing / review / checks 的实际价值
-- [ ] TUI 和 CLI 共用同一套 final report 数据结构
-- [ ] 支持大仓库时不能靠“把文件全读进内存”
+- [x] TUI 和 CLI 共用同一套 final report 数据结构
+- [x] 支持大仓库时不能靠“把文件全读进内存”
 
 ---
 
@@ -139,7 +139,7 @@ Session:
   - [x] `collectPatchBaseline`
   - [x] `collectPatchSummary`
   - [x] `collectPatchDiffSnapshot`
-  - [ ] untracked preview，见 P1-3
+  - [x] untracked preview，见 P1-3
 - [x] 新建 `packages/agent-runtime/src/checks.ts`
   - [x] `runPatchChecks`
   - [x] `runPatchChecksWithApproval`
@@ -233,7 +233,7 @@ no patch + no tools => final status = answered / read_only
 
 ### 验收标准
 
-- [ ] CLI/TUI 都能消费同一个 `FinalReport`
+- [x] CLI/TUI 都能消费同一个 `FinalReport`
 - [x] failed checks 不会被最终报告展示成 approved
 - [x] 没有 patch 时，报告明确说明 no patch activity
 - [x] `FinalReport` 可 JSON 序列化并写入 session ledger
@@ -260,15 +260,15 @@ Session: xxx
 
 - [x] CLI 增加 `--json` 输出完整 `FinalReport`
 - [x] CLI 增加 `--summary-only` 保持只输出模型 summary
-- [ ] TUI run 完成时展示 compact report card
-- [ ] TUI 支持展开 sections：Patch / Checks / Review / Workers
+- [x] TUI run 完成时展示 compact report card
+- [x] TUI 支持展开 sections：Patch / Checks / Review / Workers
 - [x] Session ledger 记录 `final_report`
 
 ### 验收标准
 
 - [x] `braincode run --allow-edits "update README"` 输出 changed files/check/review 信息
 - [x] `braincode run --json "..."` 可用于自动化脚本
-- [ ] TUI 不再只依赖 assistant text 传达执行事实
+- [x] TUI 不再只依赖 assistant text 传达执行事实
 
 ---
 
@@ -282,25 +282,25 @@ Session: xxx
 
 ### TODO
 
-- [ ] 改造 `read_file`
-  - [ ] `stat` 先判断文件大小
-  - [ ] 小文件继续全量读取
-  - [ ] 大文件使用 `fs.open` + `read` 读取指定 byte window
-  - [ ] 返回 `nextOffset`
-  - [ ] 保留 binary 检测
-  - [ ] 注意 UTF-8 多字节字符边界
-- [ ] 增加参数
-  - [ ] `offset`
-  - [ ] `limit`
-  - [ ] `encoding?: "utf8"`
-- [ ] 为超大文件增加测试：10MB / 100MB mock 或 fixture
+- [x] 改造 `read_file`
+  - [x] `stat` 先判断文件大小
+  - [x] 小文件继续全量读取
+  - [x] 大文件使用 `fs.open` + `read` 读取指定 byte window
+  - [x] 返回 `nextOffset`
+  - [x] 保留 binary 检测
+  - [x] 注意 UTF-8 多字节字符边界
+- [x] 增加参数
+  - [x] `offset`
+  - [x] `limit`
+  - [x] `encoding?: "utf8"`
+- [x] 为超大文件增加测试：10MB / 100MB mock 或 fixture
 
 ### 验收标准
 
-- [ ] 读取大文件时不会把全文件加载进内存
-- [ ] `limit` 很小也能正确返回窗口和 `nextOffset`
-- [ ] binary 文件仍被拒绝
-- [ ] `bun test packages/tools` 通过
+- [x] 读取大文件时不会把全文件加载进内存
+- [x] `limit` 很小也能正确返回窗口和 `nextOffset`
+- [x] binary 文件仍被拒绝
+- [x] `bun test packages/tools` 通过
 
 ---
 
@@ -312,9 +312,9 @@ Session: xxx
 
 ### TODO
 
-- [ ] fallback search 增加并发限制
-  - [ ] 默认并发 8 或 16
-- [ ] 增加默认 ignore directories
+- [x] fallback search 增加并发限制
+  - [x] 默认并发 8 或 16
+- [x] 增加默认 ignore directories
 
 ```txt
 .git
@@ -329,17 +329,17 @@ coverage
 vendor
 ```
 
-- [ ] 增加 max searchable file bytes
-  - [ ] 默认 256KB 或 512KB
-- [ ] 搜索结果达到 `maxResults` 后尽快停止排队和读取
-- [ ] 对 skipped files 返回 details，而不是塞进正文
+- [x] 增加 max searchable file bytes
+  - [x] 默认 256KB 或 512KB
+- [x] 搜索结果达到 `maxResults` 后尽快停止排队和读取
+- [x] 对 skipped files 返回 details，而不是塞进正文
 
 ### 验收标准
 
-- [ ] 无 `rg` 环境下，fallback search 仍可用
-- [ ] 大仓库不会明显卡死
-- [ ] maxResults 生效后不继续无意义扫描
-- [ ] 测试覆盖 no-rg path/content search
+- [x] 无 `rg` 环境下，fallback search 仍可用
+- [x] 大仓库不会明显卡死
+- [x] maxResults 生效后不继续无意义扫描
+- [x] 测试覆盖 no-rg path/content search
 
 ---
 
@@ -752,18 +752,18 @@ braincode run --yes "fix failing test and run checks"
 ## 第 1 周：结构和报告
 
 - [ ] P0-1 拆 `agent-runtime/src/index.ts`
-- [ ] P0-2 定义 `FinalReport`
-- [ ] P0-3 CLI 输出 Final Report
+- [x] P0-2 定义 `FinalReport`
+- [x] P0-3 CLI 输出 Final Report
 
 ## 第 2 周：性能基础
 
-- [ ] P1-1 windowed `read_file`
-- [ ] P1-2 fallback search 优化
-- [ ] P1-4 evidence cache LRU/TTL
+- [x] P1-1 windowed `read_file`
+- [x] P1-2 fallback search 优化
+- [x] P1-4 evidence cache LRU/TTL
 
 ## 第 3 周：review 和安全
 
-- [ ] P1-3 untracked file preview
+- [x] P1-3 untracked file preview
 - [ ] P2-1 permission policy v2
 - [ ] P2-3 review gate v2
 
@@ -888,16 +888,16 @@ Acceptance:
 ## v0.3：Structured Report & Runtime Refactor
 
 - [ ] 拆 agent-runtime
-- [ ] FinalReport
-- [ ] CLI/TUI report renderer
-- [ ] session `final_report`
+- [x] FinalReport
+- [x] CLI/TUI report renderer
+- [x] session `final_report`
 
 ## v0.4：Performance & Review Artifacts
 
-- [ ] windowed read_file
-- [ ] fallback search 优化
-- [ ] evidence cache LRU/TTL
-- [ ] untracked preview
+- [x] windowed read_file
+- [x] fallback search 优化
+- [x] evidence cache LRU/TTL
+- [x] untracked preview
 - [ ] MCP lazy/background loading
 
 ## v0.5：Permission & Smart Checks

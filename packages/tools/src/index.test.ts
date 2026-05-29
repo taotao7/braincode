@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDefaultToolConfiguration, createLocalCodingTools, normalizeToolConfiguration } from "./index"
@@ -162,7 +162,7 @@ test("local tool prepareArguments normalizes aliases and primitive coercions", a
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-prepare-test-"))
   try {
     expect(getTool("list_files", projectRoot).prepareArguments?.({ dir: ".", pattern: "*.ts", limit: "2" })).toEqual({ directory: ".", glob: "*.ts", maxFiles: 2 })
-    expect(getTool("read_file", projectRoot).prepareArguments?.({ filePath: "a.txt", offset: "1", maxBytes: "3" })).toEqual({ path: "a.txt", offset: 1, limit: 3 })
+    expect(getTool("read_file", projectRoot).prepareArguments?.({ filePath: "a.txt", offset: "1", maxBytes: "3", encoding: "utf8" })).toEqual({ path: "a.txt", offset: 1, limit: 3, encoding: "utf8" })
     expect(getTool("search_files", projectRoot).prepareArguments?.({ text: "needle", mode: "path", limit: "5" })).toEqual({ query: "needle", mode: "path", glob: undefined, maxResults: 5 })
     expect(getTool("search_files", projectRoot).prepareArguments?.({ glob: "*.ts", limit: "5" })).toEqual({ query: undefined, mode: "path", glob: "*.ts", maxResults: 5 })
     expect(getTool("edit_file", projectRoot).prepareArguments?.({ file: "a.txt", old: "x", new: "y", replace_all: "true" })).toEqual({ path: "a.txt", content: undefined, oldString: "x", newString: "y", replaceAll: true })
@@ -227,6 +227,102 @@ test("search_files path mode and fallback search work without rg", async () => {
 
     expect(textContent(listResult)).toContain("beta.md")
     expect(textContent(contentResult)).toContain("alpha.ts:1:needle")
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("fallback search ignores heavy directories and reports oversized skipped files in details", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-search-fallback-perf-test-"))
+  const originalPath = process.env.PATH
+  try {
+    await mkdir(join(projectRoot, "src"), { recursive: true })
+    await mkdir(join(projectRoot, "node_modules", "pkg"), { recursive: true })
+    await Bun.write(join(projectRoot, "src", "visible-1.ts"), "needle one\n")
+    await Bun.write(join(projectRoot, "src", "visible-2.ts"), "needle two\n")
+    await Bun.write(join(projectRoot, "src", "visible-3.ts"), "needle three\n")
+    await Bun.write(join(projectRoot, "src", "large.ts"), `needle${"x".repeat(600_000)}\n`)
+    await Bun.write(join(projectRoot, "node_modules", "pkg", "ignored.ts"), "needle ignored\n")
+
+    process.env.PATH = ""
+    const searchFiles = createLocalCodingTools({
+      projectRoot,
+      maxSearchableFileBytes: 128,
+      fallbackSearchConcurrency: 4,
+    }).find((tool) => tool.name === "search_files")
+    if (!searchFiles) throw new Error("Missing search_files")
+
+    const result = await searchFiles.execute("search-fallback-details", {
+      query: "needle",
+      glob: "*.ts",
+      maxResults: 10,
+    } as never)
+    const text = textContent(result)
+    const details = result.details as {
+      fallbackDetails?: {
+        candidateFiles: number
+        skippedFileCount: number
+        skippedFiles: Array<{ path: string; reason: string; size?: number }>
+        concurrency: number
+        stoppedAfterMaxResults: boolean
+      }
+    }
+
+    expect(text).toContain("src/visible-")
+    expect(text).not.toContain("node_modules")
+    expect(text).not.toContain("src/large.ts")
+    expect(details.fallbackDetails?.concurrency).toBe(4)
+    expect(details.fallbackDetails?.candidateFiles).toBe(4)
+    expect(details.fallbackDetails?.skippedFileCount).toBe(1)
+    expect(details.fallbackDetails?.skippedFiles[0]).toMatchObject({
+      path: "src/large.ts",
+      reason: "too_large",
+    })
+    expect(details.fallbackDetails?.stoppedAfterMaxResults).toBe(false)
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("fallback search stops queueing work after maxResults", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-search-fallback-stop-test-"))
+  const originalPath = process.env.PATH
+  try {
+    await mkdir(join(projectRoot, "src"), { recursive: true })
+    await Bun.write(join(projectRoot, "src", "001-visible.ts"), "needle first\n")
+    await Bun.write(join(projectRoot, "src", "002-visible.ts"), "needle second\n")
+    await Bun.write(join(projectRoot, "src", "003-visible.ts"), "needle third\n")
+
+    process.env.PATH = ""
+    const searchFiles = createLocalCodingTools({
+      projectRoot,
+      fallbackSearchConcurrency: 1,
+    }).find((tool) => tool.name === "search_files")
+    if (!searchFiles) throw new Error("Missing search_files")
+
+    const result = await searchFiles.execute("search-fallback-stop", {
+      query: "needle",
+      glob: "*.ts",
+      maxResults: 1,
+    } as never)
+    const details = result.details as {
+      fallbackDetails?: {
+        candidateFiles: number
+        searchedFiles: number
+        concurrency: number
+        stoppedAfterMaxResults: boolean
+      }
+    }
+
+    expect(textContent(result)).toBe("src/001-visible.ts:1:needle first")
+    expect(details.fallbackDetails?.candidateFiles).toBe(3)
+    expect(details.fallbackDetails?.searchedFiles).toBe(1)
+    expect(details.fallbackDetails?.concurrency).toBe(1)
+    expect(details.fallbackDetails?.stoppedAfterMaxResults).toBe(true)
   } finally {
     if (originalPath === undefined) delete process.env.PATH
     else process.env.PATH = originalPath
@@ -321,22 +417,47 @@ test("read_file expands tiny windows for large files", async () => {
   }
 })
 
-test("read_file can seek into large files without returning the prefix", async () => {
-  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-seek-test-"))
+test("read_file aligns windows to UTF-8 character boundaries", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-utf8-test-"))
   try {
-    await Bun.write(join(projectRoot, "large.txt"), `${"a".repeat(600_000)}needle-window${"z".repeat(600_000)}`)
+    await Bun.write(join(projectRoot, "unicode.txt"), "aé中🙂z")
     const readFile = createLocalCodingTools({ projectRoot, maxReadBytes: 128 }).find((tool) => tool.name === "read_file")
     if (!readFile) throw new Error("Missing read_file")
 
-    const result = await readFile.execute("read-large-seek", { path: "large.txt", offset: 600_000, limit: 32 } as never)
+    const insideCharacterOffset = Buffer.byteLength("aé") - 1
+    const firstResult = await readFile.execute("read-utf8-start", { path: "unicode.txt", offset: insideCharacterOffset, limit: 4, encoding: "utf8" } as never)
+    const firstDetails = firstResult.details as { offset: number; nextOffset?: number }
+
+    expect(textContent(firstResult)).toContain("中")
+    expect(textContent(firstResult)).not.toContain("�")
+    expect(firstDetails.offset).toBe(Buffer.byteLength("aé"))
+
+    const secondResult = await readFile.execute("read-utf8-end", { path: "unicode.txt", offset: Buffer.byteLength("aé"), limit: Buffer.byteLength("中") + 1 } as never)
+    expect(textContent(secondResult)).toContain("中🙂")
+    expect(textContent(secondResult)).not.toContain("�")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("read_file can seek into large files without returning the prefix", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-read-seek-test-"))
+  try {
+    const prefixLength = 5_000_000
+    const suffixLength = 5_000_000
+    await Bun.write(join(projectRoot, "large.txt"), `${"a".repeat(prefixLength)}needle-window${"z".repeat(suffixLength)}`)
+    const readFile = createLocalCodingTools({ projectRoot, maxReadBytes: 128 }).find((tool) => tool.name === "read_file")
+    if (!readFile) throw new Error("Missing read_file")
+
+    const result = await readFile.execute("read-large-seek", { path: "large.txt", offset: prefixLength, limit: 32 } as never)
     const details = result.details as { chars: number; totalChars: number; offset: number; nextOffset?: number }
 
     expect(textContent(result)).toContain("needle-window")
     expect(textContent(result)).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-    expect(details.offset).toBe(600_000)
+    expect(details.offset).toBe(prefixLength)
     expect(details.chars).toBeLessThanOrEqual(128)
-    expect(details.totalChars).toBe(1_200_013)
-    expect(details.nextOffset).toBe(600_128)
+    expect(details.totalChars).toBe(prefixLength + "needle-window".length + suffixLength)
+    expect(details.nextOffset).toBe(prefixLength + 128)
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

@@ -15,6 +15,8 @@ export type LocalCodingToolOptions = {
   maxReadBytes?: number
   maxOutputBytes?: number
   commandTimeoutMs?: number
+  fallbackSearchConcurrency?: number
+  maxSearchableFileBytes?: number
 }
 
 type LocalToolSpec = {
@@ -30,6 +32,8 @@ type LocalToolContext = {
   maxReadBytes: number
   maxOutputBytes: number
   commandTimeoutMs: number
+  fallbackSearchConcurrency: number
+  maxSearchableFileBytes: number
   execSessions: ExecSessionManager
 }
 
@@ -60,10 +64,25 @@ export type LocalCodingToolName = (typeof localCodingToolNames)[number]
 const DEFAULT_MAX_READ_BYTES = 128_000
 const DEFAULT_MAX_OUTPUT_BYTES = 96_000
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
+const DEFAULT_FALLBACK_SEARCH_CONCURRENCY = 16
+const DEFAULT_MAX_SEARCHABLE_FILE_BYTES = 512_000
 const LARGE_FILE_READ_THRESHOLD_CHARS = 24_000
 const MIN_LARGE_FILE_READ_CHARS = 32_000
 const BINARY_FILE_PROBE_BYTES = 4096
+const UTF8_BOUNDARY_OVERLAP_BYTES = 3
 const ALL_EXIT_CODES = Array.from({ length: 256 }, (_, code) => code)
+const FALLBACK_IGNORE_DIRECTORIES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".cache",
+  "vendor",
+])
 
 export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTool[] {
   const context: LocalToolContext = {
@@ -71,6 +90,8 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
     maxReadBytes: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
     maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
     commandTimeoutMs: options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+    fallbackSearchConcurrency: clampInteger(options.fallbackSearchConcurrency, 1, 64, DEFAULT_FALLBACK_SEARCH_CONCURRENCY),
+    maxSearchableFileBytes: clampInteger(options.maxSearchableFileBytes, 1, 50_000_000, DEFAULT_MAX_SEARCHABLE_FILE_BYTES),
     execSessions: new ExecSessionManager(),
   }
   const enabled = new Map((options.tools ?? []).map((tool) => [tool.name, tool.enabled]))
@@ -200,6 +221,7 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
     path: Type.String(),
     offset: Type.Optional(Type.Number()),
     limit: Type.Optional(Type.Number()),
+    encoding: Type.Optional(Type.Literal("utf8")),
   })
   return {
     name: "read_file",
@@ -212,10 +234,12 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
         path: pickRequiredString(record, ["path", "file", "filePath"]),
         offset: pickNumber(record, ["offset"]),
         limit: pickNumber(record, ["limit", "maxBytes"]),
+        encoding: pickString(record, ["encoding"]),
       }
     },
     execute: async (_toolCallId, params) => {
-      const input = params as { path: string; offset?: number; limit?: number }
+      const input = params as { path: string; offset?: number; limit?: number; encoding?: string }
+      if (input.encoding !== undefined && input.encoding !== "utf8") throw new Error("read_file only supports utf8 encoding")
       const target = await resolveProjectPath(context.projectRoot, input.path)
       const window = await readUtf8TextWindow(target.absolutePath, input.offset, input.limit, context.maxReadBytes)
       const truncated = window.end < window.total
@@ -239,6 +263,7 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
         limitExpanded: window.expanded,
         nextOffset: truncated ? window.end : undefined,
         truncated,
+        encoding: "utf8",
       })
     },
   }
@@ -282,13 +307,29 @@ function createSearchFilesTool(context: LocalToolContext): AgentTool {
       if (input.glob) rgArgs.splice(4, 0, "--glob", input.glob)
       const result = await runProcess("rg", rgArgs, { cwd: context.projectRoot, maxOutputBytes: context.maxOutputBytes, timeoutMs: context.commandTimeoutMs, allowExitCodes: [0, 1] })
       if (!result.spawned) {
-        const matches = await fallbackContentSearch(context, query, input.glob, maxResults)
-        return textResult(matches.join("\n") || "(no matches)", { tool: "search_files", mode: "content", matches, count: matches.length, fallback: true })
+        const fallback = await fallbackContentSearch(context, query, input.glob, maxResults)
+        return textResult(fallback.matches.join("\n") || "(no matches)", {
+          tool: "search_files",
+          mode: "content",
+          matches: fallback.matches,
+          count: fallback.matches.length,
+          fallback: true,
+          fallbackDetails: fallback.details,
+        })
       }
       const lines = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, maxResults)
       if (lines.length === 0) {
-        const matches = await fallbackContentSearch(context, query, input.glob, maxResults)
-        if (matches.length > 0) return textResult(matches.join("\n"), { tool: "search_files", mode: "content", matches, count: matches.length, fallback: true })
+        const fallback = await fallbackContentSearch(context, query, input.glob, maxResults)
+        if (fallback.matches.length > 0) {
+          return textResult(fallback.matches.join("\n"), {
+            tool: "search_files",
+            mode: "content",
+            matches: fallback.matches,
+            count: fallback.matches.length,
+            fallback: true,
+            fallbackDetails: fallback.details,
+          })
+        }
       }
       return textResult(lines.join("\n") || "(no matches)", { tool: "search_files", mode: "content", matches: lines, count: lines.length, exitCode: result.exitCode })
     },
@@ -725,23 +766,66 @@ async function readUtf8TextWindow(
   const info = await stat(path)
   if (!info.isFile()) throw new Error(`Not a file: ${path}`)
   const total = info.size
-  const offset = clampInteger(inputOffset, 0, total, 0)
+  const requestedOffset = clampInteger(inputOffset, 0, total, 0)
   const { limit, requestedLimit, expanded } = readFileWindowLimit(inputLimit, total, maxReadBytes)
-  const end = Math.min(total, offset + limit)
+  const requestedEnd = Math.min(total, requestedOffset + limit)
+  const readStart = Math.max(0, requestedOffset - UTF8_BOUNDARY_OVERLAP_BYTES)
+  const readEnd = Math.min(total, requestedEnd + UTF8_BOUNDARY_OVERLAP_BYTES)
   const [probe, bytes] = await Promise.all([
-    offset === 0 ? Promise.resolve(Buffer.alloc(0)) : readFileBytes(path, 0, Math.min(total, BINARY_FILE_PROBE_BYTES)),
-    readFileBytes(path, offset, end - offset),
+    requestedOffset === 0 ? Promise.resolve(Buffer.alloc(0)) : readFileBytes(path, 0, Math.min(total, BINARY_FILE_PROBE_BYTES)),
+    readStart === 0 && readEnd === total && total <= maxReadBytes
+      ? readFile(path)
+      : readFileBytes(path, readStart, readEnd - readStart),
   ])
   if (probe.includes(0) || bytes.includes(0)) throw new Error(`File appears to be binary: ${path}`)
+  const decoded = decodeUtf8Window(bytes, readStart, requestedOffset, requestedEnd)
   return {
-    content: bytes.toString("utf8"),
-    offset,
-    end,
+    content: decoded.content,
+    offset: decoded.offset,
+    end: decoded.end,
     total,
     limit,
     requestedLimit,
     expanded,
   }
+}
+
+function decodeUtf8Window(bytes: Buffer, readStart: number, requestedOffset: number, requestedEnd: number): { content: string; offset: number; end: number } {
+  let start = Math.max(0, Math.min(bytes.length, requestedOffset - readStart))
+  while (start < bytes.length && isUtf8ContinuationByte(bytes[start])) start += 1
+  const requestedRelativeEnd = Math.max(start, Math.min(bytes.length, requestedEnd - readStart))
+  const end = alignUtf8End(bytes, start, requestedRelativeEnd)
+  return {
+    content: bytes.subarray(start, end).toString("utf8"),
+    offset: readStart + start,
+    end: readStart + end,
+  }
+}
+
+function alignUtf8End(bytes: Buffer, start: number, requestedEnd: number): number {
+  let end = Math.max(start, Math.min(bytes.length, requestedEnd))
+  if (end <= start) return end
+  let sequenceStart = end - 1
+  while (sequenceStart >= start && isUtf8ContinuationByte(bytes[sequenceStart])) sequenceStart -= 1
+  if (sequenceStart < start) return start
+  const sequenceLength = utf8SequenceLength(bytes[sequenceStart])
+  if (sequenceLength === 0) return end
+  const sequenceEnd = sequenceStart + sequenceLength
+  if (sequenceEnd <= end) return end
+  return sequenceEnd <= bytes.length ? sequenceEnd : sequenceStart
+}
+
+function isUtf8ContinuationByte(byte: number | undefined): boolean {
+  return byte !== undefined && (byte & 0b1100_0000) === 0b1000_0000
+}
+
+function utf8SequenceLength(byte: number | undefined): number {
+  if (byte === undefined) return 0
+  if ((byte & 0b1000_0000) === 0) return 1
+  if ((byte & 0b1110_0000) === 0b1100_0000) return 2
+  if ((byte & 0b1111_0000) === 0b1110_0000) return 3
+  if ((byte & 0b1111_1000) === 0b1111_0000) return 4
+  return 0
 }
 
 async function readFileBytes(path: string, offset: number, length: number): Promise<Buffer> {
@@ -827,10 +911,10 @@ async function fallbackListFiles(projectRoot: string, directory: string, maxFile
   const output: string[] = []
   const visit = async (dir: string) => {
     if (output.length >= maxFiles) return
-    const entries = await readdir(dir, { withFileTypes: true })
+    const entries = (await readdir(dir, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))
     for (const entry of entries) {
       if (output.length >= maxFiles) return
-      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === "dist") continue
+      if (entry.isDirectory() && FALLBACK_IGNORE_DIRECTORIES.has(entry.name)) continue
       const absolutePath = resolve(dir, entry.name)
       if (entry.isDirectory()) await visit(absolutePath)
       else if (entry.isFile()) output.push(normalizePath(relative(projectRoot, absolutePath)))
@@ -840,23 +924,85 @@ async function fallbackListFiles(projectRoot: string, directory: string, maxFile
   return output
 }
 
-async function fallbackContentSearch(context: LocalToolContext, query: string, glob: string | undefined, maxResults: number): Promise<string[]> {
+type FallbackSkippedFile = {
+  path: string
+  reason: "binary" | "too_large" | "unreadable" | "not_file"
+  size?: number
+  message?: string
+}
+
+type FallbackContentSearchResult = {
+  matches: string[]
+  details: {
+    candidateFiles: number
+    searchedFiles: number
+    skippedFileCount: number
+    skippedFiles: FallbackSkippedFile[]
+    maxSearchableFileBytes: number
+    concurrency: number
+    stoppedAfterMaxResults: boolean
+  }
+}
+
+async function fallbackContentSearch(context: LocalToolContext, query: string, glob: string | undefined, maxResults: number): Promise<FallbackContentSearchResult> {
   const files = await listProjectFiles(context, context.projectRoot, glob, 5000)
   const matches: string[] = []
-  for (const file of files) {
-    if (matches.length >= maxResults) break
-    try {
-      const target = await resolveProjectPath(context.projectRoot, file)
-      const content = await readTextFile(target.absolutePath, context.maxReadBytes)
-      const lines = content.split(/\r?\n/)
-      for (let index = 0; index < lines.length && matches.length < maxResults; index++) {
-        if (lines[index]?.includes(query)) matches.push(`${file}:${index + 1}:${lines[index]}`)
+  const skippedFiles: FallbackSkippedFile[] = []
+  let skippedFileCount = 0
+  let searchedFiles = 0
+  let nextIndex = 0
+  const concurrency = Math.min(files.length, context.fallbackSearchConcurrency)
+
+  const pushSkippedFile = (skipped: FallbackSkippedFile) => {
+    skippedFileCount += 1
+    if (skippedFiles.length < 200) skippedFiles.push(skipped)
+  }
+  const searchWorker = async () => {
+    while (matches.length < maxResults) {
+      const file = files[nextIndex]
+      nextIndex += 1
+      if (!file) return
+      if (matches.length >= maxResults) return
+      try {
+        const target = await resolveProjectPath(context.projectRoot, file)
+        const info = await stat(target.absolutePath)
+        if (!info.isFile()) {
+          pushSkippedFile({ path: file, reason: "not_file", size: info.size })
+          continue
+        }
+        if (info.size > context.maxSearchableFileBytes) {
+          pushSkippedFile({ path: file, reason: "too_large", size: info.size })
+          continue
+        }
+        const content = await readTextFile(target.absolutePath, context.maxSearchableFileBytes)
+        searchedFiles += 1
+        const lines = content.split(/\r?\n/)
+        for (let index = 0; index < lines.length && matches.length < maxResults; index++) {
+          if (lines[index]?.includes(query)) matches.push(`${file}:${index + 1}:${lines[index]}`)
+        }
+      } catch (error) {
+        pushSkippedFile({
+          path: file,
+          reason: error instanceof Error && /binary/i.test(error.message) ? "binary" : "unreadable",
+          message: error instanceof Error ? error.message : String(error),
+        })
       }
-    } catch {
-      // skip unreadable/binary files
     }
   }
-  return matches
+
+  await Promise.all(Array.from({ length: concurrency }, () => searchWorker()))
+  return {
+    matches: matches.slice(0, maxResults),
+    details: {
+      candidateFiles: files.length,
+      searchedFiles,
+      skippedFileCount,
+      skippedFiles,
+      maxSearchableFileBytes: context.maxSearchableFileBytes,
+      concurrency,
+      stoppedAfterMaxResults: matches.length >= maxResults && nextIndex < files.length,
+    },
+  }
 }
 
 type ProcessResult = {

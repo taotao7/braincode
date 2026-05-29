@@ -20,6 +20,7 @@ import {
   isProviderMessageSizeLimitError,
   planRuntimeFromConfig,
   type AgentEvent,
+  type FinalReport,
   type RuntimePlan,
   type TodoLifecycleEvent,
   type ToolApprovalDecision,
@@ -86,10 +87,12 @@ type TranscriptItem = {
     | "worker"
     | "todo"
     | "queued"
-    | "decision";
+    | "decision"
+    | "report";
   text: string;
   collapsed?: boolean;
   plan?: RuntimePlan;
+  finalReport?: FinalReport;
   toolName?: string;
   toolCategory?: ToolCategory;
   toolStatus?: "running" | "ok" | "failed";
@@ -2843,6 +2846,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           text: `${result.plan.brain.id} → ${result.plan.role} → ${result.plan.piModel.provider}/${result.plan.piModel.id}${tokenSummary ? ` · ${tokenSummary}` : ""}`,
           plan: result.plan,
         });
+        next.push({
+          id: crypto.randomUUID(),
+          kind: "report",
+          text: formatTuiFinalReportCompact(result.finalReport),
+          finalReport: result.finalReport,
+          collapsed: true,
+        });
         const trimmedSummary = normalizeAssistantText(
           (result.summary ?? "").trim(),
         );
@@ -4345,6 +4355,18 @@ const TranscriptEntryView = React.memo(function TranscriptEntryView({
           ))}
         </Box>
       ) : null}
+      {item.kind === "report" && item.finalReport && !item.collapsed ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {formatTuiFinalReportSections(item.finalReport).map((line, index) => (
+            <Text
+              key={index}
+              color={/^Warnings:|^- /.test(line) ? colors.yellow : colors.gray}
+            >
+              {line}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       {item.editPreview ? <EditPreviewView preview={item.editPreview} /> : null}
     </Box>
   );
@@ -5110,6 +5132,7 @@ function samePetSnapshot(
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
+  if (item.kind === "report") return true;
   return isTranscriptItemAutoCollapsed({
     ...item,
     text:
@@ -5120,6 +5143,7 @@ function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
 function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
+  if (item.kind === "report") return true;
   if (!["assistant", "panel", "help", "error"].includes(item.kind))
     return false;
   const lines = item.text.split(/\r?\n/);
@@ -5397,6 +5421,11 @@ function estimateTranscriptSupplementRows(
         `${todoGlyph(todo.status)} ${todo.role} · ${todo.title}`,
         Math.max(10, width - 2),
       );
+    }
+  }
+  if (item.kind === "report" && item.finalReport && !item.collapsed) {
+    for (const line of formatTuiFinalReportSections(item.finalReport)) {
+      rows += countWrappedRows(line, Math.max(10, width - 2));
     }
   }
   if (item.editPreview) {
@@ -6284,6 +6313,11 @@ function transcriptBadge(item: TranscriptItem): {
       return { label: "HELP", color: "yellow" };
     case "panel":
       return { label: "PANEL", color: "magenta" };
+    case "report":
+      return {
+        label: "REPORT",
+        color: finalReportStatusColor(item.finalReport?.status),
+      };
     case "worker":
       return {
         label: "AGENT",
@@ -6315,6 +6349,13 @@ function transcriptBadge(item: TranscriptItem): {
     case "decision":
       return { label: "ASK", color: "yellow" };
   }
+}
+
+function finalReportStatusColor(status: FinalReport["status"] | undefined): UiColor {
+  if (status === "approved") return "green";
+  if (status === "changes_requested") return "yellow";
+  if (status === "blocked") return "red";
+  return "cyan";
 }
 
 function padLineNum(value: number | null, width: number): string {
@@ -6530,6 +6571,64 @@ export function formatPlanWorkersBudgetLine(plan: RuntimePlan): string {
     .filter(Boolean)
     .join(", ");
   return `workers: ${workers || "(none)"}${budget ? ` · budget: ${budget}` : ""}`;
+}
+
+export function formatTuiFinalReportCompact(report: FinalReport): string {
+  return [
+    `Braincode Run Report · ${report.status}`,
+    `${report.routing.source} → ${report.routing.primaryRole}`,
+    `patch ${formatFinalReportPatchLabel(report)}`,
+    `checks ${formatFinalReportChecksLabel(report)}`,
+    `review ${report.review?.decision ?? "not run"}`,
+    `session ${report.sessionId.slice(0, 8)}`,
+  ].join(" · ");
+}
+
+export function formatTuiFinalReportSections(report: FinalReport): string[] {
+  const lines = [
+    `Task: ${report.task}`,
+    `Brain: ${report.brain.name} / ${report.brain.mode}`,
+    `Routing: ${report.routing.source} -> ${report.routing.primaryRole}${report.routing.confidence !== undefined ? ` (${Math.round(report.routing.confidence * 100)}%)` : ""}`,
+    `Workers: ${report.routing.workers.map((worker) => `${worker.role} ${worker.status ?? worker.phase}`).join(", ") || "none"}`,
+    `Patch: ${formatFinalReportPatchLabel(report)}`,
+  ];
+  if (report.patch?.changedFiles.length) {
+    const changed = report.patch.changedFiles
+      .slice(0, 6)
+      .map((change) => `${change.status} ${change.path}`)
+      .join(", ");
+    lines.push(`Changed: ${changed}${report.patch.changedFiles.length > 6 ? `, +${report.patch.changedFiles.length - 6} more` : ""}`);
+  }
+  lines.push(`Checks: ${formatFinalReportChecksLabel(report)}`);
+  if (report.checks?.results.length) {
+    lines.push(`Check details: ${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")}`);
+  }
+  lines.push(`Review: ${report.review?.decision ?? "not run"}`);
+  if (report.review?.requiredChanges.length) {
+    lines.push(`Required: ${report.review.requiredChanges.slice(0, 3).join("; ")}`);
+  }
+  if (report.todos.length) {
+    lines.push(`Todos: ${report.todos.map((todo) => `${todo.status} ${todo.role}:${todo.title}`).join(" | ")}`);
+  }
+  if (report.warnings.length) {
+    lines.push("Warnings:");
+    lines.push(...report.warnings.map((warning) => `- ${warning}`));
+  }
+  return lines;
+}
+
+function formatFinalReportPatchLabel(report: FinalReport): string {
+  if (!report.patch || report.patch.changedFiles.length === 0)
+    return "no patch activity";
+  return `${report.patch.changedFiles.length} file${report.patch.changedFiles.length === 1 ? "" : "s"}, +${report.patch.diffStats.insertions} -${report.patch.diffStats.deletions}`;
+}
+
+function formatFinalReportChecksLabel(report: FinalReport): string {
+  if (!report.checks) return "not run";
+  if (report.checks.results.length === 0) {
+    return report.checks.reason ? `${report.checks.status} (${report.checks.reason})` : report.checks.status;
+  }
+  return `${report.checks.status} (${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")})`;
 }
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
@@ -6848,6 +6947,8 @@ function colorFor(
       return "yellow";
     case "panel":
       return "magenta";
+    case "report":
+      return finalReportStatusColor(item.finalReport?.status);
     case "thinking":
       return "gray";
     case "tool": {
