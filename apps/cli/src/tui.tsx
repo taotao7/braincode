@@ -392,7 +392,8 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   }
 }
 
-const INPUT_MAX_LINES = 1;
+const INPUT_MIN_LINES = 1;
+const INPUT_MAX_LINES = 6;
 const INPUT_PROMPT_PREFIX = "› ";
 const FRAME_RESERVED_COLUMNS = 4;
 const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
@@ -658,6 +659,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const activeUsageKey = useRef<string | null>(null);
   const runUsage = useRef<TokenUsageSnapshot>(emptyTokenUsage());
   const verticalCursorColumn = useRef<number | null>(null);
+  const transcriptFoldPreference = useRef<boolean | null>(null);
   const transcriptViewportState = useRef({
     totalRows: 0,
     viewportRows: 0,
@@ -692,10 +694,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   };
   const setItems = (update: StoreUpdate<TranscriptItem[]>) => {
     const previous = transcriptStore.getSnapshot();
-    const next =
+    const nextRaw =
       typeof update === "function"
         ? (update as (previous: TranscriptItem[]) => TranscriptItem[])(previous)
         : update;
+    const next = normalizeTranscriptItemsForFoldPreference(
+      nextRaw,
+      transcriptFoldPreference.current,
+    );
     if (Object.is(previous, next)) return;
     transcriptStore.setSnapshot(next);
     if (next.length === 0 || previous.length === 0) {
@@ -861,7 +867,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   function appendItem(item: Omit<TranscriptItem, "id">) {
     setItems((previous) => [
       ...previous,
-      normalizeTranscriptItem({ id: crypto.randomUUID(), ...item }),
+      { id: crypto.randomUUID(), ...item },
     ]);
   }
 
@@ -896,12 +902,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       .map(normalizeTranscriptItem)
       .filter(isTranscriptItemCollapsible);
     if (foldable.length === 0) {
+      if (running) {
+        transcriptFoldPreference.current = false;
+        flash("Transcript expanded");
+        return;
+      }
       flash("No foldable transcript items");
       return;
     }
 
     const shouldExpand = foldable.some((item) => item.collapsed ?? false);
     const nextCollapsed = !shouldExpand;
+    transcriptFoldPreference.current = nextCollapsed;
     const foldableIds = new Set(foldable.map((item) => item.id));
     setItems((previous) =>
       previous.map((item) =>
@@ -5004,6 +5016,32 @@ function normalizeTranscriptItem(item: TranscriptItem): TranscriptItem {
     : next;
 }
 
+function normalizeTranscriptItemForFoldPreference(
+  item: TranscriptItem,
+  preference: boolean | null,
+): TranscriptItem {
+  const normalized = normalizeTranscriptItem(item);
+  if (preference === null || !isTranscriptItemCollapsible(normalized)) {
+    return normalized;
+  }
+  return normalized.collapsed === preference
+    ? normalized
+    : { ...normalized, collapsed: preference };
+}
+
+function normalizeTranscriptItemsForFoldPreference(
+  items: TranscriptItem[],
+  preference: boolean | null,
+): TranscriptItem[] {
+  let changed = false;
+  const normalized = items.map((item) => {
+    const next = normalizeTranscriptItemForFoldPreference(item, preference);
+    if (next !== item) changed = true;
+    return next;
+  });
+  return changed ? normalized : items;
+}
+
 function transcriptPatchChangesItem(
   item: TranscriptItem,
   patch: Partial<TranscriptItem>,
@@ -5866,7 +5904,7 @@ type DraftWrapResult = {
 
 function draftWindowDisplayLines(draftWindow: DraftWindow): DraftWindowLine[] {
   const lines = draftWindow.lines.slice(0, INPUT_MAX_LINES);
-  while (lines.length < INPUT_MAX_LINES)
+  while (lines.length < INPUT_MIN_LINES)
     lines.push({ text: "", cursorOffset: null });
   return lines;
 }
@@ -7416,3 +7454,11 @@ function isAbortLikeError(error: unknown): boolean {
 function humanizeRuntimeError(error: unknown): string {
   return humanizeAgentRuntimeError(error);
 }
+
+export const __test = {
+  INPUT_MAX_LINES,
+  INPUT_MIN_LINES,
+  clipDraftToWindow,
+  draftWindowDisplayLines,
+  normalizeTranscriptItemForFoldPreference,
+};
