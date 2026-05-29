@@ -41,6 +41,7 @@ class McpConnection {
     this.child = spawn(info.command, info.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...(info.env ?? {}) },
+      detached: process.platform !== "win32",
     })
     this.child.stdout?.on("data", (chunk: Buffer) => this.onStdout(chunk))
     this.child.stderr?.on("data", (chunk: Buffer) => {
@@ -139,8 +140,29 @@ class McpConnection {
     if (this.closed) return
     this.closed = true
     try { this.child.stdin?.end() } catch { /* ignore */ }
-    try { this.child.kill("SIGTERM") } catch { /* ignore */ }
+    terminateProcessTree(this.child, "SIGTERM")
   }
+}
+
+function terminateProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (pid && process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal)
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  if (pid && process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => {})
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  try { child.kill(signal) } catch { /* ignore */ }
 }
 
 function stringifyJsonRpcError(value: unknown): string {
@@ -255,6 +277,9 @@ function createMcpAgentTool(
         }
       }
       const text = lines.join("\n") || (result.isError ? "(tool reported an error with no content)" : "(no content)")
+      if (result.isError) {
+        throw new Error(`MCP tool ${label} failed: ${text}`)
+      }
       return {
         content: [{ type: "text", text }],
         details: result,
@@ -283,6 +308,10 @@ export function collectMcpToolServers(options: {
       seen.add(key)
       if (entry.disabled) {
         skipped.push({ scope, name, reason: "disabled" })
+        continue
+      }
+      if (scope === "project" && entry.trusted !== true) {
+        skipped.push({ scope, name, reason: "untrusted project MCP server" })
         continue
       }
       if (!entry.command) {

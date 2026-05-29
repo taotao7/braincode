@@ -14,6 +14,7 @@ const TOC_IDS = [
   "docs_hooks",
   "docs_config_ui",
   "docs_cli",
+  "docs_tui",
   "docs_troubleshoot",
 ] as const;
 
@@ -188,12 +189,13 @@ export function Docs() {
               {/* 10. CLI Reference */}
               <H2 id="docs_cli" k="docs_cli_title" />
               <P k="docs_cli_intro" />
+              <h3>{t("docs_cli_core_title")}</h3>
               <div className="file-entry">
                 <h4><code>braincode</code></h4>
                 <p>{t("docs_cli_cmd_default")}</p>
               </div>
               <div className="file-entry">
-                <h4><code>braincode config</code></h4>
+                <h4><code>braincode config [--port &lt;port&gt;] [--host &lt;host&gt;] [--no-open]</code></h4>
                 <p>{t("docs_cli_cmd_config")}</p>
               </div>
               <div className="file-entry">
@@ -208,24 +210,210 @@ export function Docs() {
                 <h4><code>braincode run --dry-run --heuristic &lt;task&gt;</code></h4>
                 <p>{t("docs_cli_cmd_dry_heuristic")}</p>
               </div>
+              <h3>{t("docs_cli_run_flags_title")}</h3>
+              <P k="docs_cli_run_flags_intro" />
+              <div className="file-entry">
+                <h4><code>--read-only</code></h4>
+                <p>{t("docs_cli_flag_readonly")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>--allow-edits</code></h4>
+                <p>{t("docs_cli_flag_allow_edits")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>--yes / -y</code></h4>
+                <p>{t("docs_cli_flag_yes")}</p>
+              </div>
+              <h3>{t("docs_cli_benchmark_title")}</h3>
+              <P k="docs_cli_benchmark_intro" />
+              <div className="file-entry">
+                <h4><code>braincode benchmark</code></h4>
+                <p>{t("docs_cli_cmd_benchmark")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>braincode benchmark --list</code></h4>
+                <p>{t("docs_cli_cmd_benchmark_list")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>braincode benchmark --heuristic --task &lt;id&gt; --json</code></h4>
+                <p>{t("docs_cli_cmd_benchmark_flags")}</p>
+              </div>
+
+              {/* 11. TUI Reference */}
+              <H2 id="docs_tui" k="docs_tui_title" />
+              <P k="docs_tui_intro" />
+              <h3>{t("docs_tui_commands_title")}</h3>
+              <P k="docs_tui_commands_intro" />
+              <div className="file-entry">
+                <h4><code>/help</code></h4>
+                <p>{t("docs_tui_cmd_help")}</p>
+              </div>
               <div className="file-entry">
                 <h4><code>/plan &lt;task&gt;</code></h4>
-                <p>{t("docs_cli_cmd_plan")}</p>
+                <p>{t("docs_tui_cmd_plan")}</p>
               </div>
               <div className="file-entry">
                 <h4><code>/plan --heuristic &lt;task&gt;</code></h4>
-                <p>{t("docs_cli_cmd_plan_heuristic")}</p>
+                <p>{t("docs_tui_cmd_plan_heuristic")}</p>
               </div>
               <div className="file-entry">
-                <h4><code>/intent</code> / <code>Ctrl+O</code></h4>
-                <p>{t("docs_cli_cmd_intent")}</p>
+                <h4><code>/intent</code></h4>
+                <p>{t("docs_tui_cmd_intent")}</p>
               </div>
               <div className="file-entry">
-                <h4><code>braincode daemon</code></h4>
-                <p>{t("docs_cli_cmd_daemon")}</p>
+                <h4><code>/mcp</code></h4>
+                <p>{t("docs_tui_cmd_mcp")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/hooks</code></h4>
+                <p>{t("docs_tui_cmd_hooks")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/sessions</code></h4>
+                <p>{t("docs_tui_cmd_sessions")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/resume &lt;session-id&gt;</code></h4>
+                <p>{t("docs_tui_cmd_resume")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/new</code></h4>
+                <p>{t("docs_tui_cmd_new")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/handoff [&lt;session-id&gt;]</code></h4>
+                <p>{t("docs_tui_cmd_handoff")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/brain</code></h4>
+                <p>{t("docs_tui_cmd_brain")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/mode [auto|radical]</code></h4>
+                <p>{t("docs_tui_cmd_mode")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/auto</code> / <code>/radical</code></h4>
+                <p>{t("docs_tui_cmd_auto_radical")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/theme</code></h4>
+                <p>{t("docs_tui_cmd_theme")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/team-test &lt;task&gt;</code></h4>
+                <p>{t("docs_tui_cmd_team_test")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/skill</code></h4>
+                <p>{t("docs_tui_cmd_skill")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/agents</code></h4>
+                <p>{t("docs_tui_cmd_agents")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/files</code></h4>
+                <p>{t("docs_tui_cmd_files")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/clear</code></h4>
+                <p>{t("docs_tui_cmd_clear")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/exit</code></h4>
+                <p>{t("docs_tui_cmd_exit")}</p>
+              </div>
+              <h3>{t("docs_tui_shortcuts_title")}</h3>
+              <P k="docs_tui_shortcuts_intro" />
+              <div className="file-entry">
+                <h4><code>Ctrl+O</code></h4>
+                <p>{t("docs_tui_shortcut_intent")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Ctrl+T</code></h4>
+                <p>{t("docs_tui_shortcut_fold")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Ctrl+V</code></h4>
+                <p>{t("docs_tui_shortcut_paste")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Ctrl+P / Ctrl+N</code></h4>
+                <p>{t("docs_tui_shortcut_history")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Ctrl+↑ / Ctrl+↓</code></h4>
+                <p>{t("docs_tui_shortcut_scroll")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>PageUp / PageDown</code></h4>
+                <p>{t("docs_tui_shortcut_page")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Home / End</code></h4>
+                <p>{t("docs_tui_shortcut_home_end")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Shift+Enter</code></h4>
+                <p>{t("docs_tui_shortcut_newline")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>@</code></h4>
+                <p>{t("docs_tui_shortcut_files")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>@@</code></h4>
+                <p>{t("docs_tui_shortcut_sessions")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>/</code></h4>
+                <p>{t("docs_tui_shortcut_commands")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Tab / Enter</code></h4>
+                <p>{t("docs_tui_shortcut_accept")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Esc</code></h4>
+                <p>{t("docs_tui_shortcut_esc")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Ctrl+C</code></h4>
+                <p>{t("docs_tui_shortcut_exit")}</p>
+              </div>
+              <h3>{t("docs_tui_panels_title")}</h3>
+              <P k="docs_tui_panels_intro" />
+              <div className="file-entry">
+                <h4><code>Tool Decision</code></h4>
+                <p>{t("docs_tui_panel_decision")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>MCP Panel</code></h4>
+                <p>{t("docs_tui_panel_mcp")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Hooks Panel</code></h4>
+                <p>{t("docs_tui_panel_hooks")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Sessions Panel</code></h4>
+                <p>{t("docs_tui_panel_sessions")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Brain Panel</code></h4>
+                <p>{t("docs_tui_panel_brain")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Intent Graph Panel</code></h4>
+                <p>{t("docs_tui_panel_intent")}</p>
+              </div>
+              <div className="file-entry">
+                <h4><code>Runtime Error Panel</code></h4>
+                <p>{t("docs_tui_panel_error")}</p>
               </div>
 
-              {/* 11. Troubleshooting */}
+              {/* 12. Troubleshooting */}
               <H2 id="docs_troubleshoot" k="docs_troubleshoot_title" />
               <h3>{t("docs_troubleshoot_keys_title")}</h3>
               <P k="docs_troubleshoot_keys_body" />

@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -50,7 +50,7 @@ test("path helpers derive user and project support locations", async () => {
   }
 })
 
-test("MCP server entries can be listed and toggled disabled", async () => {
+test("MCP server entries can be listed and toggled disabled/trusted", async () => {
   const home = await makeTempHome()
   const filePath = join(home, "mcp.json")
   await Bun.write(filePath, JSON.stringify({
@@ -69,6 +69,15 @@ test("MCP server entries can be listed and toggled disabled", async () => {
   await setMcpServerDisabled(filePath, "alpha", false)
   parsed = JSON.parse(await Bun.file(filePath).text())
   expect(parsed.servers.alpha.disabled).toBeUndefined()
+
+  await setMcpServerTrusted(filePath, "alpha", true)
+  parsed = JSON.parse(await Bun.file(filePath).text())
+  expect(parsed.servers.alpha.trusted).toBe(true)
+
+  await setMcpServerTrusted(filePath, "alpha", false)
+  parsed = JSON.parse(await Bun.file(filePath).text())
+  expect(parsed.servers.alpha.trusted).toBeUndefined()
+
   await expect(setMcpServerDisabled(filePath, "missing", true)).rejects.toThrow("not found")
   await expect(setMcpServerDisabled(join(home, "missing.json"), "alpha", true)).rejects.toThrow("MCP config not found")
 

@@ -93,6 +93,7 @@ export type McpServerEntry = {
   url?: string;
   http_headers?: Record<string, string>;
   disabled?: boolean;
+  trusted?: boolean;
   [key: string]: unknown;
 };
 
@@ -700,6 +701,23 @@ export async function setMcpServerDisabled(
   serverName: string,
   disabled: boolean,
 ): Promise<void> {
+  await setMcpServerBooleanFlag(filePath, serverName, "disabled", disabled);
+}
+
+export async function setMcpServerTrusted(
+  filePath: string,
+  serverName: string,
+  trusted: boolean,
+): Promise<void> {
+  await setMcpServerBooleanFlag(filePath, serverName, "trusted", trusted);
+}
+
+async function setMcpServerBooleanFlag(
+  filePath: string,
+  serverName: string,
+  flag: "disabled" | "trusted",
+  enabled: boolean,
+): Promise<void> {
   const file = Bun.file(filePath);
   if (!(await file.exists())) {
     throw new Error(`MCP config not found at ${filePath}`);
@@ -715,10 +733,10 @@ export async function setMcpServerDisabled(
     throw new Error(`MCP server '${serverName}' not found in ${filePath}`);
   }
   const entry = (asRecord(existing[serverName]) ?? {}) as McpServerEntry;
-  if (disabled) {
-    entry.disabled = true;
+  if (enabled) {
+    entry[flag] = true;
   } else {
-    delete entry.disabled;
+    delete entry[flag];
   }
   existing[serverName] = entry as Record<string, unknown>;
   parsed[key] = existing;

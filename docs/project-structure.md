@@ -158,6 +158,7 @@ Responsibilities:
 - Apply future config migrations.
 - Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
 - Parse `.mcp.json` for project MCP server metadata without copying secrets into model context.
+- Treat user MCP config as user-installed/trusted, but require project `.mcp.json` server entries to opt in with `trusted: true` before Braincode starts their commands.
 - Load local skill Markdown from `.agents/skill/<skill-id>/SKILL.md` or top-level `.agents/skill/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
@@ -347,7 +348,7 @@ MVP-2 starts by establishing the adapter boundary:
 ### MVP-5: coding workflow - done, ongoing focused tests
 
 - Done: `AGENTS.md` durable project instruction context.
-- Done: project MCP server declarations from `.mcp.json`.
+- Done: project MCP server declarations from `.mcp.json`, gated by per-server `trusted: true` before command execution.
 - Done: project-local skills from `.agents/skill`.
 - Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Done: review worker execution for risky tasks.

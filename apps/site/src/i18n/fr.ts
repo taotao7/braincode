@@ -260,7 +260,93 @@ export const fr = {
     "Ouvrir le dernier intent graph. Il montre la décomposition de tâche, les dépendances, les statuts todo, la source de routage, la confiance et la raison.",
   docs_cli_cmd_daemon: "(Planifié) exécuter Braincode comme service local longue durée.",
 
-  docs_troubleshoot_title: "11. Dépannage",
+  docs_cli_core_title: "Commandes principales",
+  docs_cli_run_flags_title: "Flags de permission run",
+  docs_cli_run_flags_intro:
+    "Lors d'une exécution non interactive avec braincode run, vous devez choisir un mode de permission. Un seul flag à la fois.",
+  docs_cli_flag_readonly:
+    "N'expose que les outils locaux en lecture seule (list_files, read_file, search_files, git_diff, get_changed_files). Aucune édition ni commande autorisée.",
+  docs_cli_flag_allow_edits:
+    "Expose les outils locaux lecture/écriture et approuve automatiquement les éditions de fichiers (edit_file, apply_patch), mais bloque l'exécution de commandes, les outils MCP et les outils inconnus.",
+  docs_cli_flag_yes:
+    "Expose tous les outils locaux et approuve automatiquement chaque appel d'outil pour une exécution entièrement non interactive. À utiliser avec prudence.",
+  docs_cli_benchmark_title: "Benchmark",
+  docs_cli_benchmark_intro:
+    "Exécute des benchmarks représentatifs de planification de tâches de code pour valider le comportement de routage et mesurer la qualité des plans.",
+  docs_cli_cmd_benchmark:
+    "Exécute la suite benchmark complète avec le Brain Model configuré. Affiche pass/fail par tâche avec source de routage, rôle, flag review et liste des workers.",
+  docs_cli_cmd_benchmark_list:
+    "Affiche les ids et titres des tâches benchmark disponibles. Utilisez --json pour une sortie machine-readable.",
+  docs_cli_cmd_benchmark_flags:
+    "--heuristic saute routeBrain et benchmark le fallback déterministe. --task filtre sur des ids spécifiques (répétable ou séparés par des virgules). --json affiche du JSON.",
+
+  docs_tui_title: "11. Référence TUI",
+  docs_tui_intro:
+    "Le terminal UI basé sur Ink est l'interface principale de Braincode. Cette section couvre les slash commands, les raccourcis clavier et les panneaux interactifs.",
+  docs_tui_commands_title: "Slash commands",
+  docs_tui_commands_intro:
+    "Tapez / dans la zone de saisie pour ouvrir l'overlay de commandes. Tab ou Enter accepte une suggestion. Les commandes peuvent aussi être tapées directement.",
+  docs_tui_cmd_help: "Liste toutes les slash commands, y compris les skills chargés dynamiquement.",
+  docs_tui_cmd_plan:
+    "Prévisualise la décision routeBrain configurée pour une tâche. Affiche la source de routage, la confiance, la raison, le rôle primaire, les workers, le modèle, le mode et les budgets. Ajoutez --heuristic pour le fallback déterministe.",
+  docs_tui_cmd_plan_heuristic:
+    "Force le routage heuristic déterministe dans le TUI. Chemin de diagnostic, pas le flux normal de planification.",
+  docs_tui_cmd_intent:
+    "Ouvre le dernier intent graph (raccourci Ctrl+O). Montre la décomposition de tâche, les dépendances, les statuts todo, la source de routage, la confiance et la raison.",
+  docs_tui_cmd_mcp: "Ouvre le panneau de contrôle MCP interactif. Parcourez les serveurs, vérifiez la santé, activez/désactivez et consultez les configs.",
+  docs_tui_cmd_hooks: "Ouvre le panneau de contrôle hooks interactif. Parcourez les handlers, activez/désactivez et consultez les détails des commandes.",
+  docs_tui_cmd_sessions: "Parcourez les sessions récentes. Affiche le statut, le résumé du prompt et la dernière mise à jour.",
+  docs_tui_cmd_resume: "Reprend une session par son id. Le transcript et le contexte sont restaurés depuis le disque.",
+  docs_tui_cmd_new: "Démarre une nouvelle session. Efface le transcript et génère un nouvel id de session.",
+  docs_tui_cmd_handoff:
+    "Fork une nouvelle session depuis la session courante. Passez un id de session pour résumer et transférer une autre session.",
+  docs_tui_cmd_brain: "Consulte le catalogue Brain et change le brain model par défaut.",
+  docs_tui_cmd_mode: "Consulte ou change le mode d'exécution. Passez auto ou radical, ou omettez l'argument pour voir le mode actuel.",
+  docs_tui_cmd_auto_radical: "Change rapidement le mode d'exécution en auto ou radical sans ouvrir le panneau de mode.",
+  docs_tui_cmd_theme: "Affiche le thème TUI résolu par le système (dark ou light). Le thème s'auto-détecte depuis l'apparence du terminal.",
+  docs_tui_cmd_team_test:
+    "Diagnostic : force chaque rôle à exécuter le prompt en parallèle. Utile pour vérifier le comportement des rôles et la disponibilité des modèles.",
+  docs_tui_cmd_skill: "Liste les skills projet et utilisateur chargés depuis .agents/skill et ~/.braincode/skills.",
+  docs_tui_cmd_agents: "Affiche le chemin, la taille et le statut de chargement de AGENTS.md.",
+  docs_tui_cmd_files: "Rafraîchit l'index @file utilisé pour l'autocomplétion des noms de fichiers.",
+  docs_tui_cmd_clear: "Efface le transcript. Cela ne démarre pas une nouvelle session.",
+  docs_tui_cmd_exit: "Quitte le TUI.",
+  docs_tui_shortcuts_title: "Raccourcis clavier",
+  docs_tui_shortcuts_intro:
+    "Ces raccourcis fonctionnent globalement dans le TUI. Les raccourcis spécifiques à un panneau sont affichés dans le pied de celui-ci.",
+  docs_tui_shortcut_intent: "Bascule l'overlay Intent Graph.",
+  docs_tui_shortcut_fold: "Bascule l'état de repli du transcript (réduire/développer les éléments longs).",
+  docs_tui_shortcut_paste: "Colle le contenu du presse-papiers. Les images sont sauvegardées dans le dossier de session et insérées comme tokens @path.",
+  docs_tui_shortcut_history: "Navigue dans l'historique des prompts soumis.",
+  docs_tui_shortcut_scroll: "Fait défiler le transcript vers le haut ou le bas quand la zone de saisie est vide.",
+  docs_tui_shortcut_page: "Fait défiler le transcript d'une page de viewport.",
+  docs_tui_shortcut_home_end: "Saute en haut ou en bas du transcript.",
+  docs_tui_shortcut_newline: "Insère un saut de ligne dans la zone de saisie sans soumettre.",
+  docs_tui_shortcut_files: "Tapez @ pour ouvrir l'overlay des noms de fichiers. Tab/Enter insère le chemin sélectionné.",
+  docs_tui_shortcut_sessions: "Tapez @@ pour ouvrir l'overlay des références de session. Tab/Enter insère l'id sélectionné.",
+  docs_tui_shortcut_commands: "Tapez / pour ouvrir l'overlay des commandes. Tab/Enter exécute ou insère la commande sélectionnée.",
+  docs_tui_shortcut_accept: "Accepte la suggestion actuelle de l'overlay (commande, fichier ou session).",
+  docs_tui_shortcut_esc:
+    "Ferme l'overlay ou le panneau actif. Si une exécution est en cours, l'interrompt. Appuyez deux fois rapidement pour vider la zone de saisie.",
+  docs_tui_shortcut_exit: "Quitte le TUI.",
+  docs_tui_panels_title: "Panneaux",
+  docs_tui_panels_intro:
+    "Le TUI affiche plusieurs panneaux interactifs pour gérer l'état runtime. Chaque panneau a ses propres contrôles clavier affichés dans le pied.",
+  docs_tui_panel_decision:
+    "Apparaît quand un appel d'outil nécessite une approbation utilisateur. Options : approuver une fois (y), approuver pour toute la session (s), ou bloquer (n/Esc). Naviguez avec ↑↓, confirmez avec Enter, cochez avec Space.",
+  docs_tui_panel_mcp:
+    "Parcourez les serveurs MCP découverts depuis .mcp.json et ~/.braincode/. Naviguez avec ↑↓, Enter pour revérifier la santé, Space/e pour activer/désactiver, v pour voir la config.",
+  docs_tui_panel_hooks:
+    "Parcourez les hooks de cycle de vie depuis .agents/hooks.json et ~/.braincode/hooks.json. Naviguez avec ↑↓, Enter/v pour voir les détails, Space/e pour activer/désactiver.",
+  docs_tui_panel_sessions:
+    "Parcourez les sessions récentes depuis ~/.braincode/sessions/. Naviguez avec ↑↓, Enter pour reprendre, v pour voir les métadonnées, Esc pour fermer.",
+  docs_tui_panel_brain:
+    "Parcourez les Brain Models disponibles. Naviguez avec ↑↓, Enter/s pour définir par défaut, v pour voir les mappings de rôles, Esc pour fermer.",
+  docs_tui_panel_intent:
+    "Affiche le graphe d'intention en direct avec la décomposition de tâche, les statuts todo et les décisions de routage. Ctrl+O bascule, /plan rafraîchit, Esc ferme.",
+  docs_tui_panel_error: "Affiche les erreurs runtime avec des messages humanisés et des indices. Appuyez sur Enter, Esc ou q pour fermer.",
+
+  docs_troubleshoot_title: "12. Dépannage",
   docs_troubleshoot_keys_title: "Clés API non détectées",
   docs_troubleshoot_keys_body:
     "Vérifiez les permissions du fichier ~/.braincode/auth.json (devrait être 0600). Utilisez braincode config pour ré-entrer la clé ; n'éditez pas le fichier manuellement sauf si vous connaissez le schéma.",

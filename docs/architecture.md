@@ -240,7 +240,7 @@ The adapter boundary is:
 Braincode reads project-local support files from the active project root:
 
 - `AGENTS.md` provides durable project instructions and conventions.
-- `.mcp.json` declares project MCP servers. The runtime may use this file to configure MCP tools, but model prompts should only receive safe metadata such as server names and the config path, not raw secrets or full command configuration.
+- `.mcp.json` declares project MCP servers. The runtime may use trusted project entries to configure MCP tools, but model prompts should only receive safe metadata such as server names and the config path, not raw secrets or full command configuration. User-level MCP config is treated as user-installed/trusted; project entries must set `trusted: true` before Braincode starts their commands.
 - `.agents/skill` contains project-local skills. A skill can live at `.agents/skill/<skill-id>/SKILL.md` or as a Markdown file directly under `.agents/skill`.
 - `.agents/hooks.json` contains project-local lifecycle hooks.
 

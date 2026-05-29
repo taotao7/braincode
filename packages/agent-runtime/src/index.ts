@@ -1037,8 +1037,9 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
     beforeToolCall: async (context, signal) => {
       if (options.mode === "radical") return undefined
-      if (options.onToolApproval) {
-        const decision = await options.onToolApproval?.({
+      const requiresApproval = toolCallRequiresApproval(context.toolCall.name, context.args)
+      if (options.onToolApproval && requiresApproval) {
+        const decision = await options.onToolApproval({
           toolCallId: context.toolCall.id,
           toolName: context.toolCall.name,
           args: context.args,
@@ -1048,7 +1049,7 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
         }
         return undefined
       }
-      if (toolCallRequiresApproval(context.toolCall.name, context.args)) {
+      if (requiresApproval) {
         return { block: true, reason: `Tool approval callback is required for risky tool call: ${context.toolCall.name}` }
       }
       return undefined
@@ -1451,6 +1452,7 @@ function summarizeToolResultForDebug(result: unknown): Record<string, unknown> {
 
 function toolCallRequiresApproval(toolName: string, args: unknown): boolean {
   const name = toolName.toLowerCase()
+  if (name === "web_search" || name.startsWith("mcp__")) return false
   if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)) return true
   if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return true
   const serialized = safeStringify(args).toLowerCase()
@@ -1555,6 +1557,38 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
     status: results.every((result) => result.status === "passed") ? "passed" : "failed",
     results,
   }
+}
+
+export async function runPatchChecksWithApproval(
+  projectRoot: string,
+  options: PatchCheckOptions = {},
+  approval: {
+    mode: BraincodeMode
+    sessionId: string
+    attempt: number
+    onToolApproval?: AgentRunRequest["onToolApproval"]
+    signal?: AbortSignal
+  },
+): Promise<PatchCheckSummary> {
+  if (options.enabled === false) return runPatchChecks(projectRoot, options)
+  if (approval.mode !== "radical") {
+    if (!approval.onToolApproval) {
+      return { status: "skipped", reason: "check scripts require command execution approval", results: [] }
+    }
+    const decision = await approval.onToolApproval({
+      toolCallId: `patch-checks:${approval.sessionId}:${approval.attempt}`,
+      toolName: "run_script",
+      args: {
+        scripts: options.scripts?.length ? options.scripts : [...CHECK_SCRIPT_PRIORITY],
+        reason: "post-patch verification",
+      },
+    }, approval.signal)
+    if (approval.signal?.aborted) throw createRunAbortedError()
+    if (decision?.approved === false) {
+      return { status: "skipped", reason: `check scripts blocked: ${decision.reason ?? "not approved"}`, results: [] }
+    }
+  }
+  return runPatchChecks(projectRoot, options)
 }
 
 async function collectPatchDiffSnapshot(projectRoot: string, maxChars = MAX_REVIEW_DIFF_CHARS): Promise<PatchDiffSnapshot | undefined> {
@@ -1663,12 +1697,13 @@ async function runPackageScriptCheck(
     const command = packageManager.command
     const args = packageManager.runArgs(script)
     let settled = false
-    let child
+    let child: ReturnType<typeof spawn>
     try {
       child = spawn(command, args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
+        detached: process.platform !== "win32",
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -1702,7 +1737,7 @@ async function runPackageScriptCheck(
     }
     const timer = setTimeout(() => {
       timedOut = true
-      try { child.kill("SIGTERM") } catch { /* ignore */ }
+      terminateProcessTree(child, "SIGTERM")
     }, options.timeoutMs)
 
     child.stdout?.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk) })
@@ -1734,6 +1769,27 @@ async function runPackageScriptCheck(
       })
     })
   })
+}
+
+function terminateProcessTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (pid && process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal)
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  if (pid && process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => {})
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  try { child.kill(signal) } catch { /* ignore */ }
 }
 
 async function runGitCommand(cwd: string, args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
@@ -2741,12 +2797,17 @@ export function normalizeReviewDecisionText(text: string, review: WorkerResult, 
   const requiredChanges = normalizeStringArray(parsedRecord?.requiredChanges)
   const blockingIssues = normalizeStringArray(parsedRecord?.blockingIssues)
   const residualRisks = uniqueStrings([...normalizeStringArray(parsedRecord?.residualRisks), ...review.risks])
-  const fallbackDecision = fallbackReviewDecision(review, checks)
+  const missingDecisionChange = explicitDecision
+    ? undefined
+    : "Review did not provide an explicit structured decision; rerun or inspect review output before treating this as approved."
+  const fallbackDecision = missingDecisionChange
+    ? fallbackReviewDecisionWithoutExplicitDecision(review)
+    : fallbackReviewDecision(review, checks)
   return applyCheckGateToReviewDecision({
     decision: explicitDecision ?? fallbackDecision,
     rationale,
     findings,
-    requiredChanges,
+    requiredChanges: missingDecisionChange ? uniqueStrings([...requiredChanges, missingDecisionChange]) : requiredChanges,
     blockingIssues,
     residualRisks,
   }, checks)
@@ -2791,6 +2852,11 @@ function fallbackReviewDecision(review: WorkerResult, checks?: PatchCheckSummary
   if (review.progress.status === "blocked" || review.progress.status === "failed") return "blocked"
   if (checks?.status === "failed") return "changes_requested"
   return review.risks.length > 0 ? "changes_requested" : "approved"
+}
+
+function fallbackReviewDecisionWithoutExplicitDecision(review: WorkerResult): ReviewDecisionStatus {
+  if (review.progress.status === "blocked" || review.progress.status === "failed") return "blocked"
+  return "changes_requested"
 }
 
 function applyCheckGateToReviewDecision(decision: ReviewDecision, checks?: PatchCheckSummary): ReviewDecision {
@@ -3568,7 +3634,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           todoIds: primaryTodoIds,
         })
         const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
-        const checks = hasPatchActivity(patchAfterPrimary) ? await runPatchChecks(cwd, checkOptions) : undefined
+        const checks = hasPatchActivity(patchAfterPrimary)
+          ? await runPatchChecksWithApproval(cwd, checkOptions, {
+              mode: plan.mode,
+              sessionId,
+              attempt: attempt + 1,
+              onToolApproval: request.onToolApproval,
+              signal: request.signal,
+            })
+          : undefined
         if (checks) {
           await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
         }

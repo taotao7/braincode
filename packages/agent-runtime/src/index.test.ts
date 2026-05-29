@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
 import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings } from "@braincode/config"
-import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan } from "./index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
@@ -89,6 +89,87 @@ test("collectMcpToolServers skips MCP servers with unresolved auth refs", () => 
 
   expect(result.servers).toEqual([])
   expect(result.skipped[0]?.reason).toContain("Missing API key")
+})
+
+test("collectMcpToolServers trusts user MCP but skips untrusted project MCP before auth resolution", () => {
+  const userResult = collectMcpToolServers({
+    userMcp: {
+      path: "/tmp/user-mcp.json",
+      serverNames: ["filesystem"],
+      config: { mcpServers: { filesystem: { command: "filesystem-mcp" } } },
+    },
+  })
+  expect(userResult.servers.map((server) => `${server.scope}:${server.name}`)).toEqual(["user:filesystem"])
+
+  const projectResult = collectMcpToolServers({
+    projectMcp: {
+      path: "/tmp/project/.mcp.json",
+      serverNames: ["filesystem"],
+      config: {
+        mcpServers: {
+          filesystem: {
+            command: "filesystem-mcp",
+            env: { SECRET: createBraincodeAuthEnvRef("danger") },
+          },
+        },
+      },
+    },
+    auth: { providers: {} },
+  })
+  expect(projectResult.servers).toEqual([])
+  expect(projectResult.skipped).toEqual([
+    { scope: "project", name: "filesystem", reason: "untrusted project MCP server" },
+  ])
+
+  const trustedProject = collectMcpToolServers({
+    projectMcp: {
+      path: "/tmp/project/.mcp.json",
+      serverNames: ["filesystem"],
+      config: {
+        mcpServers: {
+          filesystem: {
+            command: "filesystem-mcp",
+            trusted: true,
+            env: { SECRET: createBraincodeAuthEnvRef("danger") },
+          },
+        },
+      },
+    },
+    auth: { providers: { danger: { apiKey: "project-secret" } } },
+  })
+  expect(trustedProject.servers[0]?.env).toEqual({ SECRET: "project-secret" })
+})
+
+test("McpToolHub surfaces MCP isError tool calls as failed tool executions", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-error-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await Bun.write(
+    serverScript,
+    [
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "function send(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n'); }",
+      "rl.on('line', (line) => {",
+      "  const msg = JSON.parse(line);",
+      "  if (msg.method === 'initialize') send(msg.id, { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'test' } });",
+      "  else if (msg.method === 'tools/list') send(msg.id, { tools: [{ name: 'fail_tool', inputSchema: { type: 'object', properties: {} } }] });",
+      "  else if (msg.method === 'tools/call') send(msg.id, { content: [{ type: 'text', text: 'boom' }], isError: true });",
+      "});",
+    ].join("\n"),
+  )
+
+  const hub = new McpToolHub()
+  try {
+    const report = await hub.connect([{ name: "test", scope: "user", command: "bun", args: [serverScript] }])
+    expect(report.failed).toEqual([])
+    const tool = hub.getTools().find((candidate) => candidate.name === "mcp__test__fail_tool")
+    if (!tool) throw new Error("missing MCP tool")
+
+    await expect(tool.execute("call-1", {} as never)).rejects.toThrow("boom")
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
 })
 
 test("normalizeRouterDecision does not inherit heuristic rush support for specialist routing", () => {
@@ -692,6 +773,40 @@ test("runPatchChecks supports configured script selection and disabled checks", 
   }
 })
 
+test("runPatchChecksWithApproval skips command execution when approval is denied", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-approval-test-"))
+  try {
+    await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
+      scripts: {
+        check: "bun -e \"await Bun.write('ran.txt', 'ran')\"",
+      },
+    }))
+
+    const skipped = await runPatchChecksWithApproval(projectRoot, { timeoutMs: 10_000 }, {
+      mode: "auto",
+      sessionId: "approval-test",
+      attempt: 1,
+      onToolApproval: () => ({ approved: false, reason: "no commands" }),
+    })
+
+    expect(skipped.status).toBe("skipped")
+    expect(skipped.reason).toContain("no commands")
+    await expect(Bun.file(join(projectRoot, "ran.txt")).exists()).resolves.toBe(false)
+
+    const passed = await runPatchChecksWithApproval(projectRoot, { timeoutMs: 10_000, maxOutputBytes: 4_000 }, {
+      mode: "auto",
+      sessionId: "approval-test",
+      attempt: 2,
+      onToolApproval: () => ({ approved: true }),
+    })
+
+    expect(passed.status).toBe("passed")
+    await expect(Bun.file(join(projectRoot, "ran.txt")).exists()).resolves.toBe(true)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("runPatchChecks uses npm when package-lock.json is present", async () => {
   const npmCheck = spawnSync("npm", ["--version"])
   if (npmCheck.status !== 0) return
@@ -782,6 +897,19 @@ test("normalizeReviewDecisionText falls back to risks when decision is missing",
   expect(decision.decision).toBe("changes_requested")
   expect(decision.rationale).toBe("Found an issue.")
   expect(decision.residualRisks).toEqual(["missing regression test"])
+})
+
+test("normalizeReviewDecisionText does not approve malformed review output without an explicit decision", () => {
+  const decision = normalizeReviewDecisionText("looks fine to me", {
+    summary: "looks fine to me",
+    progress: { status: "completed" },
+    risks: [],
+    artifacts: [],
+    nextQuestions: [],
+  } as never)
+
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.requiredChanges[0]).toContain("explicit structured decision")
 })
 
 test("demo benchmark task catalog covers representative coding categories", () => {

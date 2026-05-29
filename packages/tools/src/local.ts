@@ -900,6 +900,7 @@ class ExecSessionManager {
       env: process.env,
       shell: request.shell ?? true,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     })
     const session: ExecSession = {
       id,
@@ -1032,10 +1033,10 @@ class ExecSessionManager {
   }
 
   private terminate(session: ExecSession) {
-    try { session.child.kill("SIGTERM") } catch { /* ignore */ }
+    terminateProcessTree(session.child, "SIGTERM")
     setTimeout(() => {
       if (!session.closed) {
-        try { session.child.kill("SIGKILL") } catch { /* ignore */ }
+        terminateProcessTree(session.child, "SIGKILL")
       }
     }, 1_000)
   }
@@ -1055,13 +1056,14 @@ async function runProcess(
   },
 ): Promise<ProcessResult> {
   return await new Promise<ProcessResult>((resolvePromise, reject) => {
-    let child
+    let child: ChildProcessWithoutNullStreams
     try {
       child = spawn(command, args, {
         cwd: options.cwd,
         env: process.env,
         shell: options.shell ?? false,
         stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       })
     } catch {
       resolvePromise({ spawned: false, command, args, exitCode: null, signal: null, stdout: "", stderr: "", timedOut: false })
@@ -1076,7 +1078,7 @@ async function runProcess(
       return next.byteLength > options.maxOutputBytes ? next.subarray(next.byteLength - options.maxOutputBytes) : next
     }
     const abort = () => {
-      try { child.kill("SIGTERM") } catch { /* ignore */ }
+      terminateProcessTree(child, "SIGTERM")
     }
     const timer = setTimeout(() => {
       timedOut = true
@@ -1117,6 +1119,27 @@ async function runProcess(
     if (options.input !== undefined) child.stdin?.end(options.input)
     else child.stdin?.end()
   })
+}
+
+function terminateProcessTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (pid && process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal)
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  if (pid && process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => {})
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  try { child.kill(signal) } catch { /* ignore */ }
 }
 
 function appendBoundedBuffer(current: Buffer, chunk: Buffer, maxBytes: number): Buffer {

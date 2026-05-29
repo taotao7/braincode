@@ -259,7 +259,86 @@ export const zh = {
     "打开最新 intent graph。它展示当前任务拆解、依赖边、todo 状态、路由来源、置信度和路由原因。",
   docs_cli_cmd_daemon: "（计划中）将 Braincode 作为长期本地服务运行。",
 
-  docs_troubleshoot_title: "11. 故障排除",
+  docs_cli_core_title: "核心命令",
+  docs_cli_run_flags_title: "Run 权限标志",
+  docs_cli_run_flags_intro:
+    "使用 braincode run 进行非交互式执行时，必须选择一个权限模式。一次只能使用一个标志。",
+  docs_cli_flag_readonly:
+    "仅暴露只读本地工具（list_files、read_file、search_files、git_diff、get_changed_files）。不允许编辑或执行命令。",
+  docs_cli_flag_allow_edits:
+    "暴露读写本地工具并自动批准文件编辑（edit_file、apply_patch），但阻止命令执行、MCP 工具和未知工具。",
+  docs_cli_flag_yes:
+    "暴露所有本地工具并自动批准每一次工具调用，实现完全非交互式执行。请谨慎使用。",
+  docs_cli_benchmark_title: "基准测试",
+  docs_cli_benchmark_intro:
+    "运行代表性的编码任务规划基准测试，以验证路由行为并衡量规划质量。",
+  docs_cli_cmd_benchmark:
+    "使用配置的 Brain Model 运行完整基准测试套件。输出每个任务的通过/失败状态，以及路由来源、角色、审查标记和 Worker 列表。",
+  docs_cli_cmd_benchmark_list:
+    "打印可用的基准测试任务 ID 和标题。配合 --json 输出机器可读的 JSON。",
+  docs_cli_cmd_benchmark_flags:
+    "--heuristic 跳过 routeBrain，对确定性回退进行基准测试。--task 过滤到特定任务 ID（可重复或用逗号分隔）。--json 输出 JSON。",
+
+  docs_tui_title: "11. TUI 参考",
+  docs_tui_intro:
+    "基于 Ink 的终端 UI 是 Braincode 的主要交互界面。本节涵盖斜杠命令、键盘快捷键和交互式面板。",
+  docs_tui_commands_title: "斜杠命令",
+  docs_tui_commands_intro:
+    "在输入框中键入 / 打开命令覆盖层。按 Tab 或 Enter 接受建议。也可以直接键入完整命令。",
+  docs_tui_cmd_help: "列出所有斜杠命令，包括动态加载的 Skills。",
+  docs_tui_cmd_plan:
+    "预览配置的 routeBrain 决策。显示路由来源、置信度、原因、主角色、Worker、模型、模式和预算。加 --heuristic 使用确定性回退。",
+  docs_tui_cmd_plan_heuristic: "在 TUI 中强制使用确定性启发式路由。诊断路径，不是正常的规划流程。",
+  docs_tui_cmd_intent: "打开最新的意图图（快捷键 Ctrl+O）。展示任务拆解、依赖边、todo 状态、路由来源、置信度和路由原因。",
+  docs_tui_cmd_mcp: "打开交互式 MCP 控制面板。浏览服务器、检查健康状态、启用/禁用、查看配置。",
+  docs_tui_cmd_hooks: "打开交互式 Hooks 控制面板。浏览处理器、启用/禁用、查看命令详情。",
+  docs_tui_cmd_sessions: "浏览最近会话。显示状态、提示摘要和最后更新时间。",
+  docs_tui_cmd_resume: "按 ID 恢复会话。会从磁盘恢复对话记录和上下文。",
+  docs_tui_cmd_new: "开始一个新会话。清空对话记录并生成新的会话 ID。",
+  docs_tui_cmd_handoff: "从当前会话 Fork 出一个新会话。传入会话 ID 可总结并交接另一个会话。",
+  docs_tui_cmd_brain: "查看 Brain 目录并切换默认 Brain Model。",
+  docs_tui_cmd_mode: "查看或切换执行模式。传入 auto 或 radical，或不传参数查看当前模式。",
+  docs_tui_cmd_auto_radical: "快速切换执行模式为 auto 或 radical，无需打开模式面板。",
+  docs_tui_cmd_theme: "显示系统解析的 TUI 主题（dark 或 light）。主题根据终端外观自动检测。",
+  docs_tui_cmd_team_test: "诊断：强制每个角色并行运行该提示。用于验证角色行为和模型可用性。",
+  docs_tui_cmd_skill: "列出从 .agents/skill 和 ~/.braincode/skills 加载的项目和用户 Skills。",
+  docs_tui_cmd_agents: "显示 AGENTS.md 文件路径、大小以及是否已加载。",
+  docs_tui_cmd_files: "刷新用于文件名自动补全的 @file 索引。",
+  docs_tui_cmd_clear: "清空对话记录。这不会开始一个新会话。",
+  docs_tui_cmd_exit: "退出 TUI。",
+  docs_tui_shortcuts_title: "键盘快捷键",
+  docs_tui_shortcuts_intro: "以下快捷键在 TUI 中全局生效。面板专属快捷键显示在面板底部。",
+  docs_tui_shortcut_intent: "切换意图图覆盖层。",
+  docs_tui_shortcut_fold: "切换对话记录的折叠状态（折叠/展开长内容）。",
+  docs_tui_shortcut_paste: "粘贴剪贴板内容。图片会保存到会话目录并作为 @path 标记插入。",
+  docs_tui_shortcut_history: "在已提交的提示历史记录中导航。",
+  docs_tui_shortcut_scroll: "当输入框为空时，向上或向下滚动对话记录。",
+  docs_tui_shortcut_page: "按视口页数滚动对话记录。",
+  docs_tui_shortcut_home_end: "跳转到对话记录的顶部或底部。",
+  docs_tui_shortcut_newline: "在输入框中插入换行而不提交。",
+  docs_tui_shortcut_files: "键入 @ 打开文件名覆盖层。按 Tab/Enter 插入选中的文件路径。",
+  docs_tui_shortcut_sessions: "键入 @@ 打开会话引用覆盖层。按 Tab/Enter 插入选中的会话 ID。",
+  docs_tui_shortcut_commands: "键入 / 打开命令覆盖层。按 Tab/Enter 运行或插入选中的命令。",
+  docs_tui_shortcut_accept: "接受当前覆盖层建议（命令、文件或会话）。",
+  docs_tui_shortcut_esc: "关闭当前覆盖层或面板。如果运行正在进行，则中断运行。快速按两次可清空输入框。",
+  docs_tui_shortcut_exit: "退出 TUI。",
+  docs_tui_panels_title: "面板",
+  docs_tui_panels_intro: "TUI 显示多个交互式面板用于管理运行时状态。每个面板都有自己的键盘控制，显示在面板底部。",
+  docs_tui_panel_decision:
+    "当工具调用需要用户审批时出现。选项：本次允许（y）、整个会话允许（s）或拦截（n/Esc）。用 ↑↓ 导航，Enter 确认，Space 勾选。",
+  docs_tui_panel_mcp:
+    "浏览从 .mcp.json 和 ~/.braincode/ 发现的 MCP 服务器。用 ↑↓ 导航，Enter 重新检查健康状态，Space/e 启用/禁用，v 查看配置。",
+  docs_tui_panel_hooks:
+    "浏览来自 .agents/hooks.json 和 ~/.braincode/hooks.json 的生命周期钩子。用 ↑↓ 导航，Enter/v 查看详情，Space/e 启用/禁用。",
+  docs_tui_panel_sessions:
+    "浏览 ~/.braincode/sessions/ 中的最近会话。用 ↑↓ 导航，Enter 恢复，v 查看元数据，Esc 关闭。",
+  docs_tui_panel_brain:
+    "浏览可用的 Brain Models。用 ↑↓ 导航，Enter/s 设为默认，v 查看角色映射，Esc 关闭。",
+  docs_tui_panel_intent:
+    "显示实时意图图，包含任务拆解、todo 状态和路由决策。Ctrl+O 切换，/plan 刷新，Esc 关闭。",
+  docs_tui_panel_error: "显示运行时错误及人性化提示。按 Enter、Esc 或 q 关闭。",
+
+  docs_troubleshoot_title: "12. 故障排除",
   docs_troubleshoot_keys_title: "API 密钥未被识别",
   docs_troubleshoot_keys_body:
     "检查 ~/.braincode/auth.json 文件权限（应为 0600）。用 braincode config 重新输入密钥；除非你了解 schema，不要手动编辑文件。",

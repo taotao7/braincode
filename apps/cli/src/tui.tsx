@@ -40,6 +40,7 @@ import {
   resolveMcpServerEnv,
   setHookHandlerEnabled,
   setMcpServerDisabled,
+  setMcpServerTrusted,
   writeSettings,
   type BraincodeMode,
   type BraincodeTheme,
@@ -1268,6 +1269,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       }));
       return;
     }
+    if (entry.scope === "project" && entry.entry.trusted !== true) {
+      updateMcpEntry(entry.name, entry.filePath, () => ({
+        health: "skipped",
+        detail: "untrusted project MCP server",
+      }));
+      return;
+    }
     let env: Record<string, string> | undefined;
     try {
       env = resolveMcpServerEnv(entry.entry.env, await readAuth());
@@ -1350,6 +1358,55 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         health: "pending",
       };
       void runMcpHealth(0, refreshed);
+    }
+  }
+
+  async function toggleMcpTrust(target: McpPanelEntry) {
+    if (target.scope !== "project") {
+      setMcpPanel((previous) =>
+        previous
+          ? { ...previous, message: `${target.name} is user-global and already trusted.` }
+          : previous,
+      );
+      return;
+    }
+    const next = target.entry.trusted !== true;
+    try {
+      await setMcpServerTrusted(target.filePath, target.name, next);
+    } catch (error) {
+      setMcpPanel((previous) =>
+        previous
+          ? { ...previous, message: `Trust toggle failed: ${formatError(error)}` }
+          : previous,
+      );
+      return;
+    }
+    updateMcpEntry(target.name, target.filePath, () => ({
+      entry: { ...target.entry, trusted: next || undefined },
+      health: target.entry.disabled ? "skipped" : "pending",
+      detail: target.entry.disabled ? "disabled" : undefined,
+      toolCount: undefined,
+      latencyMs: undefined,
+    }));
+    setMcpPanel((previous) =>
+      previous
+        ? {
+            ...previous,
+            message: `${target.name} ${next ? "trusted" : "untrusted"}`,
+          }
+        : previous,
+    );
+    try {
+      setProjectSupport(await readProjectSupport(projectRoot));
+    } catch {
+      // ignore reload error
+    }
+    if (next && !target.entry.disabled) {
+      void runMcpHealth(0, {
+        ...target,
+        entry: { ...target.entry, trusted: true },
+        health: "pending",
+      });
     }
   }
 
@@ -3269,6 +3326,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         void toggleMcpEntry(target);
         return;
       }
+      if (input === "t") {
+        void toggleMcpTrust(target);
+        return;
+      }
       if (input === "v") {
         viewMcpConfig(target);
         return;
@@ -3810,6 +3871,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
                   {index === mcpPanel.selected ? "›" : " "} {healthGlyph(entry)}{" "}
                   {entry.scope === "user" ? "user" : "proj"} · {entry.name}
                   {entry.entry.disabled ? " (disabled)" : ""}
+                  {entry.scope === "project" && entry.entry.trusted !== true
+                    ? " (untrusted)"
+                    : ""}
                 </Text>
                 <Text color={colors.gray}>
                   {" "}
@@ -3822,7 +3886,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             ) : null}
             <Text color={colors.gray}>
               ↑↓ / Ctrl+P/N navigate · Enter recheck · Space/e enable·disable ·
-              v view config · Esc close
+              t trust · v view config · Esc close
             </Text>
           </Box>
         ) : null}
@@ -6978,6 +7042,7 @@ function formatWorkerPhase(phase: WorkerLifecycleEvent["phase"]): string {
 
 function classifyToolCall(toolName: string, args: unknown): ToolCategory {
   const name = toolName.toLowerCase();
+  if (name.startsWith("mcp__")) return "mcp";
   if (
     /(web.?search|search_query|search-query|brave|tavily|serp|firecrawl|browser_search|web_fetch|fetch_url)/.test(
       name,
@@ -7009,7 +7074,6 @@ function classifyToolCall(toolName: string, args: unknown): ToolCategory {
     )
   )
     return "execute";
-  if (name.startsWith("mcp__")) return "mcp";
   return "tool";
 }
 
@@ -7054,6 +7118,7 @@ function requiresToolDecision(
   toolName: string,
   args: unknown,
 ): boolean {
+  if (category === "mcp" || toolName.toLowerCase() === "web_search") return false;
   if (category === "execute" || category === "write") return true;
   const text = `${toolName} ${summarizeToolArgs(args)}`.toLowerCase();
   return /\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from|truncate\s+table)\b/.test(
