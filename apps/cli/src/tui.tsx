@@ -394,7 +394,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   }
 }
 
-const INPUT_MAX_LINES = 6;
+const INPUT_MAX_LINES = 1;
 const INPUT_PROMPT_PREFIX = "› ";
 const FRAME_RESERVED_COLUMNS = 4;
 const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
@@ -4563,6 +4563,41 @@ function fitVisualWidth(text: string, width: number): string {
   return `${output}…`;
 }
 
+function clipVisualAroundIndex(
+  text: string,
+  focusIndex: number,
+  width: number,
+): string {
+  if (visualWidth(text) <= width) return text;
+  const chars = Array.from(text);
+  const focus = clamp(
+    Array.from(text.slice(0, focusIndex)).length,
+    0,
+    chars.length - 1,
+  );
+  let start = 0;
+  let end = chars.length;
+
+  const render = () =>
+    `${start > 0 ? "…" : ""}${chars.slice(start, end).join("")}${end < chars.length ? "…" : ""}`;
+
+  while (visualWidth(render()) > width && start < end) {
+    const leftDistance = focus - start;
+    const rightDistance = end - focus - 1;
+    if (rightDistance > leftDistance && end > focus + 1) {
+      end--;
+    } else if (start < focus) {
+      start++;
+    } else if (end > focus + 1) {
+      end--;
+    } else {
+      break;
+    }
+  }
+
+  return fitVisualWidth(render(), width);
+}
+
 function padVisual(text: string, width: number): string {
   return " ".repeat(Math.max(0, width - visualWidth(text)));
 }
@@ -5661,34 +5696,19 @@ function clipDraftToWindow(
   draft: string,
   cursor: number,
   width: number,
-  maxLines: number,
+  _maxLines: number,
 ): DraftWindow {
-  const composed = composeDraftLine(draft, cursor);
-  const lines = wrapByVisualWidth(composed, width);
-  if (lines.length <= maxLines) {
-    return { lines, hiddenAbove: 0, hiddenBelow: 0 };
-  }
-  // Cursor position: head length + 1 for caret offset, then "› " adds 2 chars.
-  const cursorOffsetInComposed = 2 + clamp(cursor, 0, draft.length);
-  const cursorRow = locateCursorRow(composed, cursorOffsetInComposed, width);
-  let start = Math.max(0, cursorRow - Math.floor(maxLines / 2));
-  let end = start + maxLines;
-  if (end > lines.length) {
-    end = lines.length;
-    start = Math.max(0, end - maxLines);
-  }
-  if (cursorRow < start) {
-    start = cursorRow;
-    end = Math.min(lines.length, start + maxLines);
-  }
-  if (cursorRow >= end) {
-    end = Math.min(lines.length, cursorRow + 1);
-    start = Math.max(0, end - maxLines);
-  }
+  const safeWidth = Math.max(1, width);
+  const cursorPosition = clamp(cursor, 0, draft.length);
+  const composed = composeDraftLine(draft, cursorPosition).replace(
+    /\r?\n/g,
+    " ",
+  );
+  const cursorOffsetInComposed = INPUT_PROMPT_PREFIX.length + cursorPosition;
   return {
-    lines: lines.slice(start, end),
-    hiddenAbove: start,
-    hiddenBelow: lines.length - end,
+    lines: [clipVisualAroundIndex(composed, cursorOffsetInComposed, safeWidth)],
+    hiddenAbove: 0,
+    hiddenBelow: 0,
   };
 }
 
