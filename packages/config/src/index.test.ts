@@ -395,7 +395,7 @@ test("non-secret config documents can be read and written from an explicit home"
   await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "brain" }] })
   const models = await readModels(home)
   expect(models.models[0]).toEqual({ id: "fast" })
-  expect(models.models.some((model) => (model as { id?: string }).id === "openai/gpt-image-2")).toBe(true)
+  expect(models.models.some((model) => (model as { id?: string }).id === "openai/gpt-image-2")).toBe(false)
   const tools = await readTools(home)
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
   expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(true)
@@ -469,7 +469,7 @@ test("readBrains migrates obsolete roles and stale default system prompts", asyn
   )
 
   const brains = await readBrains(home)
-  const brain = brains.brains[0] as { planner?: { systemPrompt?: string }; roles?: Record<string, { systemPrompt?: string }> }
+  const brain = brains.brains[0] as { planner?: { systemPrompt?: string }; roles?: Record<string, { systemPrompt?: string; imageModel?: { provider?: string; modelId?: string } }> }
 
   expect(brain.roles?.coding).toBeUndefined()
   expect(brain.roles?.fastReply).toBeUndefined()
@@ -480,6 +480,7 @@ test("readBrains migrates obsolete roles and stale default system prompts", asyn
   expect(brain.roles?.rush?.systemPrompt).toBe(agentRoleSystemPrompts.rush)
   expect(brain.roles?.pet?.systemPrompt).toBe(agentRoleSystemPrompts.pet)
   expect(brain.roles?.imageMaker?.systemPrompt).toBe(agentRoleSystemPrompts.imageMaker)
+  expect(brain.roles?.imageMaker?.imageModel).toMatchObject({ provider: "openai", modelId: "gpt-image-2" })
 })
 
 test("auth status lists configured provider names without returning secrets", async () => {

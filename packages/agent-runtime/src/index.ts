@@ -9,7 +9,7 @@ export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
 export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTasks, runDemoBenchmarkSuite } from "./benchmark"
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import type { ImageContent, Model } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ImageModelPolicy, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, appendTokenUsageRecord, defaultBrains, defaultModels, getBraincodeHome, normalizeTokenUsage, readAuth, readBrains, readHookSources, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type ProjectSupport, type SessionContext, type TokenUsagePhase } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type BrainTaskContext, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
@@ -130,6 +130,9 @@ export function humanizeAgentRuntimeError(error: unknown): string {
   }
   if (/Provider returned an empty assistant response/i.test(message)) {
     return `${message}\n\nHint: The provider returned HTTP success but no assistant content. Check the model API type in ~/.braincode/models.json; for OpenAI-compatible proxies, try switching this model between \`openai-responses\` and \`openai-completions\` in \`braincode config\`.`
+  }
+  if (/image input requires a vision-capable model|no configured vision-capable model/i.test(message)) {
+    return `${message}\n\nHint: This prompt includes an image, so Braincode can only use a model marked as Vision-capable. Enable Vision for a compatible model in \`braincode config\`, or let routeBrain select a configured vision model for this run.`
   }
   return message
 }
@@ -367,8 +370,14 @@ export type PlanRuntimeOptions = {
   projectRoot?: string
 }
 
-type RouterPlanDecision = AgentRoutingPlan & {
+type RouterWorkerPlan = AgentWorkerPlan & {
+  modelId?: string
+}
+
+type RouterPlanDecision = Omit<AgentRoutingPlan, "workers"> & {
+  workers: RouterWorkerPlan[]
   confidence?: number
+  modelId?: string
 }
 
 type WorkerTodoStatusHandler = (
@@ -662,7 +671,66 @@ function runtimeModelRequirementsForRole(role: AgentRole | RoutedAgentRole, imag
   return runtimeModelRequirementsForImages(images)
 }
 
+function imageModelPolicyToBraincodeModel(imageModel: ImageModelPolicy): BraincodeModel {
+  const provider = imageModel.provider.trim()
+  const modelId = imageModel.modelId.trim()
+  return {
+    id: `${provider}/${modelId}`,
+    provider,
+    modelId,
+    name: imageModel.name?.trim() || modelId,
+    api: "openai-images",
+    ...(imageModel.baseUrl?.trim() ? { baseUrl: imageModel.baseUrl.trim() } : {}),
+    contextWindow: 32000,
+    supportsTools: false,
+    supportsVision: false,
+    supportsImageGeneration: true,
+    defaultThinkingLevel: "off",
+  }
+}
+
+function imageGenerationSelectionFromPolicy(policy: ModelPolicy): RuntimeModelSelection | undefined {
+  const imageModel = policy.imageModel
+  if (!imageModel?.provider?.trim() || !imageModel.modelId?.trim()) return undefined
+  const configured = imageModelPolicyToBraincodeModel(imageModel)
+  return {
+    requested: policy,
+    configured,
+    piModel: {
+      id: configured.modelId,
+      name: configured.name,
+      provider: configured.provider,
+      api: "openai-images",
+      contextWindow: configured.contextWindow,
+      maxTokens: 0,
+    } as unknown as Model<any>,
+  }
+}
+
+function createRuntimeModelSelection(policy: ModelPolicy, configured: BraincodeModel): RuntimeModelSelection {
+  const piModel = isImageGenerationModel(configured)
+    ? ({
+        id: configured.modelId,
+        name: configured.name,
+        provider: configured.provider,
+        api: configured.api ?? "openai-images",
+        contextWindow: configured.contextWindow,
+        maxTokens: 0,
+      } as unknown as Model<any>)
+    : resolveBuiltInPiModel(configured).piModel
+  return {
+    requested: policy,
+    configured,
+    piModel,
+  }
+}
+
 export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeModelSelection {
+  if (requirements?.requiresImageGeneration) {
+    const directImageSelection = imageGenerationSelectionFromPolicy(policy)
+    if (directImageSelection) return directImageSelection
+  }
+
   const modelIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
   debugLog("runtime", "selecting runtime model", { modelIds, configuredModelCount: models.length, requirements })
@@ -675,21 +743,7 @@ export function selectRuntimeModel(policy: ModelPolicy, models: BraincodeModel[]
     }
 
     try {
-      const piModel = isImageGenerationModel(configured)
-        ? ({
-            id: configured.modelId,
-            name: configured.name,
-            provider: configured.provider,
-            api: configured.api ?? "openai-images",
-            contextWindow: configured.contextWindow,
-            maxTokens: 0,
-          } as unknown as Model<any>)
-        : resolveBuiltInPiModel(configured).piModel
-      const selection = {
-        requested: policy,
-        configured,
-        piModel,
-      }
+      const selection = createRuntimeModelSelection(policy, configured)
       const requirementError = runtimeModelRequirementError(selection, requirements)
       if (requirementError) {
         errors.push(`${modelId}: ${requirementError}`)
@@ -713,8 +767,8 @@ function toPiModelSummary(selection: RuntimeModelSelection): RuntimePiModelSumma
   }
 }
 
-function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[], requirements?: RuntimeModelRequirements): RuntimeWorkerPlan {
-  const policy = selectModelPolicy(brain, worker.role)
+function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainModel, models: BraincodeModel[], requirements?: RuntimeModelRequirements, policyOverride?: ModelPolicy): RuntimeWorkerPlan {
+  const policy = policyOverride ?? selectModelPolicy(brain, worker.role)
   const workerRequirements = worker.role === "imageMaker" ? { requiresImageGeneration: true } : requirements
   const selection = selectRuntimeModel(policy, models, workerRequirements)
   return {
@@ -736,40 +790,22 @@ async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, model
   const explicitIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
   const candidates: Array<{ selection: RuntimeModelSelection; apiKey: string }> = []
-  const seenIds = new Set<string>()
-  const seenProviders = new Set<string>()
 
-  for (const modelId of explicitIds) {
+  for (const [index, modelId] of explicitIds.entries()) {
     try {
-      const selection = selectRuntimeModel({ ...policy, modelId, fallbackModelIds: [] }, models, requirements)
+      const selection = selectRuntimeModel(
+        { ...policy, modelId, fallbackModelIds: [], ...(index === 0 ? {} : { imageModel: undefined }) },
+        models,
+        requirements,
+      )
       const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
       if (!apiKey) {
         errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
         continue
       }
-      seenIds.add(modelId)
-      seenProviders.add(selection.piModel.provider)
       candidates.push({ selection, apiKey })
     } catch (error) {
       errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  // Cross-provider safety net: append catalog-wide fallbacks so a regional/upstream
-  // failure on one provider (e.g. cliproxyapi → OpenAI 400 "User location is not
-  // supported") automatically rolls over to another provider with an available API key.
-  for (const model of models) {
-    if (seenIds.has(model.id)) continue
-    if (seenProviders.has(model.provider)) continue
-    try {
-      const selection = selectRuntimeModel({ ...policy, modelId: model.id, fallbackModelIds: [] }, models, requirements)
-      const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
-      if (!apiKey) continue
-      seenIds.add(model.id)
-      seenProviders.add(selection.piModel.provider)
-      candidates.push({ selection, apiKey })
-    } catch {
-      // ignore catalog-fallback failures; explicit errors are already collected
     }
   }
 
@@ -1087,8 +1123,56 @@ function enforceHandoffContextBudget(
   })
 }
 
-function estimateProviderContextBytes(messages: AgentMessage[], systemPrompt: string): number {
-  return utf8ByteLength(safeStringify({ systemPrompt, messages }))
+export function estimateProviderContextBytes(messages: AgentMessage[], systemPrompt: string): number {
+  return utf8ByteLength(safeStringify({ systemPrompt, messages: sanitizeMessagesForContextBudget(messages) }))
+}
+
+function sanitizeMessagesForContextBudget(messages: AgentMessage[]): unknown[] {
+  return messages.map((message) => sanitizeContextBudgetValue(message))
+}
+
+function sanitizeContextBudgetValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeContextBudgetValue(item))
+  if (!value || typeof value !== "object") return value
+  const record = value as Record<string, unknown>
+  if (isImageLikeContextBlock(record)) {
+    const sanitized: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(record)) {
+      if (key === "data" && typeof entry === "string") {
+        sanitized[key] = `[image data omitted from context budget: ${entry.length} chars]`
+      } else if (key === "image_url") {
+        sanitized[key] = summarizeImageUrlForContextBudget(entry)
+      } else if (key === "url" && typeof entry === "string" && entry.startsWith("data:image/")) {
+        sanitized[key] = `[image data URL omitted from context budget: ${entry.length} chars]`
+      } else {
+        sanitized[key] = sanitizeContextBudgetValue(entry)
+      }
+    }
+    return sanitized
+  }
+  return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, sanitizeContextBudgetValue(entry)]))
+}
+
+function isImageLikeContextBlock(record: Record<string, unknown>): boolean {
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : ""
+  if (type === "image" || type === "input_image" || type === "image_url") return true
+  return typeof record.data === "string" && typeof record.mimeType === "string" && record.mimeType.startsWith("image/")
+}
+
+function summarizeImageUrlForContextBudget(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.startsWith("data:image/")
+      ? `[image data URL omitted from context budget: ${value.length} chars]`
+      : value
+  }
+  if (!value || typeof value !== "object") return value
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
+    if (key === "url" && typeof entry === "string" && entry.startsWith("data:image/")) {
+      return [key, `[image data URL omitted from context budget: ${entry.length} chars]`]
+    }
+    return [key, sanitizeContextBudgetValue(entry)]
+  }))
 }
 
 function utf8ByteLength(text: string): number {
@@ -1722,18 +1806,23 @@ function isAgentRole(value: unknown): value is AgentRole {
   return value === "frontend" || value === "backend" || value === "designer" || value === "imageMaker" || value === "dba" || value === "devops" || value === "security" || value === "qa" || value === "review" || value === "summarize" || value === "oracle" || value === "librarian" || value === "rush" || value === "routeBrain" || value === "pet"
 }
 
-export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">): RouterPlanDecision {
-  const primaryRole = isRoutedAgentRole(value.role) ? value.role : fallback.primaryRole
-  const workersByRole = new Map<RoutedAgentRole, AgentRoutingPlan["workers"][number]>()
+export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">, allowedRoles?: readonly RoutedAgentRole[]): RouterPlanDecision {
+  const allowedRoleSet = allowedRoles && allowedRoles.length > 0 ? new Set<RoutedAgentRole>(allowedRoles) : undefined
+  const roleIsAllowed = (role: unknown): role is RoutedAgentRole => isRoutedAgentRole(role) && (!allowedRoleSet || allowedRoleSet.has(role))
+  const fallbackRole = roleIsAllowed(fallback.primaryRole) ? fallback.primaryRole : allowedRoles?.[0] ?? fallback.primaryRole
+  const primaryRole = roleIsAllowed(value.role) ? value.role : fallbackRole
+  const workersByRole = new Map<RoutedAgentRole, RouterWorkerPlan>()
   if (Array.isArray(value.workers)) {
     for (const worker of value.workers) {
       if (typeof worker !== "object" || worker === null) continue
-      const candidate = worker as { role?: unknown; goal?: unknown; reason?: unknown }
-      if (!isRoutedAgentRole(candidate.role)) continue
+      const candidate = worker as { role?: unknown; goal?: unknown; reason?: unknown; modelId?: unknown }
+      if (!roleIsAllowed(candidate.role)) continue
+      const modelId = typeof candidate.modelId === "string" && candidate.modelId.trim() ? candidate.modelId.trim() : undefined
       workersByRole.set(candidate.role, {
         role: candidate.role,
         goal: typeof candidate.goal === "string" && candidate.goal.trim() ? candidate.goal : fallback.workers.find((item) => item.role === candidate.role)?.goal ?? `Handle ${candidate.role} work.`,
         reason: typeof candidate.reason === "string" && candidate.reason.trim() ? candidate.reason : fallback.workers.find((item) => item.role === candidate.role)?.reason ?? `Router selected ${candidate.role}.`,
+        ...(modelId ? { modelId } : {}),
       })
     }
   }
@@ -1761,7 +1850,7 @@ export function normalizeRouterDecision(value: { role?: unknown; workers?: unkno
   if (!cappedWorkers.some((worker) => worker.role === primaryRole)) {
     cappedWorkers.splice(0, cappedWorkers.length > 0 ? 1 : 0, primaryWorker)
   }
-  const todoInputs = normalizeRouterTodos(value.todos, primaryRole, limits.maxTodos)
+  const todoInputs = normalizeRouterTodos(value.todos, primaryRole, limits.maxTodos, allowedRoleSet)
   const workerRoles = new Set(cappedWorkers.map((worker) => worker.role))
   const routedTodoInputs = todoInputs
     .filter((todo) => primaryRole === "rush" || todo.role !== "rush")
@@ -1777,18 +1866,19 @@ export function normalizeRouterDecision(value: { role?: unknown; workers?: unkno
 
   return {
     primaryRole,
-    workers: normalized.workers,
+    workers: normalized.workers as RouterWorkerPlan[],
     todos: normalized.todos,
     dependencies: normalized.dependencies,
     requiresReview: fallback.requiresReview,
     confidence: typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
       : undefined,
+    modelId: typeof value.modelId === "string" && value.modelId.trim() ? value.modelId.trim() : undefined,
     reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
   }
 }
 
-function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole, maxTodos: number): AgentTodoItem[] {
+function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole, maxTodos: number, allowedRoleSet?: ReadonlySet<RoutedAgentRole>): AgentTodoItem[] {
   if (!Array.isArray(value)) return []
   const todos: AgentTodoItem[] = []
   for (const [index, item] of value.slice(0, Math.max(1, maxTodos)).entries()) {
@@ -1796,7 +1886,8 @@ function normalizeRouterTodos(value: unknown, fallbackRole: RoutedAgentRole, max
     const candidate = item as { id?: unknown; title?: unknown; task?: unknown; goal?: unknown; role?: unknown; reason?: unknown }
     const title = [candidate.title, candidate.task, candidate.goal].find((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     if (!title) continue
-    const role = isRoutedAgentRole(candidate.role) ? candidate.role : fallbackRole
+    const candidateRole = isRoutedAgentRole(candidate.role) ? candidate.role : undefined
+    const role = candidateRole && (!allowedRoleSet || allowedRoleSet.has(candidateRole)) ? candidateRole : fallbackRole
     todos.push({
       id: typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : createAgentTodoId(role, index),
       title,
@@ -1859,9 +1950,139 @@ function formatModeRoutingDirective(mode: BraincodeMode, policy: ModePolicy, lim
   ].join("\n")
 }
 
+function formatInputModalityRoutingDirective(images: ImageContent[]): string {
+  if (images.length === 0) {
+    return "Input modality: text only."
+  }
+  return [
+    `Input modality: text plus ${images.length} attached image${images.length === 1 ? "" : "s"}.`,
+    "Image-input routing rules:",
+    "- Any text agent that receives and reasons about the original user image must run on a vision-capable model selected from user configuration.",
+    "- Do not route to imageMaker merely because the user attached an image; imageMaker is only for generating or editing image assets.",
+    "- If the user asks what is in an image, route by task domain: rush for a small direct answer only when rush's own execution chain can receive image input; designer/frontend/review/etc. when the image is evidence for that specialist work.",
+  ].join("\n")
+}
+
+function policyModelIds(policy: ModelPolicy): string[] {
+  return [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
+}
+
+function brainRoutedRoleTextModelIds(brain: BrainModel): string[] {
+  const ids = new Set<string>()
+  for (const role of routedAgentRoles) {
+    if (role === "imageMaker") continue
+    for (const modelId of roleExecutionModelIds(brain, role)) {
+      ids.add(modelId)
+    }
+  }
+  return [...ids]
+}
+
+function roleExecutionModelIds(brain: BrainModel, role: RoutedAgentRole): string[] {
+  return policyModelIds(selectModelPolicy(brain, role))
+}
+
+function policySatisfiesRequirements(policy: ModelPolicy, models: BraincodeModel[], requirements?: RuntimeModelRequirements): boolean {
+  try {
+    selectRuntimeModel(policy, models, requirements)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function formatRoleModelCapabilityDirective(brain: BrainModel, models: BraincodeModel[], images: ImageContent[]): string {
+  const imageRequirements = runtimeModelRequirementsForImages(images)
+  const modelById = new Map(models.map((model) => [model.id, model]))
+  const modelLines = brainRoutedRoleTextModelIds(brain)
+    .map((modelId) => {
+      const model = modelById.get(modelId)
+      if (!model || isImageGenerationModel(model)) return `- ${modelId}: not configured as a text model`
+      const vision = model.supportsVision === true ? "vision" : "text-only"
+      const tools = model.supportsTools ? "tools" : "no-tools"
+      return `- ${model.id}: ${vision}, ${tools}, context ${model.contextWindow}`
+    })
+
+  const roleLines = routedAgentRoles.map((role) => {
+    const policy = selectModelPolicy(brain, role)
+    if (role === "imageMaker") {
+      const imageGenerationReady = policySatisfiesRequirements(policy, models, { requiresImageGeneration: true })
+      return `- ${role}: default chain ${policyModelIds(policy).join(" -> ") || "(none)"}; ${imageGenerationReady ? "image-generation-capable" : "not image-generation-capable"}; use only for image generation/edit requests, not image description.`
+    }
+    const defaultReady = policySatisfiesRequirements(policy, models, imageRequirements)
+    const capability = imageRequirements?.requiresVision
+      ? defaultReady ? "default chain can receive image input" : "default chain cannot receive image input"
+      : "no image constraint for this prompt"
+    return `- ${role}: default chain ${policyModelIds(policy).join(" -> ") || "(none)"}; ${capability}`
+  })
+
+  return [
+    "Text models available through routed role policies:",
+    ...modelLines,
+    "Configured role execution policies:",
+    ...roleLines,
+    "Model routing rules:",
+    "- Pick the best role for the task. Braincode executes each selected role with that role's own modelId -> fallbackModelIds chain.",
+    "- Do not rebind a role to the planner model or to another role's model. The planner/routeBrain model is for routing only unless it is also configured in the selected role's own chain.",
+    "- For image inputs, choose primary and worker text roles whose own execution chain can receive image input. Do not choose a role whose chain is text-only for attached images.",
+    "- Do not invent model ids. Use imageMaker only for image generation/edit requests, not image description.",
+  ].join("\n")
+}
+
+export function normalizeRouterModelId(
+  value: unknown,
+  models: BraincodeModel[],
+  requirements: RuntimeModelRequirements | undefined,
+  fallbackModelId?: string,
+  allowedModelIds?: ReadonlySet<string>,
+): string | undefined {
+  const candidates = [value, fallbackModelId]
+    .filter((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0)
+    .map((candidate) => candidate.trim())
+
+  for (const modelId of candidates) {
+    if (allowedModelIds && !allowedModelIds.has(modelId)) continue
+    try {
+      const selection = selectRuntimeModel({ modelId, fallbackModelIds: [], thinkingLevel: "medium" }, models, requirements)
+      return selection.configured.id
+    } catch {
+      // Try the next candidate; the final runtime selection will surface a detailed error if none work.
+    }
+  }
+  return undefined
+}
+
+function normalizeRouterDecisionModelIds(
+  decision: RouterPlanDecision,
+  brain: BrainModel,
+  models: BraincodeModel[],
+  requirements: RuntimeModelRequirements | undefined,
+): RouterPlanDecision {
+  const primaryAllowedModelIds = new Set(roleExecutionModelIds(brain, decision.primaryRole))
+  const primaryModelId = normalizeRouterModelId(decision.modelId, models, requirements, undefined, primaryAllowedModelIds)
+  const workers = decision.workers.map((worker) => {
+    if (worker.role === "imageMaker") return worker
+    const workerAllowedModelIds = new Set(roleExecutionModelIds(brain, worker.role))
+    const workerModelId = normalizeRouterModelId(worker.modelId, models, requirements, undefined, workerAllowedModelIds)
+    return workerModelId ? { ...worker, modelId: workerModelId } : worker
+  })
+  const { modelId: _ignored, ...rest } = decision
+  return {
+    ...rest,
+    ...(primaryModelId ? { modelId: primaryModelId } : {}),
+    workers,
+  }
+}
+
 async function routePromptWithBrain(prompt: string, brain: BrainModel, models: BraincodeModel[], mode: BraincodeMode, modePolicy: ModePolicy, routingLimits: ModeRoutingLimits, fallback: AgentRoutingPlan, images: ImageContent[] = [], home?: string, usageSessionId?: string): Promise<RouterPlanDecision | undefined> {
   const routerPolicy = brain.planner ?? brain.roles.routeBrain
-  if (!routerPolicy?.modelId) return undefined
+  const routeBrainRequired = images.length > 0
+  if (!routerPolicy?.modelId) {
+    if (routeBrainRequired) {
+      throw new Error("routeBrain is required for image routing, but no planner or routeBrain model is configured.")
+    }
+    return undefined
+  }
   const requirements = runtimeModelRequirementsForImages(images)
 
   try {
@@ -1882,6 +2103,10 @@ async function routePromptWithBrain(prompt: string, brain: BrainModel, models: B
 
 ${formatModeRoutingDirective(mode, modePolicy, routingLimits)}
 
+${formatInputModalityRoutingDirective(images)}
+
+${formatRoleModelCapabilityDirective(brain, models, images)}
+
 Allowed routed roles:
 ${formatRoutedAgentRoleCatalog()}
 
@@ -1894,7 +2119,8 @@ Routing principles (read these before deciding):
 - Use rush for short conversational replies or tiny chores that need no tools (it absorbs what would have been a "fastReply" role).
 - Never use rush for workspace actions that require tools: git status/diff/add/commit/push, shell commands, package scripts, tests, file edits, or repository inspection. Route git/commit/release/CI/package-command work to devops unless another specialist is clearly primary.
 - Use summarize only when the user explicitly needs a handoff or recap.
-- Route only by role responsibility. Do not name, choose, or reason about execution engines; user configuration binds each role to its engine.
+- Route by role responsibility and by each role's configured model policy. Braincode executes the primary role and workers with their own role policy chains.
+- Do not invent execution engines or rebind model ids. You may not assign the planner model or another role's model to a selected role unless that model is already in the selected role's own chain.
 - Dependencies are Brain-mediated: add one only when the downstream todo should receive the upstream todo's summarized result before it runs.
 
 Return ONLY a single JSON object matching this schema exactly:
@@ -1902,6 +2128,8 @@ Return ONLY a single JSON object matching this schema exactly:
 
 Output constraints:
 - "role" MUST be one of the enum values above. Do not invent role names. Do not include "coding", "fastReply", or "research" — they are deprecated.
+- Do not include "modelId" fields. The selected Brain Model's role policies decide execution models.
+- For image inputs, every selected text role must have a configured role execution chain that can receive image input. Omit imageMaker unless the user asks for image generation/editing.
 - Pick exactly one primary role in "role".
 - Include only workers that would materially improve the task.
 - Do not include rush as a support worker when the primary role is not rush. If a specialist is primary and no extra support is needed, include only the primary specialist worker.
@@ -1941,12 +2169,22 @@ ${prompt}`, images.length > 0 ? images : undefined)
       provider: routerSelection.piModel.provider,
       api: routerSelection.configured.api,
     })
-    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown }
+    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }
 
-    const decision = normalizeRouterDecision(parsed, fallback, routingLimits)
+    const decision = normalizeRouterDecisionModelIds(
+      normalizeRouterDecision(parsed, fallback, routingLimits),
+      brain,
+      models,
+      requirements,
+    )
     debugLog("runtime", "router brain selected role", decision)
     return decision
   } catch (error) {
+    if (routeBrainRequired) {
+      const detail = error instanceof Error ? error.message : String(error)
+      debugLog("runtime", "router brain failed for image input", { error: detail })
+      throw new Error(`routeBrain failed before image routing could complete. Braincode did not fall back to heuristic routing because this prompt includes image input. ${detail}`)
+    }
     debugLog("runtime", "router brain failed; falling back to heuristic", { error: error instanceof Error ? error.message : String(error) })
     return undefined
   }
@@ -1980,7 +2218,11 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
       }
     : baseAgentPlan)
   const role = agentPlan.primaryRole
-  const policy = selectModelPolicy(brain, role)
+  const rolePolicy = selectModelPolicy(brain, role)
+  const roleModelIds = new Set(roleExecutionModelIds(brain, role))
+  const policy = routerDecision?.modelId && role !== "imageMaker" && roleModelIds.has(routerDecision.modelId)
+    ? { ...rolePolicy, modelId: routerDecision.modelId, fallbackModelIds: [], imageModel: undefined }
+    : rolePolicy
   const selection = selectRuntimeModel(policy, models as BraincodeModel[], runtimeModelRequirementsForRole(role, images))
   const runtimeWorkerInputs = [...agentPlan.workers]
   if (agentPlan.requiresReview && role !== "review" && !runtimeWorkerInputs.some((worker) => worker.role === "review")) {
@@ -1991,7 +2233,18 @@ async function buildRuntimePlan(prompt: string, home: string | undefined, useRou
     })
   }
   const runtimeTodoPlan = normalizeAgentRoutingPlan({ ...agentPlan, workers: runtimeWorkerInputs, todos: agentPlan.todos, dependencies: agentPlan.dependencies })
-  const workers = runtimeTodoPlan.workers.map((worker) => createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[], requirements))
+  const policyForRuntimeWorker = (worker: AgentWorkerPlan): ModelPolicy | undefined => {
+    if (worker.role === role) return policy
+    if (worker.role === "imageMaker") return undefined
+    const routedWorker = worker as RouterWorkerPlan
+    const selectedModelId = routedWorker.modelId
+    return selectedModelId
+      ? { ...selectModelPolicy(brain, worker.role), modelId: selectedModelId, fallbackModelIds: [], imageModel: undefined }
+      : undefined
+  }
+  const workers = runtimeTodoPlan.workers.map((worker) =>
+    createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[], requirements, policyForRuntimeWorker(worker)),
+  )
   const context = createBrainTaskContext({
     id: brainContextId,
     goal: prompt,

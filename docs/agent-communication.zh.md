@@ -183,7 +183,7 @@ type AgentRoutingPlan = {
 2. 在 `agentRoleProfiles` 加 profile，在 `agentRoleSystemPrompts` 加系统提示。
 3. 确保 router-brain prompt 使用 `routedAgentRoles` 生成允许角色枚举。
 
-router prompt 会嵌入来自 `agentRoleProfiles` 的完整角色目录。目录只描述角色身份、能力、边界和输出契约；用户配置决定每个角色绑定到哪个执行引擎。
+router prompt 会嵌入来自 `agentRoleProfiles` 的完整角色目录，以及当前选中 Brain Model 的 routed role policy 能力摘要。角色目录只描述角色身份、能力、边界和输出契约；每个被选中的角色仍然只通过它自己的 `modelId -> fallbackModelIds` 链执行。`models.json` 是能力注册表，用来校验这些 id，不是全局模型池，也不能用来把某个角色偷换成 planner 或另一个角色的模型。
 
 ## 发给 worker 的 prompt
 
@@ -214,13 +214,12 @@ Open questions:
 每个 worker（以及主 agent）都从 `selectRuntimeModelCandidatesWithApiKey` 拿一个有序候选列表：
 
 1. policy 的 `modelId`，然后是 `fallbackModelIds`（按序）。
-2. **目录级跨 provider 兜底** —— 任何配置好的其它模型，只要它的 provider 有 API key 且没试过。
 
-如果 prompt 展开后带有图片输入，这条候选链路会带上 `requiresVision: true`。这是 runtime 的硬约束，routeBrain、support worker、主 agent、review worker 都一样：无视觉能力的纯文本模型会在调用 provider 之前被跳过，即使它排在 role policy 第一位，或本来会作为跨 provider 兜底候选。
+runtime 不会把 `models.json` 当作全局 fallback 池扫描。fallback 必须显式写在当前 Brain Model 的 planner / role policy 里，这样模型执行始终留在用户配置的路由策略内。
 
-跨 provider 兜底是故意做的：某个 provider 出现区域性 / 上游故障（比如代理报 OpenAI 400），应该自动切换到另一个你有 key 的 provider。每次尝试都会记录（`run_error` / `worker_error`）并标注 `willFallback: true|false`。
+如果 prompt 展开后带有图片输入，这条候选链路会带上 `requiresVision: true`。这是 runtime 的硬约束，routeBrain、support worker、主 agent、review worker 都一样：无视觉能力的纯文本模型会在调用 provider 之前被跳过。routeBrain 应该选择自身 role policy 链里包含 vision 候选的角色；runtime 会直接暴露 router/model 错误，而不是把该角色偷换成 planner 模型。
 
-加 policy 字段或新模型字段时，请确保显式列表和目录扫描都能尊重它。
+加 policy 字段或新模型字段时，请确保显式 primary / fallback 列表能尊重它。
 
 ## Hooks：每次对话里的「第三方」
 
@@ -263,7 +262,7 @@ Worker 在 `SubagentStart` hook 结束后发 `worker_start`，结果归一化后
 - **实时运行状态** —— TUI 的 elapsed 时间由本地 1 秒计时器驱动，token 总量仍来自 provider 的 `AgentEvent` usage 数据；这样长时间没有流式事件时，用时显示也不会停住。
 - **Transcript 折叠** —— 带 `▸` / `▾` 标记的工具或 agent 行使用 `Ctrl+T` 统一展开/收起。鼠标捕获仅用于滚轮滚动；需要保留终端选择文本时可设 `BRAINCODE_TUI_MOUSE=false`。
 - **Intent graph 视图** —— `Ctrl+O` 或 `/intent` 会打开最新 `RuntimePlan` 的任务拆解和依赖路径，并显示路由来源、置信度、原因、worker 和 mode 预算。
-- **Router plan 预览** —— `/plan <task>` 默认请求配置的 `routeBrain`；`/plan --heuristic <task>` 只用于确定性、无 provider 调用的诊断。如果 router 不可用，`RuntimePlan.routing` 会把结果标成 heuristic fallback。
+- **Router plan 预览** —— `/plan <task>` 默认请求配置的 `routeBrain`；`/plan --heuristic <task>` 只用于确定性、无 provider 调用的诊断。文本输入的 router 失败会标成 heuristic fallback；图片输入必须经过 routeBrain，router 失败会直接报错。
 
 新增需要 UI 感知的生命周期节点时，**优先扩展 `WorkerLifecycleEvent`**，而不是从 `AgentRunRequest` 漏出新的 callback。一条类型化的流比五个 callback 好渲染得多。
 

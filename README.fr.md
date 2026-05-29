@@ -62,6 +62,14 @@ Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. A
 
 ## Notes de version
 
+### v0.2.6
+
+- Le routage Image Maker utilise maintenant une politique dédiée d'API Images compatible OpenAI au lieu d'ajouter les modèles de génération d'images au catalogue normal des modèles texte.
+- Le routage avec image en entrée est plus strict : les prompts avec image exigent une planification routeBrain et des chaînes de rôles texte compatibles vision, tandis qu'Image Maker reste réservé à la génération ou l'édition d'images.
+- Config Web fusionne catalogue, fournisseurs enregistrés, endpoint `/models` et saisie manuelle dans un seul flux d'ajout de modèle, avec prise en charge du listing Anthropic-compatible.
+- L'estimation du budget contexte provider omet les octets des images inline tout en gardant les métadonnées, ce qui réduit les faux dépassements de contexte sur les prompts image.
+- Le wrapper npm et les métadonnées de release sont en `0.2.6` pour correspondre aux assets GitHub de même version.
+
 ### v0.2.5
 
 - La TUI passe à Ink 7 et React 19, et les lignes assistant/help du transcript rendent maintenant le Markdown via `markdansi`, afin que titres, listes, code inline, blocs de code et tableaux ne s'affichent plus comme du Markdown brut.

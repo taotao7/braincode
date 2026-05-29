@@ -97,7 +97,7 @@ Modes are a Braincode-level concept; they bias the orchestration, not the model.
 
 ## Brain Model
 
-A **Brain Model** is a `ModelPolicy` per role plus routing/context defaults. The role catalog is defined in one place — `agentRoleProfiles` + `agentRoleSystemPrompts` in `packages/brain` — so the router prompt, defaults, and runtime system prompts never drift apart. routeBrain sees the full role catalog, but the catalog only describes role identity, capability boundaries, and output contracts; the user binds concrete models in configuration.
+A **Brain Model** is a `ModelPolicy` per role plus routing/context defaults. The role catalog is defined in one place — `agentRoleProfiles` + `agentRoleSystemPrompts` in `packages/brain` — so the router prompt, defaults, and runtime system prompts never drift apart. routeBrain sees the full role catalog plus role-policy capability summaries, then chooses the primary role, workers, todos, and dependencies. Execution models are resolved from each selected role's own `modelId -> fallbackModelIds` chain; routeBrain must not rebind a role to the planner model or to another role's model. For image input, it should choose roles whose own chains can receive images.
 
 Routed roles (the ones a worker can be), v0.2.0:
 `frontend · backend · designer · dba · devops · security · qa · review · summarize · oracle · librarian · rush`
@@ -119,7 +119,7 @@ Everything user-specific lives under `~/.braincode/`:
   settings.json      execution mode, default brain id, feature flags
   auth.json          provider keys (kept out of model prompts)
   brains.json        Brain Models
-  models.json        BraincodeModel catalog (provider, baseUrl, id)
+  models.json        BraincodeModel catalog for normal agent models (provider, baseUrl, id)
   tools.json         tool toggles
   hooks.json         user-level lifecycle hooks
   sessions/          per-session JSONL transcripts of orchestration events
@@ -127,6 +127,8 @@ Everything user-specific lives under `~/.braincode/`:
 ```
 
 `braincode config` serves a tabbed Web UI on localhost. Models are the first tab; usage statistics have a dedicated tab with Recharts summaries and click-through details by model, role, and runtime phase. OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot appear as model-catalog providers once authenticated, so models can be added without duplicating API keys.
+
+The Models tab is only for normal agent models. User-added providers declare an OpenAI-compatible or Anthropic-compatible API, can load available models from `/models` when the provider supports it, and can also accept manual model ids. The `imageMaker` role is different: it is a dedicated raster image generator configured directly in Brain routing with an OpenAI-compatible Images API endpoint such as OpenAI or Minimax. Vision-capable text models remain ordinary models with image input support; they are not image generation models.
 
 Project-local support files live next to code:
 

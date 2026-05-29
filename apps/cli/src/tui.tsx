@@ -7,10 +7,7 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
-import {
-  render as renderMarkdown,
-  strip as stripMarkdown,
-} from "markdansi";
+import { render as renderMarkdown, strip as stripMarkdown } from "markdansi";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -394,7 +391,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   }
 }
 
-const INPUT_MAX_LINES = 6;
+const INPUT_MAX_LINES = 1;
 const INPUT_PROMPT_PREFIX = "› ";
 const FRAME_RESERVED_COLUMNS = 4;
 const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
@@ -2916,7 +2913,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (!result.moved) return false;
     verticalCursorColumn.current = result.desiredColumn;
     inputStore.setSnapshot((current) =>
-      current.cursor === result.cursor ? current : { ...current, cursor: result.cursor },
+      current.cursor === result.cursor
+        ? current
+        : { ...current, cursor: result.cursor },
     );
     return true;
   }
@@ -3555,10 +3554,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const sessionMatchRows =
     sessionMatches.length === 0
       ? 1
-      : sessionMatches.reduce(
-          (sum, entry) => sum + (entry.prompt ? 2 : 1),
-          0,
-        );
+      : sessionMatches.reduce((sum, entry) => sum + (entry.prompt ? 2 : 1), 0);
 
   return (
     <TuiThemeContext.Provider value={tuiTheme}>
@@ -4118,9 +4114,7 @@ const TranscriptSurface = React.memo(function TranscriptSurface({
   const transcriptChromeRows =
     items.length > 0 ? 1 : showEmptyIntro ? BRAIN_LOGO.length + 4 : 0;
   const nonTranscriptRows =
-    fixedRows +
-    transcriptChromeRows +
-    estimateFooterRows(queueLength, toast);
+    fixedRows + transcriptChromeRows + estimateFooterRows(queueLength, toast);
   const transcriptLayout = useMemo(
     () => layoutTranscriptItems(items, contentWidth),
     [items, contentWidth],
@@ -4129,8 +4123,7 @@ const TranscriptSurface = React.memo(function TranscriptSurface({
     1,
     terminalRows - nonTranscriptRows - INK_RENDER_SAFETY_ROWS,
   );
-  const transcriptViewportRows =
-    items.length > 0 ? availableTranscriptRows : 0;
+  const transcriptViewportRows = items.length > 0 ? availableTranscriptRows : 0;
   const transcriptViewport = useMemo(
     () =>
       viewportTranscriptLayout(
@@ -4302,12 +4295,7 @@ const InputSurface = React.memo(function InputSurface({
   const runStatus = useTuiStoreSnapshot(runStatusStore);
   const draftWindow = useMemo(
     () =>
-      clipDraftToWindow(
-        input.draft,
-        input.cursor,
-        inputWidth,
-        INPUT_MAX_LINES,
-      ),
+      clipDraftToWindow(input.draft, input.cursor, inputWidth, INPUT_MAX_LINES),
     [input, inputWidth],
   );
 
@@ -4320,10 +4308,7 @@ const InputSurface = React.memo(function InputSurface({
         inputWidth,
         INPUT_MAX_LINES,
       );
-      const nextMetrics = draftMetricsFromWindow(
-        current.draft,
-        currentWindow,
-      );
+      const nextMetrics = draftMetricsFromWindow(current.draft, currentWindow);
       const previousMetrics = draftMetricsStore.getSnapshot();
       if (!sameDraftMetrics(previousMetrics, nextMetrics)) {
         draftMetricsStore.setSnapshot(nextMetrics);
@@ -4748,10 +4733,7 @@ function fitRunStatusChars(
   return fitted;
 }
 
-function runStatusActiveIndex(
-  chars: RunStatusTextChar[],
-  now: number,
-): number {
+function runStatusActiveIndex(chars: RunStatusTextChar[], now: number): number {
   const highlightable = chars
     .map((cell, index) => (/\S/u.test(cell.char) ? index : -1))
     .filter((index) => index >= 0);

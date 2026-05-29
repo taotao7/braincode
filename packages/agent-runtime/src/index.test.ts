@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
-import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeSettings } from "@braincode/config"
-import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, humanizeAgentRuntimeError, normalizeReviewDecisionText, normalizeRouterDecision, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
+import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings } from "@braincode/config"
+import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, selectRuntimeModel, type RuntimePlan } from "./index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
@@ -112,6 +112,7 @@ test("normalizeRouterDecision does not inherit heuristic rush support for specia
         { id: "gather-news", title: "Gather current news", role: "librarian" },
         { id: "todo-03-rush", title: "Handle fallback response", role: "rush" },
       ],
+      workers: [{ role: "librarian", modelId: "custom/vision", goal: "Gather facts", reason: "Needs facts" }],
       dependencies: [
         { from: "todo-03-rush", to: "gather-news", reason: "fallback output feeds primary" },
       ],
@@ -123,9 +124,17 @@ test("normalizeRouterDecision does not inherit heuristic rush support for specia
   )
 
   expect(decision.primaryRole).toBe("librarian")
+  expect(decision.workers[0]?.modelId).toBe("custom/vision")
   expect(decision.workers.map((worker) => worker.role)).toEqual(["librarian"])
   expect(decision.todos.map((todo) => [todo.id, todo.role])).toEqual([["gather-news", "librarian"]])
   expect(decision.dependencies).toEqual([])
+
+  const modelDecision = normalizeRouterDecision(
+    { role: "rush", modelId: "custom/vision" },
+    fallback,
+    { maxWorkerAgents: 4, maxTodos: 8 },
+  )
+  expect(modelDecision.modelId).toBe("custom/vision")
 })
 
 test("selectRuntimeModel falls back when the primary model is unavailable", () => {
@@ -179,6 +188,115 @@ test("selectRuntimeModel skips text-only models when image input is required", (
   expect(selection.configured.id).toBe("custom/vision")
 })
 
+test("selectRuntimeModel does not borrow unrelated catalog vision models for a role", () => {
+  expect(() =>
+    selectRuntimeModel(
+      { modelId: "custom/text", thinkingLevel: "low" },
+      [
+        {
+          id: "custom/text",
+          provider: "custom-text",
+          modelId: "text",
+          name: "Text",
+          api: "openai-completions",
+          baseUrl: "http://localhost:9999/v1",
+          contextWindow: 128000,
+          supportsTools: true,
+          supportsVision: false,
+        },
+        {
+          id: "custom/vision",
+          provider: "custom-vision",
+          modelId: "vision",
+          name: "Vision",
+          api: "openai-completions",
+          baseUrl: "http://localhost:9999/v1",
+          contextWindow: 128000,
+          supportsTools: true,
+          supportsVision: true,
+        },
+      ],
+      { requiresVision: true },
+    ),
+  ).toThrow("image input requires a vision-capable model")
+})
+
+test("selectRuntimeModel accepts an explicit vision model policy", () => {
+  const selection = selectRuntimeModel(
+    { modelId: "custom/vision", fallbackModelIds: [], thinkingLevel: "low" },
+    [
+      {
+        id: "custom/text",
+        provider: "custom-text",
+        modelId: "text",
+        name: "Text",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: false,
+      },
+      {
+        id: "custom/vision",
+        provider: "custom-vision",
+        modelId: "vision",
+        name: "Vision",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: true,
+      },
+    ],
+    { requiresVision: true },
+  )
+
+  expect(selection.configured.id).toBe("custom/vision")
+})
+
+test("normalizeRouterModelId stays inside the selected role policy chain", () => {
+  const models = [
+    {
+      id: "custom/text",
+      provider: "custom-text",
+      modelId: "text",
+      name: "Text",
+      api: "openai-completions" as const,
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsVision: false,
+    },
+    {
+      id: "custom/brain-vision",
+      provider: "custom-vision",
+      modelId: "brain-vision",
+      name: "Brain Vision",
+      api: "openai-completions" as const,
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsVision: true,
+    },
+    {
+      id: "custom/unreferenced-vision",
+      provider: "custom-vision",
+      modelId: "unreferenced-vision",
+      name: "Unreferenced Vision",
+      api: "openai-completions" as const,
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsVision: true,
+    },
+  ]
+
+  expect(normalizeRouterModelId(undefined, models, { requiresVision: true }, undefined, new Set(["custom/text"]))).toBeUndefined()
+  expect(normalizeRouterModelId("custom/brain-vision", models, { requiresVision: true }, undefined, new Set(["custom/text"]))).toBeUndefined()
+  expect(normalizeRouterModelId("custom/unreferenced-vision", models, { requiresVision: true }, undefined, new Set(["custom/text", "custom/brain-vision"]))).toBeUndefined()
+  expect(normalizeRouterModelId("custom/brain-vision", models, { requiresVision: true }, undefined, new Set(["custom/text", "custom/brain-vision"]))).toBe("custom/brain-vision")
+})
+
 test("selectRuntimeModel rejects text-only policies when image input has no vision fallback", () => {
   expect(() =>
     selectRuntimeModel(
@@ -199,6 +317,32 @@ test("selectRuntimeModel rejects text-only policies when image input has no visi
       { requiresVision: true },
     ),
   ).toThrow("image input requires a vision-capable model")
+})
+
+test("selectRuntimeModel uses direct imageMaker image API config without models.json entry", () => {
+  const selection = selectRuntimeModel(
+    {
+      modelId: "openai/gpt-image-2",
+      thinkingLevel: "off",
+      imageModel: {
+        provider: "openai",
+        modelId: "gpt-image-2",
+        name: "GPT Image 2",
+        baseUrl: "https://api.openai.com/v1",
+        api: "openai-images",
+      },
+    },
+    [],
+    { requiresImageGeneration: true },
+  )
+
+  expect(selection.configured).toMatchObject({
+    id: "openai/gpt-image-2",
+    provider: "openai",
+    modelId: "gpt-image-2",
+    api: "openai-images",
+    supportsImageGeneration: true,
+  })
 })
 
 test("createBraincodeAgentRuntime normalizes minimal thinking for OpenAI-compatible models", () => {
@@ -389,8 +533,39 @@ test("createBraincodeAgentRuntime invalidates evidence cache after shell calls",
 test("humanizeAgentRuntimeError gives actionable provider configuration guidance", () => {
   expect(humanizeAgentRuntimeError(new Error("403 Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code, etc."))).toContain("only accepts supported coding-agent clients")
   expect(humanizeAgentRuntimeError(new Error("Provider returned an empty assistant response from cliproxyapi/gpt-5.3-codex-spark via openai-responses."))).toContain("switching this model between `openai-responses` and `openai-completions`")
+  expect(humanizeAgentRuntimeError(new Error("Model policy references no usable model. Tried: custom/text: image input requires a vision-capable model"))).toContain("marked as Vision-capable")
   expect(humanizeAgentRuntimeError(new ContextHandoffRequiredError({ estimatedBytes: 5_209_202, limitBytes: 2_097_152, sessionId: "session-1" }))).toContain("Context handoff required")
   expect(humanizeAgentRuntimeError(new Error('400 {"error":{"message":"total message size 5209202 exceeds limit 2097152"}}'))).toContain("Run `/handoff`")
+})
+
+test("estimateProviderContextBytes does not count raw image payloads across turns as handoff context", () => {
+  const firstImageData = "a".repeat(5_000_000)
+  const laterImageData = "b".repeat(5_000_000)
+  const estimated = estimateProviderContextBytes(
+    [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what is in this image?" },
+          { type: "image", data: firstImageData, mimeType: "image/png" },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "It is a screenshot." }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "now compare this later image" },
+          { type: "input_image", image_url: { url: `data:image/png;base64,${laterImageData}` } },
+        ],
+      },
+    ] as never,
+    "route the request",
+  )
+
+  expect(estimated).toBeLessThan(20_000)
 })
 
 test("collectPatchSummary captures changed files and diff stats", async () => {
@@ -963,6 +1138,189 @@ test("planRuntimeFromConfig chooses a vision-capable model when prompt reference
   }
 })
 
+test("planRuntimeFromConfig does not borrow a catalog vision model outside the selected role policy", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-catalog-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-catalog-project-test-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom-text",
+            modelId: "text",
+            name: "Text",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: false,
+          },
+          {
+            id: "custom/vision",
+            provider: "custom-vision",
+            modelId: "vision",
+            name: "Vision",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(createTestBrainDocument("custom/text"), home)
+    const pngPath = join(projectRoot, "snap.png")
+    await Bun.write(pngPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+
+    await expect(planRuntimeFromConfig(`describe @${pngPath}`, home, { useRouterBrain: false, projectRoot })).rejects.toThrow("image input requires a vision-capable model")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("planRuntimeFromConfig requires routeBrain instead of heuristic fallback for image routing", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-router-required-home-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-vision-router-required-project-test-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom-text",
+            modelId: "text",
+            name: "Text",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: false,
+          },
+          {
+            id: "custom/brain-vision",
+            provider: "custom-vision",
+            modelId: "brain-vision",
+            name: "Brain Vision",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+            supportsVision: true,
+          },
+        ],
+      },
+      home,
+    )
+    const textPolicy = { modelId: "custom/text", fallbackModelIds: [], thinkingLevel: "low" }
+    const routerPolicy = { modelId: "custom/brain-vision", fallbackModelIds: [], thinkingLevel: "medium" }
+    await writeBrains(
+      {
+        brains: [
+          {
+            id: "brain",
+            name: "Brain",
+            description: "Test brain",
+            planner: routerPolicy,
+            roles: {
+              ...Object.fromEntries(TEST_ROLE_NAMES.map((role) => [role, textPolicy])),
+              routeBrain: routerPolicy,
+            },
+            routing: {
+              maxParallelAgents: 2,
+              preferCheapModelForSimpleTasks: true,
+              escalateOnUncertainty: true,
+              requireReviewForFileEdits: true,
+            },
+            context: { maxInputTokens: 1000, compaction: "auto", isolation: "strict" },
+          },
+        ],
+      },
+      home,
+    )
+    const pngPath = join(projectRoot, "snap.png")
+    await Bun.write(pngPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+
+    await expect(planRuntimeFromConfig(`describe @${pngPath}`, home, { projectRoot })).rejects.toThrow("routeBrain failed before image routing could complete")
+    await expect(planRuntimeFromConfig(`describe @${pngPath}`, home, { projectRoot })).rejects.toThrow("missing API key for provider 'custom-vision'")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("formatRoleModelCapabilityDirective tells routeBrain which roles can receive image input", () => {
+  const testBrain = createTestBrainDocument("custom/text").brains[0] as ReturnType<typeof createTestBrainDocument>["brains"][number] & { roles: Record<string, unknown> }
+  testBrain.planner = { modelId: "custom/unreferenced-vision", fallbackModelIds: [], thinkingLevel: "medium" }
+  testBrain.roles.oracle = { modelId: "custom/vision", fallbackModelIds: [], thinkingLevel: "high" }
+  const directive = formatRoleModelCapabilityDirective(
+    testBrain as never,
+    [
+      {
+        id: "custom/text",
+        provider: "custom-text",
+        modelId: "text",
+        name: "Text",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: false,
+      },
+      {
+        id: "custom/vision",
+        provider: "custom-vision",
+        modelId: "vision",
+        name: "Vision",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: true,
+      },
+      {
+        id: "custom/unreferenced-vision",
+        provider: "custom-vision",
+        modelId: "unreferenced-vision",
+        name: "Unreferenced Vision",
+        api: "openai-completions",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: true,
+      },
+    ],
+    [{ type: "image", data: "abc", mimeType: "image/png" }],
+  )
+
+  expect(directive).toContain("custom/vision: vision")
+  expect(directive).not.toContain("custom/unreferenced-vision")
+  expect(directive).toContain("rush: default chain custom/text; default chain cannot receive image input")
+  expect(directive).toContain("oracle: default chain custom/vision; default chain can receive image input")
+  expect(directive).toContain("Do not rebind a role to the planner model or to another role's model")
+})
+
 test("planRuntimeFromConfig supports routeBrain previews and heuristic diagnostics", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-test-"))
   try {
@@ -1149,6 +1507,54 @@ test("executePromptFromConfig fails clearly before provider execution when auth 
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-auth-test-"))
   try {
     await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("No usable model with API key")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test("executePromptFromConfig does not use unrelated configured models as runtime fallback", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-no-global-fallback-test-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom-text",
+            modelId: "text",
+            name: "Text",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+          },
+          {
+            id: "custom/unrelated",
+            provider: "custom-unrelated",
+            modelId: "unrelated",
+            name: "Unrelated",
+            api: "openai-completions",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(createTestBrainDocument("custom/text"), home)
+    await writeProviderApiKey("custom-unrelated", "unrelated-key", home)
+
+    await expect(executePromptFromConfig({ prompt: "hello" }, home)).rejects.toThrow("custom/text: missing API key for provider 'custom-text'")
   } finally {
     await rm(home, { recursive: true, force: true })
   }

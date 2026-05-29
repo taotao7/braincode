@@ -193,7 +193,7 @@ export const zh = {
 
   docs_brain_title: "3. Brain Models",
   docs_brain_intro:
-    "Brain Model 是路由策略，不是单个 LLM。它把每个 Agent 角色映射到一个模型策略，包括思考级别、回退链和升级阈值。选中的 Brain Model 决定每个任务如何拆解和路由。",
+    "Brain Model 是路由策略，不是单个 LLM。它把每个 Agent 角色映射到一个模型策略，包括思考级别、回退链和升级阈值。routeBrain 负责选择角色和 worker；每个被选中的角色只通过自己的配置模型链执行。",
   docs_brain_example_title: "brains.json 示例",
   docs_brain_roles_title: "内置角色",
   docs_brain_roles_body:
@@ -248,7 +248,7 @@ export const zh = {
   docs_cli_cmd_config: "启动本地配置 Web 服务器并打印 URL。",
   docs_cli_cmd_run: "执行单个非交互式提示并打印结果。",
   docs_cli_cmd_dry:
-    "预览真实的 routeBrain 计划。它使用当前 Brain Model，可能调用 routeBrain 绑定的 provider；如果 routeBrain 不可用，输出会明确标成 heuristic fallback。",
+    "预览真实的 routeBrain 计划。它使用当前 Brain Model，可能调用 routeBrain 绑定的 provider；文本输入下如果 routeBrain 不可用，输出会明确标成 heuristic fallback。图片输入必须经过 routeBrain，会直接暴露 router/model 失败。",
   docs_cli_cmd_dry_heuristic:
     "只预览确定性的 heuristic 路由。用于无 provider 的诊断，或检查 fallback 行为。",
   docs_cli_cmd_plan:

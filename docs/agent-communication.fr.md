@@ -210,13 +210,12 @@ Si vous avez besoin d'une nouvelle façon de présenter les résultats, étendez
 Chaque worker (et le primaire) tire une liste ordonnée de candidats depuis `selectRuntimeModelCandidatesWithApiKey` :
 
 1. Le `modelId` de la politique, puis `fallbackModelIds`, dans l'ordre.
-2. **Fallback catalogue inter-provider** — tout autre modèle configuré dont le provider a une clé API et qui n'a pas déjà été essayé.
 
-Si l'expansion du prompt a attaché des images, ce même chemin de candidats est appelé avec `requiresVision: true`. C'est une contrainte runtime stricte pour le router brain, les support workers, l'agent primaire et le worker de review : les modèles texte seuls sont ignorés avant tout appel provider, même s'ils sont premiers dans la politique ou éligibles comme fallback inter-provider.
+Le runtime ne scanne pas `models.json` comme pool de fallback global. Les fallbacks doivent être explicites dans les politiques planner / rôles du Brain Model sélectionné, afin que l'exécution reste dans la stratégie de routage configurée par l'utilisateur.
 
-Le filet de sécurité inter-provider est délibéré : un échec régional ou amont chez un provider (par ex. un OpenAI 400 depuis un proxy) doit automatiquement basculer vers un autre provider pour lequel vous avez des clés. Chaque tentative est enregistrée (`run_error` / `worker_error`) avec `willFallback: true|false`.
+Si l'expansion du prompt a attaché des images, ce même chemin de candidats est appelé avec `requiresVision: true`. C'est une contrainte runtime stricte pour le router brain, les support workers, l'agent primaire et le worker de review : les modèles texte seuls sont ignorés avant tout appel provider. routeBrain doit choisir des rôles dont la propre chaîne de policy contient un candidat vision ; le runtime échoue avec l'erreur router/model au lieu de rattacher ce rôle au modèle planner.
 
-Quand vous étendez la politique ou ajoutez un champ modèle, assurez-vous que la liste explicite et le scan catalogue le respectent tous deux.
+Quand vous étendez la politique ou ajoutez un champ modèle, assurez-vous que la liste explicite primary / fallback le respecte.
 
 ## Hooks : le tiers dans chaque conversation
 

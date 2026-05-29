@@ -72,6 +72,14 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 
 ## Release Notes
 
+### v0.2.6
+
+- Image Maker routing now uses a dedicated OpenAI-compatible Images API policy instead of adding image-generation models to the normal text-model catalog.
+- Image-input routing is stricter: attached images require routeBrain planning and vision-capable text role chains, while Image Maker is reserved for generation or editing requests.
+- Config Web combines catalog, saved-provider, provider `/models`, and manual model setup into one add-model flow, including Anthropic-compatible model listing.
+- Provider context budgeting now omits inline image payload bytes from budget estimates while preserving metadata, reducing false context-overflow failures on image prompts.
+- The npm wrapper and release metadata are versioned as `0.2.6` for the matching GitHub release assets.
+
 ### v0.2.5
 
 - The TUI now runs on Ink 7 and React 19, and assistant/help transcript rows render Markdown through `markdansi`, so headings, lists, inline code, code blocks, and tables no longer appear as raw Markdown.

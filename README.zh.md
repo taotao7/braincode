@@ -67,6 +67,14 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 
 ## 发布记录
 
+### v0.2.6
+
+- 图片制造者路由改用专门的 OpenAI-compatible Images API 策略，不再把图片生成模型加入普通文本模型目录。
+- 图像输入路由更严格：带图 prompt 必须由 routeBrain 规划，并选择具备视觉能力的文本角色模型链；Image Maker 只用于生成或编辑图片。
+- Config Web 把目录模型、已保存 provider、provider `/models` 和手动模型配置合并为一个添加模型入口，并支持 Anthropic-compatible 模型列表。
+- Provider context 预算估算会跳过内联图片 payload 字节但保留元数据，减少图像 prompt 的误报 context overflow。
+- npm wrapper 和发布元数据同步到 `0.2.6`，用于匹配同版本 GitHub release 资产。
+
 ### v0.2.5
 
 - TUI 升级到 Ink 7 和 React 19，并通过 `markdansi` 渲染 assistant/help transcript 里的 Markdown，标题、列表、inline code、代码块和表格不再以原始 Markdown 形式显示。

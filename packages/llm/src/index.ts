@@ -25,6 +25,12 @@ export type OpenAICompatibleModelListRequest = {
   apiKey?: string
 }
 
+export type ProviderModelApi = "openai" | "anthropic"
+
+export type ProviderModelListRequest = OpenAICompatibleModelListRequest & {
+  api?: ProviderModelApi | "openai-completions" | "anthropic-messages" | "anthropic"
+}
+
 export type ModelConnectionTestResult = {
   modelId: string
   provider: string
@@ -156,45 +162,63 @@ export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
 
 export const resolveBuiltInPiModel = resolvePiModel
 
-export async function listOpenAICompatibleModels(request: OpenAICompatibleModelListRequest): Promise<BraincodeModel[]> {
+export async function listProviderModels(request: ProviderModelListRequest): Promise<BraincodeModel[]> {
   const provider = request.provider.trim()
-  const baseUrl = normalizeOpenAICompatibleBaseUrl(request.baseUrl)
+  const api = normalizeProviderModelApi(request.api)
+  const baseUrl = normalizeProviderBaseUrl(request.baseUrl, api)
   if (!provider) throw new Error("provider is required")
   if (!baseUrl) throw new Error("baseUrl is required")
 
-  debugLog("llm", "listing OpenAI-compatible models", { provider, baseUrl, hasApiKey: Boolean(request.apiKey) })
+  debugLog("llm", "listing provider models", { provider, baseUrl, api, hasApiKey: Boolean(request.apiKey) })
 
   const response = await fetch(`${baseUrl}/models`, {
-    headers: {
-      "user-agent": "BrainCode",
-      ...(request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}),
-    },
+    headers: providerModelListHeaders(api, request.apiKey),
   })
-  const body = (await response.json().catch(() => undefined)) as { data?: Array<{ id?: unknown; name?: unknown }> } | undefined
+  const body = (await response.json().catch(() => undefined)) as { data?: Array<{ id?: unknown; name?: unknown; display_name?: unknown }> } | undefined
   if (!response.ok) {
     throw new Error(`Unable to list models from ${baseUrl}/models: HTTP ${response.status}`)
   }
   if (!body || !Array.isArray(body.data)) {
-    throw new Error("/v1/models response must contain a data array")
+    throw new Error("/models response must contain a data array")
   }
 
   const models = body.data
-    .filter((model): model is { id: string; name?: string } => typeof model.id === "string" && model.id.trim().length > 0)
-    .map((model) => toOpenAICompatibleBraincodeModel({ provider, baseUrl, modelId: model.id, name: typeof model.name === "string" ? model.name : model.id }))
+    .filter((model): model is { id: string; name?: string; display_name?: string } => typeof model.id === "string" && model.id.trim().length > 0)
+    .map((model) => toProviderBraincodeModel({
+      provider,
+      baseUrl,
+      api,
+      modelId: model.id,
+      name: typeof model.name === "string"
+        ? model.name
+        : typeof model.display_name === "string"
+          ? model.display_name
+          : model.id,
+    }))
 
-  debugLog("llm", "listed OpenAI-compatible models", { provider, baseUrl, count: models.length })
+  debugLog("llm", "listed provider models", { provider, baseUrl, api, count: models.length })
   return models
 }
 
+export async function listOpenAICompatibleModels(request: OpenAICompatibleModelListRequest): Promise<BraincodeModel[]> {
+  return listProviderModels({ ...request, api: "openai" })
+}
+
 export function toOpenAICompatibleBraincodeModel(input: { provider: string; baseUrl: string; modelId: string; name?: string }): BraincodeModel {
+  return toProviderBraincodeModel({ ...input, api: "openai" })
+}
+
+export function toProviderBraincodeModel(input: { provider: string; baseUrl: string; api?: ProviderModelApi; modelId: string; name?: string }): BraincodeModel {
+  const api = normalizeProviderModelApi(input.api)
+  const contextWindow = api === "anthropic" ? 200000 : 128000
   return {
     id: `${input.provider}/${input.modelId}`,
     provider: input.provider,
     modelId: input.modelId,
     name: input.name || input.modelId,
-    api: "openai-completions",
-    baseUrl: normalizeOpenAICompatibleBaseUrl(input.baseUrl),
-    contextWindow: 128000,
+    api: api === "anthropic" ? "anthropic-messages" : "openai-completions",
+    baseUrl: normalizeProviderModelBaseUrlForStorage(input.baseUrl, api),
+    contextWindow,
     supportsTools: true,
     supportsVision: false,
     defaultThinkingLevel: "medium",
@@ -409,7 +433,7 @@ function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: stri
 }
 
 const TEST_IMAGE_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAJklEQVR42u3NMQ0AAAwDoPo33arYsQQMkB6LQCAQCAQCgUAg+BIMi1X0ptsIcT0AAAAASUVORK5CYII="
 
 function mapThinkingLevelToReasoningEffort(thinkingLevel: ModelThinkingLevel | undefined): string | undefined {
   if (!thinkingLevel || thinkingLevel === "off") return undefined
@@ -421,6 +445,39 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "")
   if (!trimmed) return ""
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`
+}
+
+function normalizeProviderModelApi(api: ProviderModelListRequest["api"] | undefined): ProviderModelApi {
+  const normalized = String(api || "openai").trim()
+  return normalized === "anthropic" || normalized === "anthropic-messages" ? "anthropic" : "openai"
+}
+
+function normalizeProviderBaseUrl(baseUrl: string, api: ProviderModelApi): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "")
+  if (!trimmed) return ""
+  if (api === "anthropic") return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`
+  return normalizeOpenAICompatibleBaseUrl(trimmed)
+}
+
+function normalizeProviderModelBaseUrlForStorage(baseUrl: string, api: ProviderModelApi): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "")
+  if (!trimmed) return ""
+  if (api === "anthropic") return trimmed.endsWith("/v1") ? trimmed.slice(0, -3) : trimmed
+  return normalizeOpenAICompatibleBaseUrl(trimmed)
+}
+
+function providerModelListHeaders(api: ProviderModelApi, apiKey: string | undefined): Record<string, string> {
+  if (api === "anthropic") {
+    return {
+      "user-agent": "BrainCode",
+      "anthropic-version": "2023-06-01",
+      ...(apiKey ? { "x-api-key": apiKey } : {}),
+    }
+  }
+  return {
+    "user-agent": "BrainCode",
+    ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+  }
 }
 
 function normalizeImageGenerationBaseUrl(baseUrl: string | undefined): string {

@@ -115,7 +115,7 @@ The interactive TUI is implemented with Ink and should expose Braincode product 
 Early TUI commands:
 
 - `/help` — show Braincode TUI commands and the model-configuration boundary.
-- `/plan <task>` — ask the configured `routeBrain` for the preview, then label the route source, confidence, and reason; if the router is unavailable, fall back to the heuristic route.
+- `/plan <task>` — ask the configured `routeBrain` for the preview, then label the route source, confidence, and reason; if the router is unavailable for text-only input, fall back to the heuristic route. Image input requires a vision-capable routeBrain call, so router failures are surfaced instead of silently falling back.
 - `/plan --heuristic <task>` — preview deterministic fallback routing without making a provider call.
 - `/mode auto|radical`, `/auto`, `/radical` — switch top-level execution mode.
 - `/clear` — clear the transcript.
@@ -199,8 +199,10 @@ Owns provider/model registry and Pi AI integration.
 Responsibilities:
 
 - Bridge Braincode model config to Pi model definitions.
-- Register custom providers if needed.
+- Expose Pi built-in providers and user-added OpenAI/Anthropic-compatible providers.
+- List provider models through `/models` when the configured provider supports it.
 - Resolve API keys and provider headers from `packages/config`.
+- Keep dedicated image generation models on the `imageMaker` routing policy instead of the normal model catalog.
 - Hide provider-specific quirks from the rest of Braincode.
 
 ### `packages/agent-runtime`

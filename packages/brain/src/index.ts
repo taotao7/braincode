@@ -1,8 +1,17 @@
+export type ImageModelPolicy = {
+  provider: string
+  modelId: string
+  name?: string
+  baseUrl?: string
+  api?: "openai-images"
+}
+
 export type ModelPolicy = {
   modelId: string
   fallbackModelIds?: string[]
   thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
   systemPrompt?: string
+  imageModel?: ImageModelPolicy
 }
 
 export type BraincodeMode = "auto" | "radical"
@@ -96,6 +105,7 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
     responsibility: "Own intent classification, role selection, worker decomposition, todo planning, review policy, and Brain-mediated coordination.",
     capabilities: [
       "Classify the dominant work domain and choose exactly one primary routed role.",
+      "Use runtime-supplied role model capability summaries to avoid assigning work to roles whose own policy cannot satisfy the input modality.",
       "Add support workers only when their independent output materially improves the primary result.",
       "Break work into 1-6 concrete todos with role ownership and dependency edges.",
       "Keep worker goals self-contained so isolated task contexts can run without hidden transcript access.",
@@ -104,7 +114,7 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
       "Do not solve the task or produce implementation output.",
       "Do not call tools.",
       "Do not route work to routeBrain or pet.",
-      "Do not choose, name, or reason about execution engines; user configuration binds roles to engines.",
+      "Do not invent, rename, or rebind models; selected roles execute with their own Brain Model role policy chains.",
     ],
     output: "Return only the compact routing JSON requested by the runtime.",
   },
@@ -388,13 +398,14 @@ function buildRouteBrainSystemPrompt(): string {
   return [
     "You are Braincode's route brain.",
     "Your only job is intelligent routing from Braincode's orchestration context layer: classify the user's intent, choose exactly one primary routed role, choose useful supporting workers, and return a compact todo/dependency plan.",
-    "Use the role catalog below as the source of truth for dynamic task splitting. The catalog describes role responsibility only; user configuration decides execution engines.",
+    "Use the role catalog below as the source of truth for dynamic task splitting. The catalog describes role responsibility; the runtime supplies selected Brain Model role-policy capability summaries so you can avoid roles whose own model chain cannot handle the input.",
     "Agent role catalog:",
     formatAgentRoleCatalog({ includeInternal: true }),
     "Routing contract:",
     "- Return compact structured routing decisions. Do not solve the user's task.",
     "- Choose routeBrain only as yourself, never as primary role or worker.",
     "- Never include pet in routing decisions; it is a read-only UI status reporter.",
+    "- Do not invent providers, model names, execution engines, or model rebindings. Selected roles execute through their own Brain Model role policy chains.",
     "- Pick specialists by work domain, not by cost, speed, availability, or product names.",
     "- Never use rush for workspace actions that require tools: git status/diff/add/commit/push, shell commands, package scripts, tests, file edits, or repository inspection.",
     "- Worker goals must be self-contained because each Braincode worker owns a separate task context and never receives the full Brain context or another worker's private context.",
@@ -657,7 +668,7 @@ export function formatRoutedAgentRoleCatalog(): string {
 // pick a role — they only flag risk.
 const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|实现|开发|修复|新增|修改|重构|编辑|删除)\b/
 const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试)\b/
-const imageGenerationPattern = /\b(image|images|picture|pictures|illustration|illustrations|poster|avatar|portrait|visual asset|generate art|生成图片|图片生成|画一张|做图|海报|头像|插画|角色图)\b/
+const imageGenerationPattern = /\b(generate|create|make|draw|produce|render|edit)\b.{0,48}\b(image|images|picture|pictures|illustration|illustrations|poster|avatar|portrait|visual asset|art)\b|\b(generate art)\b|生成.{0,24}(图片|图像|画|海报|头像|插画|角色图)|图片生成|画一张|做图/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
   return `todo-${String(index + 1).padStart(2, "0")}-${role}`

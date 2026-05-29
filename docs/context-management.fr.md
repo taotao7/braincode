@@ -13,7 +13,7 @@ Les conversations chat-style d'aujourd'hui croissent sans limite. Quand plusieur
 - Les workers peuvent être des modèles bon marché sans être empoisonnés par du contexte non pertinent.
 - L'orchestrateur peut exécuter, reprendre ou récupérer une session car chaque tâche a un id stable.
 - Ajouter un rôle ne grossit pas le prompt partagé de tous les autres rôles.
-- Le fallback inter-provider (on peut réessayer un worker sur un autre provider) est sûr car l'entrée du worker est auto-contenue.
+- Le fallback modèle explicitement configuré dans un Brain Model est sûr car l'entrée du worker est auto-contenue.
 
 ## Deux couches, deux contextes de tâche
 

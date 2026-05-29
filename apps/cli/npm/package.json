@@ -1,6 +1,6 @@
 {
   "name": "@taotao7/braincode",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Coding-first AI agent with user-selectable Brain Model that routes sub-tasks to different LLMs",
   "license": "MIT",
   "author": "taotao7",

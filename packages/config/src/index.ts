@@ -328,6 +328,13 @@ export const defaultBrains: BraincodeBrains = {
         imageMaker: {
           modelId: "openai/gpt-image-2",
           thinkingLevel: "off",
+          imageModel: {
+            provider: "openai",
+            modelId: "gpt-image-2",
+            name: "GPT Image 2",
+            baseUrl: "https://api.openai.com/v1",
+            api: "openai-images",
+          },
           systemPrompt: agentRoleSystemPrompts.imageMaker,
         },
         dba: {
@@ -469,19 +476,6 @@ export const defaultModels: BraincodeModels = {
       contextWindow: 1000000,
       supportsTools: true,
       defaultThinkingLevel: "low",
-    },
-    {
-      id: "openai/gpt-image-2",
-      provider: "openai",
-      modelId: "gpt-image-2",
-      name: "GPT Image 2",
-      api: "openai-images",
-      baseUrl: "https://api.openai.com/v1",
-      contextWindow: 32000,
-      supportsTools: false,
-      supportsVision: false,
-      supportsImageGeneration: true,
-      defaultThinkingLevel: "off",
     },
   ],
 };
@@ -1987,9 +1981,32 @@ function migrateBrains(document: BraincodeBrains): boolean {
         roles.imageMaker = {
           modelId: "openai/gpt-image-2",
           thinkingLevel: "off",
+          imageModel: {
+            provider: "openai",
+            modelId: "gpt-image-2",
+            name: "GPT Image 2",
+            baseUrl: "https://api.openai.com/v1",
+            api: "openai-images",
+          },
           systemPrompt: agentRoleSystemPrompts.imageMaker,
         };
         changed = true;
+      } else {
+        const imageMaker = asRecord(roles.imageMaker);
+        if (
+          imageMaker &&
+          imageMaker.modelId === "openai/gpt-image-2" &&
+          !asRecord(imageMaker.imageModel)
+        ) {
+          imageMaker.imageModel = {
+            provider: "openai",
+            modelId: "gpt-image-2",
+            name: "GPT Image 2",
+            baseUrl: "https://api.openai.com/v1",
+            api: "openai-images",
+          };
+          changed = true;
+        }
       }
       // v0.2.0: drop the obsolete `coding`, `fastReply`, and `research` roles.
       // `coding` is subsumed by frontend/backend specialists. `fastReply` folds
@@ -2037,9 +2054,9 @@ export async function writeModels(
 
 function migrateModels(document: BraincodeModels): boolean {
   let changed = false;
-  const imageModel = defaultModels.models.find((model) => (model as Record<string, unknown>).id === "openai/gpt-image-2");
-  if (imageModel && !document.models.some((model) => (model as Record<string, unknown>)?.id === "openai/gpt-image-2")) {
-    document.models.push(imageModel);
+  const withoutDefaultImageModel = document.models.filter((model) => (model as Record<string, unknown> | undefined)?.id !== "openai/gpt-image-2");
+  if (withoutDefaultImageModel.length !== document.models.length) {
+    document.models = withoutDefaultImageModel;
     changed = true;
   }
   for (const model of document.models) {

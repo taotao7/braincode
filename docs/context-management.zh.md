@@ -13,7 +13,7 @@
 - Worker 可以用便宜模型，不会被无关上下文污染。
 - 编排器可以运行、恢复、重放一个 session，因为每个 task 都有稳定的 id。
 - 加一个角色不会让其他每个角色的共享 prompt 变大。
-- 跨 provider 兜底（同一个 worker 可能换 provider 重试）是安全的，因为 worker 的输入是自包含的。
+- Brain Model 内显式配置的模型兜底是安全的，因为 worker 的输入是自包含的。
 
 ## 两层、两种任务上下文
 

@@ -139,6 +139,7 @@ const {
   listBuiltInProviders,
   listOAuthProviderSummaries,
   listOpenAICompatibleModels,
+  listProviderModels,
   readProviderRuntimeApiKey,
   resolvePiModel,
   testModelConnection,
@@ -373,6 +374,42 @@ test("listOpenAICompatibleModels normalizes base URL and maps valid model entrie
     ["proxy/beta", "beta", "https://proxy.example/v1"],
   ])
   expect(models.map((model) => model.api)).toEqual(["openai-completions", "openai-completions"])
+})
+
+test("listProviderModels supports Anthropic-compatible model listing", async () => {
+  const requests: Array<{ url: string; headers: Headers }> = []
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ url: String(input), headers: new Headers(init?.headers) })
+    return new Response(JSON.stringify({ data: [{ id: "claude-test", display_name: "Claude Test" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }) as unknown as typeof fetch
+
+  const models = await listProviderModels({
+    provider: "anthropic-proxy",
+    api: "anthropic",
+    baseUrl: "https://anthropic.example/v1",
+    apiKey: "key",
+  })
+
+  expect(requests[0]?.url).toBe("https://anthropic.example/v1/models")
+  expect(requests[0]?.headers.get("x-api-key")).toBe("key")
+  expect(requests[0]?.headers.get("anthropic-version")).toBe("2023-06-01")
+  expect(models).toEqual([
+    {
+      id: "anthropic-proxy/claude-test",
+      provider: "anthropic-proxy",
+      modelId: "claude-test",
+      name: "Claude Test",
+      api: "anthropic-messages",
+      baseUrl: "https://anthropic.example",
+      contextWindow: 200000,
+      supportsTools: true,
+      supportsVision: false,
+      defaultThinkingLevel: "medium",
+    },
+  ])
 })
 
 test("listOpenAICompatibleModels rejects invalid inputs and malformed responses", async () => {

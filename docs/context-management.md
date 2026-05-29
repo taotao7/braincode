@@ -13,7 +13,7 @@ Today's chat-style transcripts grow without bound. When several agents work on t
 - Workers can be cheap models without being poisoned by unrelated context.
 - The orchestrator can run, resume, or recover a session because every task has a stable id.
 - Adding a role does not enlarge the shared prompt of every other role.
-- Cross-provider fallback (we may retry a worker on a different provider) is safe because the worker's input is self-contained.
+- Explicit model fallback inside a Brain Model is safe because the worker's input is self-contained.
 
 ## Two layers, two task contexts
 

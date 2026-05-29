@@ -23,7 +23,7 @@ import {
   type BraincodeTools,
 } from "@braincode/config"
 import { configWebHtml } from "@braincode/config-web"
-import { getBraincodeOAuthProvider, listBuiltInModelCatalog, listOAuthProviderSummaries, listOpenAICompatibleModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
+import { getBraincodeOAuthProvider, listBuiltInModelCatalog, listOAuthProviderSummaries, listProviderModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
 import { debugLog, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
 import logoPath from "../../../resources/logo.png" with { type: "file" }
@@ -304,14 +304,15 @@ async function handleRequest(request: Request): Promise<Response> {
     }
 
     if (request.method === "POST" && url.pathname === "/api/provider-models") {
-      const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string }
+      const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string; api?: string }
       const provider = body.provider?.trim() ?? ""
       const apiKey = body.apiKey?.trim() || (provider ? await readProviderRuntimeApiKey(provider) : undefined)
-      debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, hasApiKey: Boolean(apiKey) })
-      const models = await listOpenAICompatibleModels({ provider, baseUrl: body.baseUrl ?? "", apiKey })
+      const api = body.api === "anthropic" || body.api === "anthropic-messages" ? "anthropic" : "openai"
+      debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, api, hasApiKey: Boolean(apiKey) })
+      const models = await listProviderModels({ provider, baseUrl: body.baseUrl ?? "", apiKey, api })
       const savedModels = await readModels()
       const providers = [
-        { provider, baseUrl: models[0]?.baseUrl ?? body.baseUrl },
+        { provider, baseUrl: models[0]?.baseUrl ?? body.baseUrl, api },
         ...((savedModels.providers ?? []) as Array<{ provider?: unknown }>).filter((entry) => entry.provider !== provider),
       ]
       await writeModels({ ...savedModels, providers })

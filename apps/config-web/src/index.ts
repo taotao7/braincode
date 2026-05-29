@@ -335,13 +335,15 @@ export const configWebHtml = `<!doctype html>
           <p class="muted" data-i18n="modelsHint">Choose models from the provider catalog. The UI stores selected models in ~/.braincode/models.json.</p>
           <div class="panel-grid">
             <form id="model-form" class="card stack">
-              <h3 data-i18n="addFromCatalog">Add from catalog</h3>
+              <h3 data-i18n="addModel">Add model</h3>
+              <p class="muted" data-i18n="addModelHint">Add a normal agent model from Pi's built-in providers, a saved provider, a /models endpoint, or manual OpenAI/Anthropic-compatible metadata.</p>
               <div class="field"><label for="saved-provider-select" data-i18n="savedProviders">Saved providers</label><select id="saved-provider-select"></select></div>
               <div class="grid">
                 <div class="field"><label for="custom-provider" data-i18n="provider">Provider</label><input id="custom-provider" autocomplete="off" placeholder="openai" /></div>
+                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai">openai</option><option value="anthropic">anthropic</option></select></div>
                 <div class="field"><label for="custom-base-url" data-i18n="baseUrl">Base URL</label><input id="custom-base-url" autocomplete="off" placeholder="https://api.openai.com/v1" /></div>
+                <div class="field"><label for="custom-api-key" data-i18n="apiKey">API key</label><input id="custom-api-key" type="password" autocomplete="off" placeholder="Optional token saved for this provider" /></div>
               </div>
-              <div class="field"><label for="custom-api-key" data-i18n="apiKey">API key</label><input id="custom-api-key" type="password" autocomplete="off" placeholder="sk-..." /></div>
               <button id="load-provider-models" type="button" data-i18n="loadProviderModels">Load /v1/models</button>
               <div id="subscription-models-panel" class="subscription-strip" hidden>
                 <div class="field"><label for="subscription-provider-select" data-i18n="subscriptionModels">Authenticated subscriptions</label><select id="subscription-provider-select"></select></div>
@@ -349,27 +351,16 @@ export const configWebHtml = `<!doctype html>
               </div>
               <div class="field"><label for="provider-select" data-i18n="providerCatalog">Provider catalog</label><select id="provider-select"></select></div>
               <div class="field"><label for="catalog-model-select" data-i18n="catalogModel">Model</label><select id="catalog-model-select"></select></div>
-              <div class="field checkbox-field"><label for="catalog-vision"><input id="catalog-vision" type="checkbox" /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
-              <div class="field"><label for="catalog-api-key" data-i18n="apiKey">API key</label><input id="catalog-api-key" type="password" autocomplete="off" placeholder="Optional token saved for the selected provider" /></div>
-              <button class="primary" type="submit" data-i18n="addSelectedModel">Add selected model</button>
-            </form>
-            <form id="manual-model-form" class="card stack">
-              <h3 data-i18n="addManualModel">Add custom model manually</h3>
-              <p class="muted" data-i18n="manualModelHint">Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.</p>
               <div class="grid">
-                <div class="field"><label for="manual-provider" data-i18n="provider">Provider</label><input id="manual-provider" autocomplete="off" placeholder="openrouter" required /></div>
                 <div class="field"><label for="manual-model-id" data-i18n="modelId">Model ID</label><input id="manual-model-id" autocomplete="off" placeholder="anthropic/claude-sonnet-4.5" required /></div>
                 <div class="field"><label for="manual-name" data-i18n="modelName">Name</label><input id="manual-name" autocomplete="off" placeholder="Claude Sonnet 4.5" /></div>
-                <div class="field"><label for="manual-base-url" data-i18n="baseUrl">Base URL</label><input id="manual-base-url" autocomplete="off" placeholder="https://openrouter.ai/api/v1" /></div>
-                <div class="field"><label for="manual-api-key" data-i18n="apiKey">API key</label><input id="manual-api-key" type="password" autocomplete="off" placeholder="Optional token saved for this provider" /></div>
-                <div class="field"><label for="manual-api" data-i18n="apiType">API type</label><select id="manual-api"><option value="openai">openai</option><option value="anthropic">anthropic</option></select></div>
                 <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
                 <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
-                <div class="field checkbox-field"><label for="manual-vision"><input id="manual-vision" type="checkbox" checked /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
+                <div class="field checkbox-field"><label for="manual-vision"><input id="manual-vision" type="checkbox" /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
               </div>
               <div class="row-between">
                 <button id="test-manual-model" type="button" data-i18n="testConnection">Test connection</button>
-                <button class="primary" type="submit" data-i18n="addManualModelButton">Add custom model</button>
+                <button class="primary" type="submit" data-i18n="addModelButton">Add model</button>
               </div>
               <div id="manual-test-result" class="test-result" hidden></div>
             </form>
@@ -471,9 +462,9 @@ export const configWebHtml = `<!doctype html>
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
           tabSettings: "Settings", tabModels: "Models", tabUsage: "Statistics", tabRouting: "Routing", tabTools: "Tools & auth",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
-          modelsTitle: "Model selection", modelsHint: "Add models from the built-in catalog, load OpenAI-compatible /v1/models, or enter model metadata manually.", addModel: "Add model", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /v1/models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /v1/models", subscriptionModels: "Authenticated subscriptions", useSubscriptionProvider: "Use subscription", subscriptionProviderApplied: "Subscription provider selected", apiKeyOptional: "Optional token saved for the selected provider", apiKeyOptionalAuthenticated: "Optional; authenticated subscription token is used if empty", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", configuredModels: "Configured models",
+          modelsTitle: "Model selection", modelsHint: "Add normal agent models from Pi's built-in providers, saved providers, /models endpoints, or manual OpenAI/Anthropic-compatible metadata. Image generation is configured only on the Image Maker route.", addModel: "Add model", addModelHint: "Use one entry point for built-in Pi providers, user providers that expose /models, and manual OpenAI/Anthropic-compatible models.", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /models", subscriptionModels: "Authenticated subscriptions", useSubscriptionProvider: "Use subscription", subscriptionProviderApplied: "Subscription provider selected", apiKeyOptional: "Optional token saved for the selected provider", apiKeyOptionalAuthenticated: "Optional; authenticated subscription token is used if empty", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", addModelButton: "Add model", configuredModels: "Configured models",
           usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.", usageChartModels: "Model token chart", usageChartRoles: "Role token chart", usageChartPhases: "Phase share",
-          brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. No JSON editing required.", brain: "Brain", applyAllModel: "Apply model to all roles", applyAllRoles: "Apply to all roles", saveBrainRouting: "Save brain routing",
+          brainRoutingTitle: "Brain routing", brainRoutingHint: "Select which configured model each agent role should use. Configure Image Maker directly with an OpenAI-compatible Images API provider.", brain: "Brain", applyAllModel: "Apply model to all text roles", applyAllRoles: "Apply to text roles", saveBrainRouting: "Save brain routing", imageMakerConfigTitle: "Image Maker API", imageMakerConfigHint: "Dedicated raster image generator. This is separate from vision-capable text models and is not added on the Models tab.", imageModelName: "Image model name",
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", tavilyQuickConfig: "Tavily web search", tavilyQuickConfigHint: "Configure Tavily MCP for web search. The API key is saved in ~/.braincode/auth.json; ~/.braincode/mcp.json only stores a Braincode auth reference.", tavilyApiKey: "Tavily API key", configureTavily: "Configure Tavily", tavilyGetApiKey: "Get API key", tavilyConfigured: "Tavily MCP configured", tavilyNotConfigured: "Tavily MCP is not configured", tavilyNeedsApiKey: "Add a Tavily API key to finish setup", tavilyServerReady: "MCP server ready", tavilyAuthReady: "API key saved", tavilyApiKeyRequired: "Tavily API key is required", tavilyRestartHint: "Start a new agent run or use /mcp to recheck the server.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
@@ -499,9 +490,9 @@ export const configWebHtml = `<!doctype html>
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
           tabSettings: "基础设置", tabModels: "模型", tabUsage: "数据统计", tabRouting: "路由", tabTools: "工具与认证",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
-          modelsTitle: "模型选择", modelsHint: "可以从内置目录添加模型、加载 OpenAI-compatible /v1/models，或手动填写模型元数据。", addModel: "添加模型", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /v1/models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /v1/models", subscriptionModels: "已认证订阅", useSubscriptionProvider: "使用订阅", subscriptionProviderApplied: "已选择订阅 Provider", apiKeyOptional: "可选；会保存到选中的 Provider", apiKeyOptionalAuthenticated: "可选；留空会使用已认证订阅 token", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", configuredModels: "已配置模型",
+          modelsTitle: "模型选择", modelsHint: "添加普通 agent 模型：Pi 内置 provider、已保存 provider、/models 端点，或手动填写 OpenAI/Anthropic-compatible 元数据。图片生成只在图片制造者路由里配置。", addModel: "添加模型", addModelHint: "同一个入口支持 Pi 内置 provider、用户添加且能暴露 /models 的 provider，以及手动 OpenAI/Anthropic-compatible 模型。", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /models", subscriptionModels: "已认证订阅", useSubscriptionProvider: "使用订阅", subscriptionProviderApplied: "已选择订阅 Provider", apiKeyOptional: "可选；会保存到选中的 Provider", apiKeyOptionalAuthenticated: "可选；留空会使用已认证订阅 token", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", addModelButton: "添加模型", configuredModels: "已配置模型",
           usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。", usageChartModels: "模型 token 图表", usageChartRoles: "角色 token 图表", usageChartPhases: "阶段占比",
-          brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部角色", applyAllRoles: "应用到全部角色", saveBrainRouting: "保存 Brain 路由",
+          brainRoutingTitle: "Brain 路由", brainRoutingHint: "为每个 agent 角色选择已配置模型；图片制造者直接配置 OpenAI-compatible Images API Provider，不需要手写 JSON。", brain: "Brain", applyAllModel: "应用模型到全部文本角色", applyAllRoles: "应用到文本角色", saveBrainRouting: "保存 Brain 路由", imageMakerConfigTitle: "图片制造者 API", imageMakerConfigHint: "专门的图片生成器，和普通模型的视觉输入能力无关，也不在模型页添加。", imageModelName: "图片模型名称",
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", tavilyQuickConfig: "Tavily 网页搜索", tavilyQuickConfigHint: "为 web_search 配置 Tavily MCP。API key 会保存到 ~/.braincode/auth.json；~/.braincode/mcp.json 只保存 Braincode 认证引用。", tavilyApiKey: "Tavily API key", configureTavily: "配置 Tavily", tavilyGetApiKey: "获取 API key", tavilyConfigured: "Tavily MCP 已配置", tavilyNotConfigured: "Tavily MCP 尚未配置", tavilyNeedsApiKey: "添加 Tavily API key 才能完成配置", tavilyServerReady: "MCP server 已就绪", tavilyAuthReady: "API key 已保存", tavilyApiKeyRequired: "需要 Tavily API key", tavilyRestartHint: "开始新的 agent run，或用 /mcp 重新检查 server。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
@@ -527,7 +518,7 @@ export const configWebHtml = `<!doctype html>
 
       const roles = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
       const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
-      const apiTypes = ["openai", "anthropic", "openai-images"]
+      const apiTypes = ["openai", "anthropic"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
       const status = document.querySelector("#status")
@@ -538,7 +529,6 @@ export const configWebHtml = `<!doctype html>
       const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
       const settingsForm = document.querySelector("#settings-form")
       const modelForm = document.querySelector("#model-form")
-      const manualModelForm = document.querySelector("#manual-model-form")
       const brainForm = document.querySelector("#brain-form")
       const hostInput = document.querySelector("#host")
       const portInput = document.querySelector("#port")
@@ -553,13 +543,13 @@ export const configWebHtml = `<!doctype html>
       const useSubscriptionProviderButton = document.querySelector("#use-subscription-provider")
       const providerSelect = document.querySelector("#provider-select")
       const catalogModelSelect = document.querySelector("#catalog-model-select")
-      const catalogVisionInput = document.querySelector("#catalog-vision")
-      const catalogApiKeyInput = document.querySelector("#catalog-api-key")
-      const manualProviderInput = document.querySelector("#manual-provider")
+      const catalogVisionInput = document.querySelector("#manual-vision")
+      const catalogApiKeyInput = customApiKeyInput
+      const manualProviderInput = customProviderInput
       const manualModelIdInput = document.querySelector("#manual-model-id")
       const manualNameInput = document.querySelector("#manual-name")
-      const manualBaseUrlInput = document.querySelector("#manual-base-url")
-      const manualApiKeyInput = document.querySelector("#manual-api-key")
+      const manualBaseUrlInput = customBaseUrlInput
+      const manualApiKeyInput = customApiKeyInput
       const manualApiInput = document.querySelector("#manual-api")
       const manualContextWindowInput = document.querySelector("#manual-context-window")
       const manualThinkingInput = document.querySelector("#manual-thinking")
@@ -709,7 +699,7 @@ export const configWebHtml = `<!doctype html>
 
       function renderCatalogModels() {
         const entry = catalog.providers.find((candidate) => candidate.provider === providerSelect.value)
-        catalogModelSelect.replaceChildren(...(entry?.models || []).map((model) => option(model.id, model.name + " / " + model.modelId)))
+        catalogModelSelect.replaceChildren(...(entry?.models || []).filter((model) => !isImageGenerationModelConfig(model)).map((model) => option(model.id, model.name + " / " + model.modelId)))
         enhanceSelect(catalogModelSelect)
         syncCatalogVision()
         syncCatalogApiKeyPlaceholder()
@@ -788,7 +778,7 @@ export const configWebHtml = `<!doctype html>
 
       function renderSavedProviders() {
         const providers = currentModels.providers || []
-        savedProviderSelect.replaceChildren(option("", t("none")), ...providers.map((entry) => option(entry.provider, entry.provider + " / " + entry.baseUrl)))
+        savedProviderSelect.replaceChildren(option("", t("none")), ...providers.map((entry) => option(entry.provider, entry.provider + " / " + (entry.api || "openai") + " / " + entry.baseUrl)))
         enhanceSelect(savedProviderSelect)
       }
 
@@ -797,6 +787,8 @@ export const configWebHtml = `<!doctype html>
         if (!provider) return
         customProviderInput.value = provider.provider
         customBaseUrlInput.value = provider.baseUrl || ""
+        manualApiInput.value = apiChoice(provider.api || "openai")
+        enhanceSelect(manualApiInput)
       }
 
       function selectedCatalogModel() {
@@ -804,26 +796,63 @@ export const configWebHtml = `<!doctype html>
         return provider?.models.find((candidate) => candidate.id === catalogModelSelect.value)
       }
 
-      function syncCatalogVision() {
-        const model = selectedCatalogModel()
-        catalogVisionInput.disabled = !model
-        catalogVisionInput.checked = model ? model.supportsVision !== false : false
+      function isImageGenerationModelConfig(model) {
+        return model?.supportsImageGeneration === true || model?.api === "openai-images"
       }
 
-      function selectedCatalogModelFromForm() {
+      function textModels() {
+        return (currentModels.models || []).filter((model) => !isImageGenerationModelConfig(model))
+      }
+
+      function modelOptionLabel(model) {
+        return model.name + " / " + model.id
+      }
+
+      function syncCatalogVision() {
         const model = selectedCatalogModel()
-        return model ? { ...model, supportsVision: catalogVisionInput.checked } : undefined
+        if (!model) {
+          catalogVisionInput.disabled = false
+          return
+        }
+        manualProviderInput.value = model.provider || ""
+        manualModelIdInput.value = model.modelId || ""
+        manualNameInput.value = model.name || model.modelId || ""
+        manualBaseUrlInput.value = model.baseUrl || ""
+        manualApiInput.value = apiChoice(model.api || "openai")
+        manualContextWindowInput.value = String(model.contextWindow || (apiChoice(model.api) === "anthropic" ? 200000 : 128000))
+        manualThinkingInput.value = thinkingLevels.includes(model.defaultThinkingLevel) ? model.defaultThinkingLevel : "medium"
+        catalogVisionInput.disabled = false
+        catalogVisionInput.checked = model.supportsVision === true
+        enhanceSelect(manualApiInput)
+        enhanceSelect(manualThinkingInput)
+      }
+
+      function modelFromUnifiedForm() {
+        const model = selectedCatalogModel()
+        const provider = manualProviderInput.value.trim() || model?.provider || providerSelect.value.trim()
+        const modelId = manualModelIdInput.value.trim() || model?.modelId || ""
+        if (!provider || !modelId) return undefined
+        const api = normalizeApiType(manualApiInput.value)
+        if (model && model.provider === provider && model.modelId === modelId && model.builtIn === true) {
+          return {
+            ...model,
+            name: manualNameInput.value.trim() || model.name || modelId,
+            contextWindow: Number(manualContextWindowInput.value) || model.contextWindow || 128000,
+            supportsVision: catalogVisionInput.checked,
+            defaultThinkingLevel: manualThinkingInput.value,
+          }
+        }
+        return manualModelFromForm()
       }
 
       function apiChoice(value) {
         const normalized = String(value || "").trim()
-        if (normalized === "openai-images") return "openai-images"
         return normalized === "anthropic" || normalized === "anthropic-messages" ? "anthropic" : "openai"
       }
 
       function isOpenAICompatibleApi(apiType) {
         const api = normalizeApiType(apiType)
-        return api === "openai-completions" || api === "openai-images"
+        return api === "openai-completions"
       }
 
       function normalizeBaseUrl(value, apiType = "openai") {
@@ -837,7 +866,6 @@ export const configWebHtml = `<!doctype html>
       function normalizeApiType(value) {
         const choice = apiChoice(value)
         if (choice === "anthropic") return "anthropic-messages"
-        if (choice === "openai-images") return "openai-images"
         return "openai-completions"
       }
 
@@ -848,7 +876,6 @@ export const configWebHtml = `<!doctype html>
         const api = normalizeApiType(manualApiInput.value)
         const baseUrl = normalizeBaseUrl(manualBaseUrlInput.value, api)
         const contextWindow = Number(manualContextWindowInput.value) || 128000
-        const imageGeneration = api === "openai-images"
         return {
           id: provider + "/" + modelId,
           provider,
@@ -857,10 +884,9 @@ export const configWebHtml = `<!doctype html>
           api,
           ...(baseUrl ? { baseUrl } : {}),
           contextWindow,
-          supportsTools: !imageGeneration,
-          supportsVision: imageGeneration ? false : manualVisionInput.checked,
-          supportsImageGeneration: imageGeneration,
-          defaultThinkingLevel: imageGeneration ? "off" : manualThinkingInput.value,
+          supportsTools: true,
+          supportsVision: manualVisionInput.checked,
+          defaultThinkingLevel: manualThinkingInput.value,
         }
       }
 
@@ -930,7 +956,6 @@ export const configWebHtml = `<!doctype html>
         const api = normalizeApiType(controls.api.value)
         const baseUrl = normalizeBaseUrl(controls.baseUrl.value, api)
         const contextWindow = Number(controls.contextWindow.value) || 128000
-        const imageGeneration = api === "openai-images"
         const nextModel = {
           ...previousModel,
           id: provider + "/" + modelId,
@@ -939,10 +964,9 @@ export const configWebHtml = `<!doctype html>
           name,
           api,
           contextWindow,
-          supportsTools: !imageGeneration,
-          supportsVision: imageGeneration ? false : controls.vision.checked,
-          supportsImageGeneration: imageGeneration,
-          defaultThinkingLevel: imageGeneration ? "off" : controls.thinking.value,
+          supportsTools: true,
+          supportsVision: controls.vision.checked,
+          defaultThinkingLevel: controls.thinking.value,
         }
         if (baseUrl) nextModel.baseUrl = baseUrl
         else delete nextModel.baseUrl
@@ -1243,7 +1267,7 @@ export const configWebHtml = `<!doctype html>
         }
         controls.apiKey.type = "password"
         controls.apiKey.placeholder = "Optional token saved for this provider"
-        const vision = makeCheckboxField(prefix + "vision", model.supportsVision !== false)
+        const vision = makeCheckboxField(prefix + "vision", model.supportsVision === true)
         controls.vision = vision.input
         const result = document.createElement("div")
         result.className = "test-result"
@@ -1326,15 +1350,16 @@ export const configWebHtml = `<!doctype html>
       }
 
       function renderConfiguredModels() {
-        if (currentModels.models.length === 0) { configuredModels.innerHTML = '<div class="item">' + t("none") + '</div>'; return }
-        configuredModels.replaceChildren(...currentModels.models.map((model, index) => {
+        const models = textModels()
+        if (models.length === 0) { configuredModels.innerHTML = '<div class="item">' + t("none") + '</div>'; return }
+        configuredModels.replaceChildren(...models.map((model, index) => {
           const item = document.createElement("div")
           item.className = "item"
           const header = document.createElement("div")
           header.className = "item-header"
           const text = document.createElement("div")
           text.className = "model-summary"
-          const visionTag = model.supportsVision === false ? "" : " · " + t("visionBadge")
+          const visionTag = model.supportsVision === true ? " · " + t("visionBadge") : ""
           const summaryText = document.createElement("div")
           summaryText.textContent = model.name + visionTag + "\\n" + model.id + "\\n" + model.provider
           const usageChip = document.createElement("span")
@@ -1371,17 +1396,136 @@ export const configWebHtml = `<!doctype html>
         }))
       }
 
+      function defaultImageModelConfig() {
+        return {
+          provider: "openai",
+          modelId: "gpt-image-2",
+          name: "GPT Image 2",
+          baseUrl: "https://api.openai.com/v1",
+          api: "openai-images",
+        }
+      }
+
+      function imageModelConfigFromPolicy(policy) {
+        if (policy?.imageModel?.provider && policy?.imageModel?.modelId) {
+          return { ...defaultImageModelConfig(), ...policy.imageModel, api: "openai-images" }
+        }
+        const configured = currentModels.models.find((model) => model.id === policy?.modelId && isImageGenerationModelConfig(model))
+        if (configured) {
+          return {
+            provider: configured.provider,
+            modelId: configured.modelId,
+            name: configured.name || configured.modelId,
+            baseUrl: configured.baseUrl || "https://api.openai.com/v1",
+            api: "openai-images",
+          }
+        }
+        return defaultImageModelConfig()
+      }
+
+      function imageModelConfigFromRoutingForm() {
+        const provider = roleModels.querySelector("[data-image-provider]")?.value.trim() || "openai"
+        const modelId = roleModels.querySelector("[data-image-model-id]")?.value.trim() || "gpt-image-2"
+        const name = roleModels.querySelector("[data-image-name]")?.value.trim() || modelId
+        const baseUrl = normalizeBaseUrl(roleModels.querySelector("[data-image-base-url]")?.value || "https://api.openai.com/v1", "openai")
+        return { provider, modelId, name, baseUrl, api: "openai-images" }
+      }
+
+      function imageBraincodeModelFromConfig(config) {
+        return {
+          id: config.provider + "/" + config.modelId,
+          provider: config.provider,
+          modelId: config.modelId,
+          name: config.name || config.modelId,
+          api: "openai-images",
+          baseUrl: config.baseUrl,
+          contextWindow: 32000,
+          supportsTools: false,
+          supportsVision: false,
+          supportsImageGeneration: true,
+          defaultThinkingLevel: "off",
+        }
+      }
+
+      function appendImageMakerRoutingCard(policy) {
+        const config = imageModelConfigFromPolicy(policy)
+        const card = document.createElement("div")
+        card.className = "role-card role-card--full"
+        const title = document.createElement("p")
+        title.className = "role-card-title"
+        title.textContent = t("imageMakerConfigTitle")
+        const note = document.createElement("div")
+        note.className = "role-note"
+        note.textContent = t("imageMakerConfigHint")
+        const grid = document.createElement("div")
+        grid.className = "model-edit-form"
+        const provider = makeTextInput(config.provider, true)
+        provider.dataset.imageProvider = "true"
+        const modelId = makeTextInput(config.modelId, true)
+        modelId.dataset.imageModelId = "true"
+        const name = makeTextInput(config.name || config.modelId)
+        name.dataset.imageName = "true"
+        const baseUrl = makeTextInput(config.baseUrl || "https://api.openai.com/v1")
+        baseUrl.dataset.imageBaseUrl = "true"
+        const apiKey = makeTextInput("")
+        apiKey.type = "password"
+        apiKey.placeholder = "Optional token saved for this provider"
+        apiKey.dataset.imageApiKey = "true"
+        const result = document.createElement("div")
+        result.className = "test-result"
+        result.hidden = true
+        const testButton = document.createElement("button")
+        testButton.type = "button"
+        testButton.textContent = t("testConnection")
+        testButton.addEventListener("click", async (event) => {
+          event.preventDefault()
+          const previous = testButton.textContent
+          testButton.disabled = true
+          testButton.textContent = t("testing") + "..."
+          result.hidden = false
+          result.className = "test-result"
+          try {
+            const imageConfig = imageModelConfigFromRoutingForm()
+            const model = imageBraincodeModelFromConfig(imageConfig)
+            const testResult = await postJson("/api/models/test-config", { model, apiKey: apiKey.value.trim(), thinkingLevel: "off" })
+            renderConnectionTestResult(testResult, result)
+          } catch (error) {
+            showResultError(result, error)
+          } finally {
+            testButton.disabled = false
+            testButton.textContent = previous
+          }
+        })
+        grid.append(
+          makeField("image-maker-provider", "provider", provider),
+          makeField("image-maker-model-id", "modelId", modelId),
+          makeField("image-maker-name", "imageModelName", name),
+          makeField("image-maker-base-url", "baseUrl", baseUrl),
+          makeField("image-maker-api-key", "apiKey", apiKey),
+          testButton,
+          result,
+        )
+        card.append(title, note, grid)
+        roleModels.append(card)
+      }
+
       function renderBrainRouting() {
         brainSelect.replaceChildren(...currentBrains.brains.map((brain) => option(brain.id, brain.name ? brain.id + " — " + brain.name : brain.id)))
-        applyAllModel.replaceChildren(...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
+        const models = textModels()
+        applyAllModel.replaceChildren(...models.map((model) => option(model.id, modelOptionLabel(model))))
         enhanceSelect(brainSelect)
         enhanceSelect(applyAllModel)
         if (!brainSelect.value && currentBrains.brains[0]) brainSelect.value = currentBrains.brains[0].id
         const brain = currentBrains.brains.find((candidate) => candidate.id === brainSelect.value)
         roleModels.replaceChildren()
         if (!brain) { roleModels.innerHTML = '<div class="item">' + t("none") + '</div>'; return }
+        let imageMakerPolicy = null
         for (const role of roles) {
           const policy = role === "routeBrain" ? (brain.planner || brain.roles?.routeBrain) : brain.roles?.[role]
+          if (role === "imageMaker") {
+            imageMakerPolicy = policy
+            continue
+          }
           const card = document.createElement("div")
           card.className = role === "pet" ? "role-card role-card--full" : "role-card"
           if (role === "pet") {
@@ -1396,13 +1540,13 @@ export const configWebHtml = `<!doctype html>
           label.textContent = roleLabel(role) || role
           const select = document.createElement("select")
           select.dataset.role = role
-          select.replaceChildren(...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
-          select.value = policy?.modelId || brain.roles?.frontend?.modelId || currentModels.models[0]?.id || ""
+          select.replaceChildren(...models.map((model) => option(model.id, modelOptionLabel(model))))
+          select.value = policy?.modelId || brain.roles?.frontend?.modelId || models[0]?.id || ""
           const fallbackLabel = document.createElement("label")
           fallbackLabel.textContent = t("fallbackModel")
           const fallback = document.createElement("select")
           fallback.dataset.roleFallback = role
-          fallback.replaceChildren(option("", t("none")), ...currentModels.models.map((model) => option(model.id, model.name + " / " + model.id)))
+          fallback.replaceChildren(option("", t("none")), ...models.map((model) => option(model.id, modelOptionLabel(model))))
           fallback.value = policy?.fallbackModelIds?.[0] || ""
           const thinkingLabel = document.createElement("label")
           thinkingLabel.textContent = t("thinking")
@@ -1430,6 +1574,7 @@ export const configWebHtml = `<!doctype html>
           enhanceSelect(fallback)
           enhanceSelect(thinking)
         }
+        appendImageMakerRoutingCard(imageMakerPolicy)
       }
 
       function renderTools() {
@@ -1661,7 +1806,7 @@ export const configWebHtml = `<!doctype html>
         if (providers.length === 0) return
         status.textContent = t("loadingCatalog")
         for (const entry of providers) {
-          const data = await postJson("/api/provider-models", { provider: entry.provider, baseUrl: entry.baseUrl })
+          const data = await postJson("/api/provider-models", { provider: entry.provider, baseUrl: entry.baseUrl, api: entry.api || "openai" })
           currentModels = { ...currentModels, providers: data.providers }
           mergeCatalogProvider(entry.provider, data.models)
         }
@@ -1675,7 +1820,8 @@ export const configWebHtml = `<!doctype html>
         const provider = customProviderInput.value.trim()
         const baseUrl = customBaseUrlInput.value.trim().replace(new RegExp("/+$"), "")
         const apiKey = customApiKeyInput.value.trim()
-        const data = await postJson("/api/provider-models", { provider, baseUrl, apiKey })
+        const api = apiChoice(manualApiInput.value)
+        const data = await postJson("/api/provider-models", { provider, baseUrl, apiKey, api })
         currentModels = { ...currentModels, providers: data.providers }
         mergeCatalogProvider(provider, data.models)
         renderSavedProviders()
@@ -1823,7 +1969,7 @@ export const configWebHtml = `<!doctype html>
 
       modelForm.addEventListener("submit", (event) => {
         event.preventDefault()
-        const model = selectedCatalogModelFromForm()
+        const model = modelFromUnifiedForm()
         if (!model) return
         status.textContent = t("saving") + " models..."
         const saveKey = catalogApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: catalogApiKeyInput.value.trim() }) : Promise.resolve(null)
@@ -1831,18 +1977,6 @@ export const configWebHtml = `<!doctype html>
           if (auth) setAuthStatusData(auth)
           return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
         }).then((savedModels) => { currentModels = savedModels; catalogApiKeyInput.value = ""; renderSavedProviders(); renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
-      })
-
-      manualModelForm.addEventListener("submit", (event) => {
-        event.preventDefault()
-        const model = manualModelFromForm()
-        if (!model.provider || !model.modelId) return
-        status.textContent = t("saving") + " models..."
-        const saveKey = manualApiKeyInput.value.trim() ? postJson("/api/provider-api-key", { provider: model.provider, apiKey: manualApiKeyInput.value.trim() }) : Promise.resolve(null)
-        saveKey.then((auth) => {
-          if (auth) setAuthStatusData(auth)
-          return putJson("/api/models", { ...currentModels, models: mergeConfiguredModel(model) })
-        }).then((savedModels) => { currentModels = savedModels; manualModelForm.reset(); manualContextWindowInput.value = "128000"; manualThinkingInput.value = "medium"; renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models" }).catch(showError)
       })
 
       brainForm.addEventListener("submit", (event) => {
@@ -1865,9 +1999,24 @@ export const configWebHtml = `<!doctype html>
             nextBrain.planner = { ...plannerWithoutPrompt, modelId: select.value, fallbackModelIds, thinkingLevel }
           }
         }
+        const imageConfig = imageModelConfigFromRoutingForm()
+        const previousImageMaker = nextBrain.roles.imageMaker || { thinkingLevel: "off" }
+        const { systemPrompt: _imageSystemPrompt, ...imageMakerWithoutPrompt } = previousImageMaker
+        nextBrain.roles.imageMaker = {
+          ...imageMakerWithoutPrompt,
+          modelId: imageConfig.provider + "/" + imageConfig.modelId,
+          fallbackModelIds: [],
+          thinkingLevel: "off",
+          imageModel: imageConfig,
+        }
         const nextBrains = currentBrains.brains.map((candidate) => candidate.id === nextBrain.id ? nextBrain : candidate)
         status.textContent = t("saving") + " brain..."
-        putJson("/api/brains", { brains: nextBrains }).then((savedBrains) => { currentBrains = savedBrains; renderBrainRouting(); status.textContent = t("saved") + " brain" }).catch(showError)
+        const imageApiKey = roleModels.querySelector("[data-image-api-key]")?.value.trim()
+        const saveImageKey = imageApiKey ? postJson("/api/provider-api-key", { provider: imageConfig.provider, apiKey: imageApiKey }) : Promise.resolve(null)
+        saveImageKey.then((auth) => {
+          if (auth) setAuthStatusData(auth)
+          return putJson("/api/brains", { brains: nextBrains })
+        }).then((savedBrains) => { currentBrains = savedBrains; renderBrainRouting(); status.textContent = t("saved") + " brain" }).catch(showError)
       })
 
       function showCatalogError(error) { status.textContent = t("catalogFailed"); authStatus.textContent = String(error) }

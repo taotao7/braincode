@@ -189,7 +189,7 @@ If you add a new role:
 2. Add a profile in `agentRoleProfiles` and a system prompt in `agentRoleSystemPrompts`.
 3. Make sure the new role appears in the router-brain prompt by using `routedAgentRoles` as the generated enum source.
 
-The router prompt includes the full role catalog from `agentRoleProfiles`. It describes role identity, capabilities, boundaries, and output contracts only; user configuration decides which execution engine each role uses.
+The router prompt includes the full role catalog from `agentRoleProfiles` plus the selected Brain Model's routed role-policy capability summaries. The role catalog describes role identity, capabilities, boundaries, and output contracts; each selected role still executes through its own `modelId -> fallbackModelIds` chain. `models.json` is the capability registry used to validate those ids, not a free global pool and not a source for rebinding a role to the planner or another role's model.
 
 ## Prompts sent to a worker
 
@@ -220,13 +220,12 @@ If you need a new way to present results, extend the formatter — do not pass t
 Each worker (and the primary) pulls an ordered list of candidates from `selectRuntimeModelCandidatesWithApiKey`:
 
 1. The policy's `modelId`, then `fallbackModelIds`, in order.
-2. **Catalog-wide cross-provider fallback** — any other configured model whose provider has an API key and was not already tried.
 
-If prompt expansion attached image inputs, the same candidate path is called with `requiresVision: true`. This is a hard runtime constraint for the router brain, support workers, primary agent, and review worker: text-only models are skipped before provider execution, even when they are first in the role policy or would otherwise qualify as cross-provider fallbacks.
+The runtime does not scan `models.json` as a global fallback pool. Fallbacks must be explicit in the selected Brain Model's planner/role policies so model execution stays inside the user's configured routing strategy.
 
-The cross-provider safety net is deliberate: a regional or upstream failure on one provider (e.g. an OpenAI 400 from a proxy) should automatically roll over to a different provider that you have keys for. Each attempt is logged (`run_error` / `worker_error`) with `willFallback: true|false`.
+If prompt expansion attached image inputs, the same candidate path is called with `requiresVision: true`. This is a hard runtime constraint for the router brain, support workers, primary agent, and review worker: text-only models are skipped before provider execution. routeBrain should select roles whose own policy chains include a vision-capable candidate; runtime will fail with the router/model error instead of rebinding that role to the planner model.
 
-When extending policy or adding a model field, make sure both the explicit list and the catalog scan respect it.
+When extending policy or adding a model field, make sure the explicit primary/fallback list respects it.
 
 ## Hooks: the third party in every conversation
 
@@ -270,7 +269,7 @@ Workers emit `worker_start` after `SubagentStart` hooks settle and `worker_end` 
 - **Live run status** in the TUI — elapsed time is driven by a local one-second timer, while token totals still come from provider `AgentEvent` usage data. This avoids freezing the visible timer during long model calls with no streaming updates.
 - **Transcript folding** in the TUI — tool and agent rows with `▸` / `▾` markers are toggled with `Ctrl+T`; mouse capture is only used for wheel scrolling and can be disabled with `BRAINCODE_TUI_MOUSE=false`.
 - **Intent graph view** in the TUI — `Ctrl+O` or `/intent` opens the current task decomposition and dependency path from the latest `RuntimePlan`, including routing source, confidence, reason, workers, and mode budgets.
-- **Router plan preview** in the TUI — `/plan <task>` asks the configured `routeBrain` by default; `/plan --heuristic <task>` is reserved for deterministic no-provider diagnostics. Router failures are surfaced as a heuristic fallback in `RuntimePlan.routing`.
+- **Router plan preview** in the TUI — `/plan <task>` asks the configured `routeBrain` by default; `/plan --heuristic <task>` is reserved for deterministic no-provider diagnostics. Router failures on text-only input are surfaced as a heuristic fallback in `RuntimePlan.routing`; image input requires routeBrain and reports router failures directly.
 
 When you add a new lifecycle moment that the UI should know about, prefer extending an existing typed event (`AgentEvent`, `WorkerLifecycleEvent`, or `TodoLifecycleEvent`) before adding another callback surface.
 

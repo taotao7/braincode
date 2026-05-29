@@ -194,7 +194,7 @@ export const fr = {
 
   docs_brain_title: "3. Brain Models",
   docs_brain_intro:
-    "Un Brain Model est une politique de routage, pas un LLM unique. Il mappe chaque rôle d'agent à une politique de modèle avec niveau de réflexion, chaîne de repli et seuils d'escalade. Le Brain Model sélectionné dicte comment chaque tâche est décomposée et routée.",
+    "Un Brain Model est une politique de routage, pas un LLM unique. Il mappe chaque rôle d'agent à une politique de modèle avec niveau de réflexion, chaîne de repli et seuils d'escalade. routeBrain choisit les rôles et workers ; chaque rôle sélectionné s'exécute via sa propre chaîne de modèles configurée.",
   docs_brain_example_title: "Exemple brains.json",
   docs_brain_roles_title: "Rôles intégrés",
   docs_brain_roles_body:
@@ -249,7 +249,7 @@ export const fr = {
   docs_cli_cmd_config: "Démarrer le serveur web de configuration local et afficher l'URL.",
   docs_cli_cmd_run: "Exécuter un prompt non interactif unique et afficher le résultat.",
   docs_cli_cmd_dry:
-    "Prévisualiser le vrai plan routeBrain pour une tâche. Il utilise le Brain Model configuré et peut appeler le provider de routeBrain ; si routeBrain est indisponible, la sortie est étiquetée comme fallback heuristic.",
+    "Prévisualiser le vrai plan routeBrain pour une tâche. Il utilise le Brain Model configuré et peut appeler le provider de routeBrain ; si routeBrain est indisponible pour une entrée texte seule, la sortie est étiquetée comme fallback heuristic. Une entrée image exige routeBrain et signale directement les échecs router/model.",
   docs_cli_cmd_dry_heuristic:
     "Prévisualiser uniquement le routage heuristic déterministe. À utiliser pour les diagnostics sans provider ou pour vérifier le comportement de fallback.",
   docs_cli_cmd_plan:
