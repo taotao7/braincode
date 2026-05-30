@@ -117,3 +117,37 @@ test("image preview bounds are stable and fit inside transcript viewports", () =
     maxRows: 6,
   });
 });
+
+test("transcript viewport snaps scrollTop to an entry boundary and clamps", () => {
+  const items = Array.from({ length: 12 }, (_, index) => ({
+    id: `a${index}`,
+    kind: "assistant" as const,
+    text: `line ${index}`,
+  }));
+  const layout = __test.layoutTranscriptItems(items, 80);
+  const viewportRows = 8;
+
+  // Sticking to the bottom (null) lands at/near maxScrollTop (snapped to an
+  // entry boundary) and keeps the last item visible.
+  const atBottom = __test.viewportTranscriptLayout(layout, viewportRows, null);
+  expect(atBottom.maxScrollTop).toBe(layout.totalRows - viewportRows);
+  expect(atBottom.scrollTop).toBeLessThanOrEqual(atBottom.maxScrollTop);
+  expect(atBottom.entries.at(-1)?.item.id).toBe("a11");
+
+  // Scrolling to the top shows the first entry.
+  const atTop = __test.viewportTranscriptLayout(layout, viewportRows, 0);
+  expect(atTop.scrollTop).toBe(0);
+  expect(atTop.entries[0]?.item.id).toBe("a0");
+});
+
+test("transcript viewport with content shorter than the window does not scroll", () => {
+  const items = Array.from({ length: 2 }, (_, index) => ({
+    id: `a${index}`,
+    kind: "assistant" as const,
+    text: `line ${index}`,
+  }));
+  const layout = __test.layoutTranscriptItems(items, 80);
+  const view = __test.viewportTranscriptLayout(layout, 40, 0);
+  expect(view.maxScrollTop).toBe(0);
+  expect(view.entries).toHaveLength(2);
+});

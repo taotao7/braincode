@@ -407,7 +407,13 @@ type BraincodeTuiProps = {
 
 export async function runTui(initialPrompt?: string): Promise<void> {
   const restoreDebugSink = await configureTuiDebugSink();
-  const instance = render(<BraincodeTui initialPrompt={initialPrompt} />);
+  // Render into the terminal's alternate screen buffer so the TUI owns the
+  // whole terminal (like vim/htop/less) and the original screen is restored on
+  // exit. The alt-screen has no native scrollback, so the transcript provides
+  // its own in-app scrolling (PageUp/PageDown/Ctrl+↑↓/Home/End + mouse wheel).
+  const instance = render(<BraincodeTui initialPrompt={initialPrompt} />, {
+    alternateScreen: true,
+  });
   try {
     await instance.waitUntilExit();
   } finally {
@@ -421,6 +427,10 @@ const INPUT_PROMPT_PREFIX = "› ";
 const FRAME_RESERVED_COLUMNS = 4;
 const INPUT_BOX_HORIZONTAL_CHROME = 4; // left/right border plus padding
 const INK_RENDER_SAFETY_ROWS = 1;
+// The header is rendered as the top of the scrollable transcript region so it
+// scrolls away as content grows. It occupies a fixed block: two content rows
+// (badges + meta), a top and bottom border, and one bottom margin row.
+const HEADER_ROWS = 5;
 const OVERLAY_SUGGESTION_MIN_ROWS = 4;
 const OVERLAY_SUGGESTION_MAX_ROWS = 12;
 const PET_PANEL_MIN_WIDTH = 28;
@@ -456,9 +466,10 @@ const STREAM_FLUSH_MIN_CHARS = 600;
 const STREAM_FLUSH_MAX_WAIT_MS = 2500;
 const PET_SNAPSHOT_FLUSH_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
-// Mouse-wheel scrolling is on by default; set BRAINCODE_TUI_MOUSE=false (or 0)
-// to opt out (e.g. if you prefer the terminal's native text selection without
-// holding Shift). An unset variable keeps mouse tracking enabled.
+// Mouse-wheel scrolling is on by default. In the alternate screen there is no
+// native terminal scrollback, so the wheel drives the in-app transcript scroll.
+// Set BRAINCODE_TUI_MOUSE=false (or 0) to release the mouse if you prefer your
+// terminal's drag-to-select without holding Shift. Unset keeps it enabled.
 const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE
   ? isTruthyEnv(process.env.BRAINCODE_TUI_MOUSE)
   : true;
@@ -3786,7 +3797,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const scrollHelp = TUI_MOUSE_ENABLED
     ? "PageUp/PageDown/wheel/Ctrl+↑↓ scroll"
     : "PageUp/PageDown/Ctrl+↑↓ scroll";
-  const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · Ctrl+T folds · ${scrollHelp} · select content to copy · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
+  const copyHelp = TUI_MOUSE_ENABLED
+    ? "Shift+drag to select/copy"
+    : "drag to select/copy";
+  const helpText = `Enter submits · / commands · ↑↓ scroll content when input is empty · Ctrl+P/N prompt history · Ctrl+T folds · ${scrollHelp} · ${copyHelp} · End bottom · Ctrl+O intent · @ files · @@ sessions · Ctrl+V paste · Esc dismisses · Ctrl+C exits`;
   const sessionMatchRows =
     sessionMatches.length === 0
       ? 1
@@ -3795,51 +3809,14 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   return (
     <TuiThemeContext.Provider value={tuiTheme}>
       <Box flexDirection="column" paddingX={1}>
-        <Box
-          borderStyle="round"
-          borderColor={colors.focusedBorder}
-          paddingX={1}
-          marginBottom={1}
-        >
-          <Box flexDirection="row" alignItems="center">
-            <Box flexDirection="column" marginRight={1}>
-              <Text>
-                <Badge label="BRAIN / CODE" backgroundColor="cyan" />
-              </Text>
-              <Text>
-                <Badge
-                  label={`${mode.toUpperCase()} / ${themeName.toUpperCase()}`.padEnd(
-                    12,
-                  )}
-                  backgroundColor={mode === "radical" ? "magenta" : "green"}
-                />
-              </Text>
-            </Box>
-
-            <HeaderSeparator />
-
-            <Box flexDirection="column" marginRight={1}>
-              <HeaderMetaLine label="SESSION" value={sessionId.slice(0, 8)} />
-              <HeaderMetaLine label="ROOT" value={headerRoot} />
-            </Box>
-
-            <HeaderSeparator />
-
-            <Box flexDirection="column" marginRight={1}>
-              <HeaderInfoLine
-                label="PROJECT"
-                backgroundColor="blue"
-                value={projectSummary}
-              />
-              <HeaderInfoLine
-                label="USER"
-                backgroundColor="magenta"
-                value={userSummary}
-              />
-            </Box>
-          </Box>
-        </Box>
-
+        <HeaderBlock
+          mode={mode}
+          themeName={themeName}
+          sessionId={sessionId}
+          headerRoot={headerRoot}
+          projectSummary={projectSummary}
+          userSummary={userSummary}
+        />
         <TranscriptSurface
           transcriptStore={transcriptStore}
           transcriptScrollStore={transcriptScrollStore}
@@ -5507,7 +5484,7 @@ function estimateFixedFrameRows({
   running: boolean;
 }): number {
   // Header border with two metadata rows plus the bottom margin.
-  let rows = 5;
+  let rows = HEADER_ROWS;
 
   if (brainPanel)
     rows += borderedPanelRows(
@@ -6366,6 +6343,68 @@ function HeaderInfoLine({
       <Badge label={label.padEnd(7)} backgroundColor={backgroundColor} />
       <Text color={theme.colors.gray}> {value}</Text>
     </Text>
+  );
+}
+
+// The header block. Rendered at the top of the scrollable transcript region so
+// it scrolls out of view as the conversation grows (it occupies HEADER_ROWS).
+function HeaderBlock({
+  mode,
+  themeName,
+  sessionId,
+  headerRoot,
+  projectSummary,
+  userSummary,
+}: {
+  mode: BraincodeMode;
+  themeName: BraincodeTheme;
+  sessionId: string;
+  headerRoot: string;
+  projectSummary: string;
+  userSummary: string;
+}) {
+  const theme = useTuiTheme();
+  return (
+    <Box
+      borderStyle="round"
+      borderColor={theme.colors.focusedBorder}
+      paddingX={1}
+      marginBottom={1}
+    >
+      <Box flexDirection="row" alignItems="center">
+        <Box flexDirection="column" marginRight={1}>
+          <Text>
+            <Badge label="BRAIN / CODE" backgroundColor="cyan" />
+          </Text>
+          <Text>
+            <Badge
+              label={`${mode.toUpperCase()} / ${themeName.toUpperCase()}`.padEnd(
+                12,
+              )}
+              backgroundColor={mode === "radical" ? "magenta" : "green"}
+            />
+          </Text>
+        </Box>
+        <HeaderSeparator />
+        <Box flexDirection="column" marginRight={1}>
+          <HeaderMetaLine label="SESSION" value={sessionId.slice(0, 8)} />
+          <HeaderMetaLine label="ROOT" value={headerRoot} />
+        </Box>
+        <HeaderSeparator />
+        <Box flexDirection="column" marginRight={1}>
+          <HeaderInfoLine
+            label="PROJECT"
+            backgroundColor="blue"
+            value={projectSummary}
+          />
+          <HeaderInfoLine
+            label="USER"
+            backgroundColor="magenta"
+            value={userSummary}
+          />
+        </Box>
+      </Box>
+    </Box>
   );
 }
 
@@ -7989,7 +8028,9 @@ export const __test = {
   clipDraftToWindow,
   draftWindowDisplayLines,
   imagePreviewBounds,
+  layoutTranscriptItems,
   leftAlignTranscriptRows,
   normalizeTranscriptItemForFoldPreference,
+  viewportTranscriptLayout,
   wrapByVisualWidth,
 };
