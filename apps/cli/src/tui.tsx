@@ -11,7 +11,7 @@ import { render as renderMarkdown, strip as stripMarkdown } from "markdansi";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 import {
   ensureSessionHandoff,
   executePromptFromConfig,
@@ -72,6 +72,10 @@ import {
   type EditRow,
 } from "./tool-edit-preview";
 import { isWideChar, moveDraftCursorVertically } from "./input-cursor";
+import {
+  buildImagePreview,
+  type ImageProtocol,
+} from "./image-preview";
 
 type TranscriptItem = {
   id: string;
@@ -88,7 +92,8 @@ type TranscriptItem = {
     | "todo"
     | "queued"
     | "decision"
-    | "report";
+    | "report"
+    | "image";
   text: string;
   collapsed?: boolean;
   plan?: RuntimePlan;
@@ -107,6 +112,14 @@ type TranscriptItem = {
   toolArgs?: Record<string, unknown>;
   toolDetail?: string;
   streaming?: boolean;
+  imagePath?: string;
+  imageStatus?: "loading" | "ready" | "failed";
+  imageLines?: string[];
+  imageCols?: number;
+  imageRows?: number;
+  imageProtocol?: ImageProtocol;
+  imageFgColor?: string;
+  imageError?: string;
 };
 
 type ToolCategory = "websearch" | "execute" | "write" | "read" | "mcp" | "tool";
@@ -258,6 +271,12 @@ const COMMANDS: CommandDefinition[] = [
     insert: "/mode ",
   },
   { name: "theme", label: "/theme", hint: "Show the system-resolved theme" },
+  {
+    name: "image",
+    label: "/image",
+    hint: "Preview an image in the terminal (kitty/ghostty or text fallback)",
+    insert: "/image ",
+  },
   { name: "auto", label: "/auto", hint: "Switch execution mode to auto" },
   {
     name: "radical",
@@ -425,6 +444,11 @@ const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 const TOOL_DETAIL_CHAR_LIMIT = 320;
 const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
+const IMAGE_PREVIEW_MAX_COLS = 72;
+const IMAGE_PREVIEW_MAX_ROWS = 12;
+const IMAGE_PREVIEW_MIN_COLS = 12;
+const IMAGE_PREVIEW_MIN_ROWS = 4;
+const IMAGE_PREVIEW_VIEWPORT_CHROME_ROWS = 4;
 const RUN_STATUS_ANIMATION_MS = 140;
 const RUN_STATUS_HIGHLIGHT_COLOR = "#ffffff";
 const DEFAULT_STREAM_FLUSH_MS = 1000;
@@ -432,7 +456,7 @@ const STREAM_FLUSH_MIN_CHARS = 600;
 const STREAM_FLUSH_MAX_WAIT_MS = 2500;
 const PET_SNAPSHOT_FLUSH_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
-const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE !== "false";
+const TUI_MOUSE_ENABLED = isTruthyEnv(process.env.BRAINCODE_TUI_MOUSE);
 
 type UiColor =
   | "blue"
@@ -875,6 +899,80 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     ]);
   }
 
+  // Load an image preview asynchronously and patch the transcript item in
+  // place. For the Kitty protocol the upload sequence is written to stdout
+  // exactly once (the image lives in the terminal's memory keyed by id);
+  // afterwards the placeholder glyph lines can be re-rendered freely by Ink
+  // as the viewport scrolls.
+  function loadImagePreviewInto(itemId: string, path: string) {
+    const { maxCols, maxRows } = imagePreviewBounds(
+      terminalCols,
+      terminalRows,
+      transcriptViewportState.current.viewportRows,
+    );
+    void (async () => {
+      const shouldStickToBottom = transcriptScrollStore.getSnapshot() === null;
+      try {
+        const preview = await buildImagePreview(path, { maxCols, maxRows });
+        if (!preview) {
+          patchTranscriptItem(itemId, {
+            imageStatus: "failed",
+            imageError: "Could not decode image (need ImageMagick or sips).",
+          });
+          if (shouldStickToBottom) scrollTranscriptTo("bottom");
+          return;
+        }
+        if (preview.transmit && stdout) stdout.write(preview.transmit);
+        patchTranscriptItem(itemId, {
+          imageStatus: "ready",
+          imageLines: preview.lines,
+          imageCols: preview.cols,
+          imageRows: preview.rows,
+          imageProtocol: preview.protocol,
+          imageFgColor: preview.fgColor,
+          text: imageCaption(path, preview.cols, preview.rows, preview.protocol),
+        });
+        if (shouldStickToBottom) scrollTranscriptTo("bottom");
+      } catch (error) {
+        patchTranscriptItem(itemId, {
+          imageStatus: "failed",
+          imageError: error instanceof Error ? error.message : String(error),
+        });
+        if (shouldStickToBottom) scrollTranscriptTo("bottom");
+      }
+    })();
+  }
+
+  function patchTranscriptItem(itemId: string, patch: Partial<TranscriptItem>) {
+    setItems((previous) => {
+      let changed = false;
+      const next = previous.map((item) => {
+        if (item.id !== itemId) return item;
+        if (!transcriptPatchChangesItem(item, patch)) return item;
+        changed = true;
+        return { ...item, ...patch };
+      });
+      return changed ? next : previous;
+    });
+  }
+
+  // Append a loading image item and kick off async decode/upload.
+  function appendImagePreview(path: string, caption?: string) {
+    const itemId = crypto.randomUUID();
+    setItems((previous) => [
+      ...previous,
+      {
+        id: itemId,
+        kind: "image",
+        imagePath: path,
+        imageStatus: "loading",
+        text: caption ?? `Loading image · ${displayImagePath(path)}`,
+      },
+    ]);
+    scrollTranscriptTo("bottom");
+    loadImagePreviewInto(itemId, path);
+  }
+
   function scrollTranscriptBy(deltaRows: number) {
     const { maxScrollTop } = transcriptViewportState.current;
     if (maxScrollTop <= 0 || !Number.isFinite(deltaRows) || deltaRows === 0)
@@ -1137,6 +1235,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         return true;
       case "theme":
         showTheme(argument);
+        return true;
+      case "image":
+        showImagePreview(argument);
         return true;
       case "auto":
         void switchMode("auto");
@@ -1953,6 +2054,23 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     });
   }
 
+  function showImagePreview(argument: string) {
+    const path = argument.trim().replace(/^["']|["']$/g, "");
+    if (!path) {
+      appendItem({
+        kind: "error",
+        text: "Usage: /image <path-to-image>",
+      });
+      return;
+    }
+    const resolved = path.startsWith("~")
+      ? join(homedir(), path.slice(1))
+      : isAbsolute(path)
+        ? path
+        : join(projectRoot, path);
+    appendImagePreview(resolved);
+  }
+
   function showSkillPanel(argument: string) {
     if (!projectSupport || !userSupport) {
       appendItem({ kind: "status", text: "Support config is still loading." });
@@ -2679,6 +2797,13 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         });
       }
       updateStatus(`${phaseLabel} ${event.role} ${event.status}.`);
+      // When an image was generated, surface a scaled preview inline so the
+      // user sees the result without opening the file. The artifact path is
+      // embedded in the worker summary as "Generated image artifact: <path>".
+      if (event.status === "completed" && event.summary) {
+        const artifactPath = extractGeneratedImagePath(event.summary);
+        if (artifactPath) appendImagePreview(artifactPath);
+      }
     };
 
     const onMcpReport = (
@@ -4405,6 +4530,7 @@ const TranscriptEntryView = React.memo(function TranscriptEntryView({
         </Box>
       ) : null}
       {item.editPreview ? <EditPreviewView preview={item.editPreview} /> : null}
+      {item.kind === "image" ? <ImagePreviewView item={item} /> : null}
     </Box>
   );
 });
@@ -4907,6 +5033,31 @@ function runStatusCharColor(
   return index === activeIndex
     ? RUN_STATUS_HIGHLIGHT_COLOR
     : tone(theme, cell.color);
+}
+
+function displayImagePath(path: string): string {
+  const home = process.env.HOME;
+  const shown = home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+  return shown.length > 60 ? `…${shown.slice(-59)}` : shown;
+}
+
+function imageCaption(
+  path: string,
+  cols: number,
+  rows: number,
+  protocol: ImageProtocol,
+): string {
+  const tag = protocol === "kitty" ? "kitty" : "text";
+  return `${displayImagePath(path)} · ${cols}×${rows} cells · ${tag}`;
+}
+
+// Pull the artifact path out of an imageMaker worker summary, which begins
+// with a "Generated image artifact: <path>" line.
+function extractGeneratedImagePath(summary: string): string | null {
+  const match = /Generated image artifact:\s*(.+)/.exec(summary);
+  if (!match) return null;
+  const path = match[1]?.split(/\r?\n/)[0]?.trim();
+  return path && path.length > 0 ? path : null;
 }
 
 function runStatusCharsText(chars: RunStatusTextChar[]): string {
@@ -5430,9 +5581,14 @@ function estimateTranscriptItemRows(
   collapsible: boolean,
 ): number {
   if (item.kind === "user") {
-    return rightAlignTranscriptRows(item.text, width, 6).length;
+    return leftAlignTranscriptRows(item.text, width, 6).length;
   }
   if (item.kind === "tool") return 1;
+  if (item.kind === "image") {
+    // The badge/caption is the main line; image cells are counted as a
+    // supplement (see estimateTranscriptSupplementRows).
+    return countWrappedRows(item.text || " ", Math.max(10, width));
+  }
   if (isMarkdownTranscriptItem(item)) {
     const line = transcriptPlainLine(
       { ...item, text: renderTranscriptMarkdownPlain(item.text, width) },
@@ -5515,6 +5671,18 @@ function estimateTranscriptSupplementRows(
       );
     }
     if (item.editPreview.truncated) rows += 1;
+  }
+  if (item.kind === "image") {
+    if (item.imageStatus === "ready" && item.imageRows) {
+      rows += item.imageRows;
+    } else if (item.imageStatus === "failed") {
+      rows += countWrappedRows(
+        `↳ ${item.imageError ?? "Failed to render image."}`,
+        Math.max(10, width - 2),
+      );
+    } else {
+      rows += 1; // loading spinner line
+    }
   }
   return rows;
 }
@@ -5871,8 +6039,33 @@ function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 function frameContentWidth(terminalCols: number): number {
   return Math.max(20, terminalCols - FRAME_RESERVED_COLUMNS);
+}
+
+function imagePreviewBounds(
+  terminalCols: number,
+  terminalRows: number,
+  transcriptViewportRows: number,
+): { maxCols: number; maxRows: number } {
+  const maxCols = Math.max(
+    IMAGE_PREVIEW_MIN_COLS,
+    Math.min(IMAGE_PREVIEW_MAX_COLS, frameContentWidth(terminalCols)),
+  );
+  const availableRows =
+    transcriptViewportRows > 0
+      ? transcriptViewportRows - IMAGE_PREVIEW_VIEWPORT_CHROME_ROWS
+      : terminalRows - 18;
+  const maxRows = Math.max(
+    IMAGE_PREVIEW_MIN_ROWS,
+    Math.min(IMAGE_PREVIEW_MAX_ROWS, availableRows),
+  );
+  return { maxCols, maxRows };
 }
 
 function inputTextWidth(terminalCols: number): number {
@@ -5889,17 +6082,61 @@ function composeDraftLine(draft: string): string {
 function wrapByVisualWidth(text: string, width: number): string[] {
   if (width <= 0) return [text];
   const lines: string[] = [];
+  for (const sourceLine of text.split(/\r?\n/)) {
+    lines.push(...wrapSingleVisualLineByWords(sourceLine, width));
+  }
+  return lines.length > 0 ? lines : [""];
+}
+
+function wrapSingleVisualLineByWords(text: string, width: number): string[] {
+  if (text.length === 0) return [""];
+  const lines: string[] = [];
+  let current = "";
+  let currentWidth = 0;
+
+  const pushCurrent = () => {
+    lines.push(current.trimEnd());
+    current = "";
+    currentWidth = 0;
+  };
+
+  for (const token of text.match(/\s+|\S+/gu) ?? []) {
+    const tokenWidth = visualWidth(token);
+    if (/^\s+$/u.test(token)) {
+      if (currentWidth > 0 && currentWidth + tokenWidth <= width) {
+        current += token;
+        currentWidth += tokenWidth;
+      }
+      continue;
+    }
+
+    if (tokenWidth > width) {
+      if (currentWidth > 0) pushCurrent();
+      const hardWrapped = hardWrapVisualToken(token, width);
+      lines.push(...hardWrapped.slice(0, -1));
+      current = hardWrapped.at(-1) ?? "";
+      currentWidth = visualWidth(current);
+      continue;
+    }
+
+    if (currentWidth > 0 && currentWidth + tokenWidth > width) {
+      pushCurrent();
+    }
+
+    current += token;
+    currentWidth += tokenWidth;
+  }
+  if (currentWidth > 0 || lines.length === 0) lines.push(current.trimEnd());
+  return lines;
+}
+
+function hardWrapVisualToken(text: string, width: number): string[] {
+  const lines: string[] = [];
   let current = "";
   let currentWidth = 0;
   for (const char of text) {
-    if (char === "\n") {
-      lines.push(current);
-      current = "";
-      currentWidth = 0;
-      continue;
-    }
     const charWidth = isWideChar(char) ? 2 : 1;
-    if (currentWidth + charWidth > width) {
+    if (current.length > 0 && currentWidth + charWidth > width) {
       lines.push(current);
       current = "";
       currentWidth = 0;
@@ -5907,7 +6144,7 @@ function wrapByVisualWidth(text: string, width: number): string[] {
     current += char;
     currentWidth += charWidth;
   }
-  lines.push(current);
+  if (current.length > 0 || lines.length === 0) lines.push(current);
   return lines;
 }
 
@@ -5929,26 +6166,18 @@ function visualWidth(text: string): number {
   return width;
 }
 
-function rightAlignTranscriptRows(
+function leftAlignTranscriptRows(
   text: string,
   width: number,
   firstLinePrefixWidth: number,
-): Array<{ padding: string; line: string; first: boolean }> {
+): Array<{ indent: string; line: string; first: boolean }> {
   const lineWidth = Math.max(20, width);
-  const available = Math.max(8, lineWidth - firstLinePrefixWidth);
-  const bubbleWidth = Math.max(
-    8,
-    Math.min(available, Math.floor(lineWidth * 0.72)),
-  );
-  return wrapByVisualWidth(text, bubbleWidth).map((line, index) => {
-    const occupied =
-      visualWidth(line) + (index === 0 ? firstLinePrefixWidth : 0);
-    return {
-      padding: " ".repeat(Math.max(0, lineWidth - occupied)),
-      line,
-      first: index === 0,
-    };
-  });
+  const bodyWidth = Math.max(8, lineWidth - firstLinePrefixWidth);
+  return wrapByVisualWidth(text, bodyWidth).map((line, index) => ({
+    indent: index === 0 ? "" : " ".repeat(firstLinePrefixWidth),
+    line,
+    first: index === 0,
+  }));
 }
 
 function locateCursorRow(text: string, cursor: number, width: number): number {
@@ -6249,18 +6478,19 @@ function TranscriptLine({
   const theme = useTuiTheme();
   const foldGlyph = collapsible ? (item.collapsed ? "▸ " : "▾ ") : "";
   if (item.kind === "user") {
-    const rows = rightAlignTranscriptRows(item.text, width, 6);
+    const rows = leftAlignTranscriptRows(item.text, width, 6);
     return (
       <Box flexDirection="column">
         {rows.map((row, index) => (
           <Text key={index}>
-            <Text>{row.padding}</Text>
             {row.first ? (
               <>
                 <Badge label="YOU" backgroundColor="blue" />
                 <Text> </Text>
               </>
-            ) : null}
+            ) : (
+              <Text>{row.indent}</Text>
+            )}
             <Text color={tone(theme, colorFor(item))}>{row.line || " "}</Text>
           </Text>
         ))}
@@ -6402,6 +6632,16 @@ function transcriptBadge(item: TranscriptItem): {
       return { label: "TOOL", color: "yellow" };
     case "decision":
       return { label: "ASK", color: "yellow" };
+    case "image":
+      return {
+        label: "IMAGE",
+        color:
+          item.imageStatus === "failed"
+            ? "red"
+            : item.imageStatus === "ready"
+              ? "cyan"
+              : "yellow",
+      };
   }
 }
 
@@ -6466,6 +6706,42 @@ function EditPreviewView({ preview }: { preview: EditPreview }) {
           {"  "}… {preview.hiddenLines} more lines …
         </Text>
       ) : null}
+    </Box>
+  );
+}
+
+function ImagePreviewView({ item }: { item: TranscriptItem }) {
+  const theme = useTuiTheme();
+  if (item.imageStatus === "failed") {
+    return (
+      <Box flexDirection="column" marginLeft={2}>
+        <Text color={tone(theme, "red")}>
+          ↳ {item.imageError ?? "Failed to render image."}
+        </Text>
+      </Box>
+    );
+  }
+  if (item.imageStatus !== "ready" || !item.imageLines) {
+    return (
+      <Box flexDirection="column" marginLeft={2}>
+        <Text color={theme.colors.gray}>↳ rendering…</Text>
+      </Box>
+    );
+  }
+  // Kitty placeholder cells carry the image id in their fg color (applied via
+  // the color prop so Ink's layout stays intact). Half-block lines embed their
+  // own SGR and must be printed verbatim.
+  return (
+    <Box flexDirection="column">
+      {item.imageLines.map((line, index) =>
+        item.imageProtocol === "kitty" ? (
+          <Text key={index} color={item.imageFgColor}>
+            {line}
+          </Text>
+        ) : (
+          <Text key={index}>{line}</Text>
+        ),
+      )}
     </Box>
   );
 }
@@ -7075,6 +7351,16 @@ function colorFor(
           return "yellow";
       }
     }
+    case "image": {
+      switch (item.imageStatus) {
+        case "ready":
+          return "cyan";
+        case "failed":
+          return "red";
+        default:
+          return "yellow";
+      }
+    }
   }
 }
 
@@ -7112,7 +7398,7 @@ export function formatHelp(commands: CommandDefinition[] = COMMANDS): string {
     "  • Press Ctrl+O or run /intent to inspect the current task graph.",
     TUI_MOUSE_ENABLED
       ? "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown, wheel, or Ctrl+↑/Ctrl+↓ also scroll it."
-      : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is disabled by BRAINCODE_TUI_MOUSE=false.",
+      : "  • Press ↑/↓ to scroll the transcript when the input is empty; PageUp/PageDown or Ctrl+↑/Ctrl+↓ also scroll it. Mouse capture is off by default; set BRAINCODE_TUI_MOUSE=true to enable wheel scrolling.",
     "  • Press Ctrl+P/Ctrl+N for prompt history; ↑/↓ still moves within multi-line input.",
     "  • Press Ctrl+Y to edit the most recent queued prompt.",
     "  • Press Ctrl+T to expand or collapse foldable transcript rows.",
@@ -7679,5 +7965,8 @@ export const __test = {
   INPUT_MIN_LINES,
   clipDraftToWindow,
   draftWindowDisplayLines,
+  imagePreviewBounds,
+  leftAlignTranscriptRows,
   normalizeTranscriptItemForFoldPreference,
+  wrapByVisualWidth,
 };

@@ -78,3 +78,42 @@ test("transcript fold preference applies to future collapsible output", () => {
       .collapsed,
   ).toBeUndefined();
 });
+
+test("transcript wrapping keeps words intact when they fit", () => {
+  expect(__test.wrapByVisualWidth("hello world from braincode", 12)).toEqual([
+    "hello world",
+    "from",
+    "braincode",
+  ]);
+  expect(
+    __test.wrapByVisualWidth("supercalifragilistic", 8),
+  ).toEqual(["supercal", "ifragili", "stic"]);
+});
+
+test("user transcript rows are left aligned with continuation indentation", () => {
+  const rows = __test.leftAlignTranscriptRows(
+    "hello world from braincode",
+    16,
+    6,
+  );
+
+  expect(rows).toEqual([
+    { indent: "", line: "hello world", first: true },
+    { indent: "      ", line: "from braincode", first: false },
+  ]);
+});
+
+test("image preview bounds are stable and fit inside transcript viewports", () => {
+  expect(__test.imagePreviewBounds(160, 60, 30)).toEqual({
+    maxCols: 72,
+    maxRows: 12,
+  });
+  expect(__test.imagePreviewBounds(160, 60, 10)).toEqual({
+    maxCols: 72,
+    maxRows: 6,
+  });
+  expect(__test.imagePreviewBounds(160, 24, 0)).toEqual({
+    maxCols: 72,
+    maxRows: 6,
+  });
+});
