@@ -4134,6 +4134,16 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           footerRowsStore={footerRowsStore}
           runStatusStore={runStatusStore}
           running={running}
+          overlayOpen={Boolean(
+            brainPanel ||
+              intentPanel ||
+              sessionPanel ||
+              hookPanel ||
+              mcpPanel ||
+              decisionPanel ||
+              runtimeErrorPanel ||
+              overlay,
+          )}
           inputWidth={inputWidth}
           contentWidth={contentWidth}
         />
@@ -4421,6 +4431,9 @@ const InputSurface = React.memo(function InputSurface({
   const { stdout } = useStdout();
   const theme = useTuiTheme();
   const colors = theme.colors;
+  // Bumped to force a declarative ink re-render while a panel/overlay is open,
+  // where imperative ANSI painting would mis-position the status line.
+  const [, setRenderTick] = useState(0);
   useTuiStoreSnapshot(draftMetricsStore);
   const input = inputStore.getSnapshot();
   const runStatus = useTuiStoreSnapshot(runStatusStore);
@@ -4445,7 +4458,7 @@ const InputSurface = React.memo(function InputSurface({
         draftMetricsStore.setSnapshot(nextMetrics);
         return;
       }
-      if (mode === "paint" && stdout) {
+      if (mode === "paint" && stdout && !overlayOpen) {
         paintInputSurface({
           stdout,
           theme,
@@ -4457,14 +4470,22 @@ const InputSurface = React.memo(function InputSurface({
         });
       }
       if (mode === "status" && stdout && running) {
-        paintRunStatusLine({
-          stdout,
-          theme,
-          contentWidth,
-          footerRows: footerRowsStore.getSnapshot(),
-          runStatus: runStatusStore.getSnapshot(),
-          draftWindow: currentWindow,
-        });
+        // While a panel/overlay sits between the transcript and the input box,
+        // ink owns the frame layout. Imperative ANSI repaint can't see the
+        // panel's height, so it would smear a second status line at the wrong
+        // row. Re-render declaratively instead and let ink place it once.
+        if (overlayOpen) {
+          setRenderTick((tick) => tick + 1);
+        } else {
+          paintRunStatusLine({
+            stdout,
+            theme,
+            contentWidth,
+            footerRows: footerRowsStore.getSnapshot(),
+            runStatus: runStatusStore.getSnapshot(),
+            draftWindow: currentWindow,
+          });
+        }
       }
     };
     syncInput("measure");
@@ -4487,6 +4508,7 @@ const InputSurface = React.memo(function InputSurface({
     footerRowsStore,
     inputStore,
     inputWidth,
+    overlayOpen,
     running,
     runStatusStore,
     stdout,
