@@ -136,7 +136,7 @@ Les fichiers de support spécifiques au projet vivent à côté du code :
   AGENTS.md                 instructions de projet durables injectées dans les prompts
   .mcp.json                 déclarations de serveurs MCP du projet (métadonnées seulement dans les prompts)
   .agents/hooks.json        hooks de cycle de vie du projet
-  .agents/skill/<id>/SKILL.md   skills locales au projet
+  .agents/skills/<id>/SKILL.md   skills locales au projet
 ```
 
 `packages/config` possède la découverte et le parsing. `agent-runtime` décide ce qui devient texte de prompt versus `ContextRef`.

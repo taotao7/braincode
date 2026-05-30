@@ -86,7 +86,7 @@ export function formatProjectSupportPromptSection(projectSupport?: ProjectSuppor
     const omittedCount = projectSupport.skills.length - inlineSkills.length
     sections.push(
       [
-        "Local skills (.agents/skill):",
+        "Local skills (.agents/skills):",
         ...inlineSkills.map((skill) => `### ${skill.id} (${skill.path})\n${clipPromptText(skill.content, `skill:${skill.id}`, MAX_INLINE_SKILL_CHARS)}`),
         omittedCount > 0 ? `[${omittedCount} additional local skill file(s) omitted from inline prompt context. Use project files/tools if their full content is needed.]` : "",
       ].join("\n\n"),

@@ -222,7 +222,7 @@ export const en = {
 
   docs_skills_title: "6. Skills",
   docs_skills_intro:
-    "Skills are project-local Markdown documents that teach Braincode a specialized workflow. They live under .agents/skill/<skill-id>/SKILL.md (or top-level .agents/skill/*.md) and are loaded as prompt context when the brain decides they are relevant.",
+    "Skills are project-local Markdown documents that teach Braincode a specialized workflow. They live under .agents/skills/<skill-id>/SKILL.md (or top-level .agents/skills/*.md) and are loaded as prompt context when the brain decides they are relevant.",
   docs_skills_file_title: "Skill layout",
   docs_skills_file_body:
     "A skill folder contains SKILL.md (the prompt) plus any reference docs. The first heading is the skill name. The brain may select a skill based on user intent — you do not have to invoke it manually.",
@@ -306,7 +306,7 @@ export const en = {
   docs_tui_cmd_theme: "Show the system-resolved TUI theme (dark or light). The theme auto-detects from terminal appearance.",
   docs_tui_cmd_team_test:
     "Diagnostic: force every role to run the prompt in parallel. Useful for verifying role behavior and model availability.",
-  docs_tui_cmd_skill: "List project and user skills loaded from .agents/skill and ~/.braincode/skills.",
+  docs_tui_cmd_skill: "List project and user skills loaded from .agents/skills and ~/.braincode/skills.",
   docs_tui_cmd_agents: "Show the AGENTS.md file path, size, and whether it was loaded.",
   docs_tui_cmd_files: "Refresh the @file index used for file name autocompletion.",
   docs_tui_cmd_clear: "Clear the transcript. This does not start a new session.",

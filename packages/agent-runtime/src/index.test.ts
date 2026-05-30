@@ -172,6 +172,37 @@ test("McpToolHub surfaces MCP isError tool calls as failed tool executions", asy
   }
 })
 
+test("McpToolHub applies per-server connect timeouts", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-timeout-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await Bun.write(
+    serverScript,
+    [
+      "const readline = require('node:readline');",
+      "readline.createInterface({ input: process.stdin });",
+      "setInterval(() => {}, 1000);",
+    ].join("\n"),
+  )
+
+  const hub = new McpToolHub()
+  const startedAt = Date.now()
+  try {
+    const report = await hub.connect(
+      [{ name: "slow", scope: "user", command: "bun", args: [serverScript] }],
+      { perServerConnectTimeoutMs: 250 },
+    )
+    const elapsedMs = Date.now() - startedAt
+
+    expect(report.connected).toEqual([])
+    expect(report.failed[0]?.name).toBe("slow")
+    expect(report.failed[0]?.error).toContain("initialize timeout")
+    expect(elapsedMs).toBeLessThan(1500)
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("normalizeRouterDecision does not inherit heuristic rush support for specialist routing", () => {
   const fallback = {
     primaryRole: "rush" as const,

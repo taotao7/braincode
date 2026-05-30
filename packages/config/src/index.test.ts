@@ -43,8 +43,9 @@ test("path helpers derive user and project support locations", async () => {
 
     expect(braincodePaths.tools).toBe(join(home, "tools.json"))
     expect(projectPaths.agents).toBe(join(root, "AGENTS.md"))
-    expect(projectPaths.skills).toBe(join(root, ".agents", "skill"))
+    expect(projectPaths.skills).toBe(join(root, ".agents", "skills"))
     expect(userPaths.mcp).toBe(join(home, "mcp.json"))
+    expect(userPaths.skills).toBe(join(home, "skills"))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -193,8 +194,8 @@ test("readProjectSupport discovers AGENTS, MCP config, and local skills", async 
       },
     }),
   )
-  await mkdir(join(projectRoot, ".agents", "skill", "docs"), { recursive: true })
-  await Bun.write(join(projectRoot, ".agents", "skill", "docs", "SKILL.md"), "# Docs skill\nSummarize project docs.\n")
+  await mkdir(join(projectRoot, ".agents", "skills", "docs"), { recursive: true })
+  await Bun.write(join(projectRoot, ".agents", "skills", "docs", "SKILL.md"), "# Docs skill\nSummarize project docs.\n")
 
   const support = await readProjectSupport(projectRoot)
 

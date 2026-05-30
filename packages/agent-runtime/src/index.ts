@@ -1,8 +1,8 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core"
 export type { AgentEvent } from "@earendil-works/pi-agent-core"
-import { collectMcpToolServers, McpToolHub, type McpHubConnectReport } from "./mcp"
+import { collectMcpToolServers, McpToolHub, type McpHubConnectReport, type McpLoadingStrategy } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
-export type { McpHubConnectReport, McpToolServerInput } from "./mcp"
+export type { McpHubConnectReport, McpLoadingStrategy, McpToolServerInput } from "./mcp"
 export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTasks, runDemoBenchmarkSuite } from "./benchmark"
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
 import { ContextHandoffRequiredError, estimateProviderContextBytes, formatBytes, isHandoffRequiredError, isProviderMessageSizeLimitError } from "./context-budget"
@@ -48,6 +48,7 @@ export type { PlanRuntimeOptions, RouterPlanDecision, RouterWorkerPlan, RuntimeP
 import { buildPrimaryPrompt, formatProjectSupportPromptSection, runSupportWorkers, runWorkerFromPlan, summarizeProjectSupport, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
 export { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, readOnlyToolWorkerRoles, runSupportWorkers, runWorkerFromPlan } from "./workers"
 export type { ExecutedWorkerResult, WorkerLifecycleEvent, WorkerTodoStatusHandler } from "./workers"
+import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFAULT_MCP_STARTUP_BUDGET_MS, normalizeRuntimeInteger } from "./mcp-loading"
 
 export type AgentRunRequest = {
   prompt: string
@@ -62,6 +63,9 @@ export type AgentRunRequest = {
   localToolMode?: LocalToolMode
   ignoreDisabledLocalTools?: boolean
   onMcpReport?: (report: McpHubConnectReport) => void | Promise<void>
+  mcpLoadingStrategy?: McpLoadingStrategy
+  mcpStartupBudgetMs?: number
+  mcpPerServerConnectTimeoutMs?: number
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
 }
 
@@ -286,32 +290,36 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     projectMcp: projectSupport.mcp,
     auth,
   })
-  let mcpReport: McpHubConnectReport = { connected: [], failed: [], skipped: mcpSkipped, toolCount: 0 }
-  if (mcpServers.length > 0) {
-    const connectReport = await mcpHub.connect(mcpServers)
-    mcpReport = {
-      connected: connectReport.connected,
-      failed: connectReport.failed,
-      skipped: [...mcpSkipped, ...connectReport.skipped],
-      toolCount: connectReport.toolCount,
-    }
-  }
-  if (request.onMcpReport) {
-    try {
-      await request.onMcpReport(mcpReport)
-    } catch {
-      // ignore listener errors
-    }
-  }
-  await appendSessionRecord(sessionId, { type: "mcp_connect", report: mcpReport }, home)
-  const mcpTools = mcpHub.getTools()
   const toolConfig = await readTools(home)
   const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
   const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools })
   const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools })
-  const runtimeTools = [...localTools, ...mcpTools]
   const toolEvidenceCache = createToolEvidenceCache()
+  const runtimeTools = [...localTools]
+  const mcpLoadingStrategy = request.mcpLoadingStrategy ?? "eager"
+  const mcpLoader = createRuntimeMcpLoader({
+    hub: mcpHub,
+    servers: mcpServers,
+    skipped: mcpSkipped,
+    strategy: mcpLoadingStrategy,
+    startupBudgetMs: normalizeRuntimeInteger(request.mcpStartupBudgetMs, 0, 120_000, DEFAULT_MCP_STARTUP_BUDGET_MS),
+    perServerConnectTimeoutMs: normalizeRuntimeInteger(request.mcpPerServerConnectTimeoutMs, 250, 120_000, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS),
+    runtimeTools,
+    localToolCount: localTools.length,
+    toolEvidenceCache,
+    publishReport: async (report) => {
+      if (request.onMcpReport) {
+        try {
+          await request.onMcpReport(report)
+        } catch {
+          // ignore listener errors
+        }
+      }
+      await appendSessionRecord(sessionId, { type: "mcp_connect", report }, home)
+    },
+  })
+  await mcpLoader.initialize()
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
@@ -389,7 +397,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           })
           await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
           await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, finalReport, attempt: attempt + 1 }, home)
-          return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpReport, patch }
+          return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpLoader.report(), patch }
         } catch (error) {
           lastError = error
           const message = error instanceof Error ? error.message : String(error)
@@ -458,6 +466,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         onEvent: request.onEvent,
         onToolApproval: request.onToolApproval,
       })
+      mcpLoader.activeRuntimes.add(runtime)
+      mcpLoader.refreshRuntimeTools(runtime)
       const unlinkAbort = linkRuntimeAbort(runtime, request.signal)
 
       try {
@@ -569,7 +579,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         })
         await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
         await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, finalReport, attempt: attempt + 1 }, home)
-        return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpReport, patch, checks, reviewDecision }
+        return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpLoader.report(), patch, checks, reviewDecision }
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
@@ -600,11 +610,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           break
         }
       }
+      finally {
+        mcpLoader.activeRuntimes.delete(runtime)
+      }
     }
 
     await updateTodoStatus(plan, todoIdsForRole(plan, plan.role), "failed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, error: lastError instanceof Error ? lastError.message : String(lastError) })
     throw lastError instanceof Error ? lastError : new Error(String(lastError))
   } finally {
+    mcpLoader.stop()
     mcpHub.shutdown()
   }
 }

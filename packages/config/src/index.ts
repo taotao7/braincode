@@ -524,7 +524,7 @@ export function getProjectSupportPaths(
     root: projectRoot,
     agents: join(projectRoot, "AGENTS.md"),
     mcp: join(projectRoot, ".mcp.json"),
-    skills: join(projectRoot, ".agents", "skill"),
+    skills: join(projectRoot, ".agents", "skills"),
     hooks: join(projectRoot, ".agents", "hooks.json"),
   };
 }

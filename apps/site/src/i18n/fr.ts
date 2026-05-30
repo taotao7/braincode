@@ -222,7 +222,7 @@ export const fr = {
 
   docs_skills_title: "6. Skills",
   docs_skills_intro:
-    "Les Skills sont des documents Markdown locaux au projet qui enseignent à Braincode un workflow spécialisé. Ils se trouvent sous .agents/skill/<skill-id>/SKILL.md (ou .agents/skill/*.md au niveau supérieur) et sont chargés comme contexte de prompt quand le cerveau juge qu'ils sont pertinents.",
+    "Les Skills sont des documents Markdown locaux au projet qui enseignent à Braincode un workflow spécialisé. Ils se trouvent sous .agents/skills/<skill-id>/SKILL.md (ou .agents/skills/*.md au niveau supérieur) et sont chargés comme contexte de prompt quand le cerveau juge qu'ils sont pertinents.",
   docs_skills_file_title: "Structure d'un Skill",
   docs_skills_file_body:
     "Un dossier skill contient SKILL.md (le prompt) plus tout document de référence. Le premier titre est le nom du skill. Le cerveau peut sélectionner un skill selon l'intention utilisateur — vous n'avez pas besoin de l'invoquer manuellement.",
@@ -306,7 +306,7 @@ export const fr = {
   docs_tui_cmd_theme: "Affiche le thème TUI résolu par le système (dark ou light). Le thème s'auto-détecte depuis l'apparence du terminal.",
   docs_tui_cmd_team_test:
     "Diagnostic : force chaque rôle à exécuter le prompt en parallèle. Utile pour vérifier le comportement des rôles et la disponibilité des modèles.",
-  docs_tui_cmd_skill: "Liste les skills projet et utilisateur chargés depuis .agents/skill et ~/.braincode/skills.",
+  docs_tui_cmd_skill: "Liste les skills projet et utilisateur chargés depuis .agents/skills et ~/.braincode/skills.",
   docs_tui_cmd_agents: "Affiche le chemin, la taille et le statut de chargement de AGENTS.md.",
   docs_tui_cmd_files: "Rafraîchit l'index @file utilisé pour l'autocomplétion des noms de fichiers.",
   docs_tui_cmd_clear: "Efface le transcript. Cela ne démarre pas une nouvelle session.",

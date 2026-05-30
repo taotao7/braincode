@@ -273,7 +273,7 @@ const COMMANDS: CommandDefinition[] = [
   {
     name: "skill",
     label: "/skill",
-    hint: "List project skills (.agents/skill)",
+    hint: "List project skills (.agents/skills)",
   },
   {
     name: "agents",
@@ -1969,7 +1969,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (all.length === 0) {
       appendItem({
         kind: "panel",
-        text: "No skills available.\n• User-global: ~/.braincode/skills/<id>/SKILL.md\n• Project-local: .agents/skill/<id>/SKILL.md",
+        text: "No skills available.\n• User-global: ~/.braincode/skills/<id>/SKILL.md\n• Project-local: .agents/skills/<id>/SKILL.md",
       });
       return;
     }
@@ -2683,16 +2683,27 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     const onMcpReport = (
       report: import("@braincode/agent-runtime").McpHubConnectReport,
     ) => {
+      const pending = report.pending ?? [];
       if (
         report.toolCount === 0 &&
+        report.connected.length === 0 &&
         report.failed.length === 0 &&
-        report.skipped.length === 0
+        report.skipped.length === 0 &&
+        pending.length === 0
       )
         return;
       const parts: string[] = [];
       if (report.toolCount > 0)
         parts.push(
           `${report.toolCount} MCP tools from ${report.connected.length} server${report.connected.length === 1 ? "" : "s"}`,
+        );
+      else if (report.connected.length > 0)
+        parts.push(
+          `connected: ${report.connected.map((entry) => `${entry.name}(${entry.toolCount})`).join(", ")}`,
+        );
+      if (pending.length > 0)
+        parts.push(
+          `loading: ${pending.map((entry) => `${entry.name}(${entry.reason})`).join(", ")}`,
         );
       if (report.failed.length > 0)
         parts.push(
@@ -2702,7 +2713,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         parts.push(
           `skipped: ${report.skipped.map((entry) => `${entry.name}(${entry.reason})`).join(", ")}`,
         );
-      const text = `MCP · ${parts.join(" · ")}`;
+      const text = `${report.loading ? "MCP loading" : "MCP"} · ${parts.join(" · ")}`;
       setItems((previous) =>
         previous.map((item) =>
           item.id === statusId ? { ...item, text } : item,
@@ -2829,6 +2840,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         onEvent,
         onToolApproval,
         onMcpReport,
+        mcpLoadingStrategy: "background",
         onWorkerEvent,
         forceRoles: options.forceRoles as never,
         ignoreDisabledLocalTools: approvalMode === "radical",

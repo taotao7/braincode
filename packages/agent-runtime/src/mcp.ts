@@ -8,6 +8,8 @@ const PROTOCOL_VERSION = "2024-11-05"
 const REQUEST_TIMEOUT_MS = 30000
 const CONNECT_TIMEOUT_MS = 15000
 
+export type McpLoadingStrategy = "eager" | "lazy" | "background"
+
 export type McpToolServerInput = {
   name: string
   scope: "user" | "project"
@@ -20,7 +22,14 @@ export type McpHubConnectReport = {
   connected: Array<{ scope: "user" | "project"; name: string; toolCount: number }>
   failed: Array<{ scope: "user" | "project"; name: string; error: string }>
   skipped: Array<{ scope: "user" | "project"; name: string; reason: string }>
+  pending?: Array<{ scope: "user" | "project"; name: string; reason: string }>
   toolCount: number
+  loading?: boolean
+  strategy?: McpLoadingStrategy
+}
+
+export type McpHubConnectOptions = {
+  perServerConnectTimeoutMs?: number
 }
 
 type PendingHandler = {
@@ -118,17 +127,17 @@ class McpConnection {
     }
   }
 
-  async initialize() {
+  async initialize(timeoutMs = CONNECT_TIMEOUT_MS) {
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: { name: "braincode", version: "0.1" },
-    }, CONNECT_TIMEOUT_MS)
+    }, timeoutMs)
     this.notify("notifications/initialized")
   }
 
-  async listTools(): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
-    const result = await this.request<{ tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> }>("tools/list", undefined, CONNECT_TIMEOUT_MS)
+  async listTools(timeoutMs = CONNECT_TIMEOUT_MS): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
+    const result = await this.request<{ tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> }>("tools/list", undefined, timeoutMs)
     return result.tools ?? []
   }
 
@@ -179,26 +188,36 @@ export class McpToolHub {
   private connections: McpConnection[] = []
   private agentTools: AgentTool[] = []
   private agentToolNames = new Set<string>()
+  private serverKeys = new Set<string>()
 
-  async connect(servers: McpToolServerInput[]): Promise<McpHubConnectReport> {
+  async connect(servers: McpToolServerInput[], options: McpHubConnectOptions = {}): Promise<McpHubConnectReport> {
     const report: McpHubConnectReport = { connected: [], failed: [], skipped: [], toolCount: 0 }
+    const connectTimeoutMs = normalizeConnectTimeoutMs(options.perServerConnectTimeoutMs)
     await Promise.all(
       servers.map(async (server) => {
+        const serverKey = `${server.scope}:${server.name}`
+        if (this.serverKeys.has(serverKey)) {
+          report.skipped.push({ scope: server.scope, name: server.name, reason: "already connected or connecting" })
+          return
+        }
+        this.serverKeys.add(serverKey)
         const connection = new McpConnection(server)
+        this.connections.push(connection)
         try {
-          await connection.initialize()
-          const tools = await connection.listTools()
+          await connection.initialize(connectTimeoutMs)
+          const tools = await connection.listTools(connectTimeoutMs)
           let addedToolCount = 0
           for (const tool of tools) {
             if (this.addAgentTool(toAgentTool(connection, server, tool))) addedToolCount += 1
             const alias = toWebSearchAlias(connection, server, tool)
             if (alias && this.addAgentTool(alias)) addedToolCount += 1
           }
-          this.connections.push(connection)
           report.connected.push({ scope: server.scope, name: server.name, toolCount: addedToolCount })
           report.toolCount += addedToolCount
         } catch (error) {
           connection.shutdown()
+          this.connections = this.connections.filter((candidate) => candidate !== connection)
+          this.serverKeys.delete(serverKey)
           const message = error instanceof Error ? error.message : String(error)
           report.failed.push({ scope: server.scope, name: server.name, error: message })
           debugLog("mcp", "connect failed", { server: server.name, error: message })
@@ -224,7 +243,13 @@ export class McpToolHub {
     this.connections = []
     this.agentTools = []
     this.agentToolNames.clear()
+    this.serverKeys.clear()
   }
+}
+
+function normalizeConnectTimeoutMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return CONNECT_TIMEOUT_MS
+  return Math.max(250, Math.min(120_000, Math.floor(value)))
 }
 
 function toAgentTool(connection: McpConnection, server: McpToolServerInput, tool: { name: string; description?: string; inputSchema?: unknown }): AgentTool {

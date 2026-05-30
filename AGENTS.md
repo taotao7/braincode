@@ -71,7 +71,7 @@ When changing architecture, structure, or planning, update the relevant `docs/` 
 
 - Load project instructions from `AGENTS.md`.
 - Load project MCP server declarations from `.mcp.json`; do not put secrets directly in this file.
-- Load project-local skills from `.agents/skill`, preferably `.agents/skill/<skill-id>/SKILL.md`.
+- Load project-local skills from `.agents/skills`, preferably `.agents/skills/<skill-id>/SKILL.md`.
 - Load project-local hooks from `.agents/hooks.json`; do not use `.codex` paths for Braincode hooks.
 - Treat `AGENTS.md` and skill Markdown as prompt context. Treat `.mcp.json` as tool configuration metadata, not prompt content.
 - Require command hooks to be explicitly trusted before running them.

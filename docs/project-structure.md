@@ -42,7 +42,7 @@ braincode/
   .mcp.json
   .agents/
     hooks.json
-    skill/
+    skills/
       <skill-id>/
         SKILL.md
   README.md
@@ -116,6 +116,7 @@ Expected commands:
 - `braincode run <task>` — execute one non-interactive prompt through the configured provider in read-only mode by default.
 - `braincode run --allow-edits <task>` — non-interactive execution with first-party local read/write tools and auto-approved file edits, while command execution, MCP tools, and unknown tools remain blocked.
 - `braincode run --yes <task>` — non-interactive execution with all local tools and auto-approved tool calls.
+- MCP startup is bounded: CLI runs use short-budget eager loading, while the TUI loads MCP servers in the background and keeps local tools available immediately.
 - `braincode benchmark [--heuristic] [--task <id>] [--json]` — run the representative coding-task plan benchmark suite.
 
 The CLI should stay thin. It should delegate implementation to packages.
@@ -166,10 +167,10 @@ Responsibilities:
 - Write settings atomically where practical.
 - Keep secrets separate from normal settings.
 - Apply future config migrations.
-- Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`.
+- Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skills`, and `.agents/hooks.json`.
 - Parse `.mcp.json` for project MCP server metadata without copying secrets into model context.
 - Treat user MCP config as user-installed/trusted, but require project `.mcp.json` server entries to opt in with `trusted: true` before Braincode starts their commands.
-- Load local skill Markdown from `.agents/skill/<skill-id>/SKILL.md` or top-level `.agents/skill/*.md`.
+- Load local skill Markdown from `.agents/skills/<skill-id>/SKILL.md` or top-level `.agents/skills/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
 - Aggregate token usage from session JSONL records by model, role, runtime phase, and recent call details for the local config UI.
@@ -230,7 +231,7 @@ Responsibilities:
 - Run the primary agent with only structured worker results as additional context.
 - Run a review worker for risky tasks when Brain policy requires it.
 - Merge structured worker and review results into the final run result.
-- Connect tools to the underlying agent runtime.
+- Connect tools to the underlying agent runtime, including eager/background/lazy MCP loading and dynamic primary-agent tool refresh when MCP becomes ready.
 - Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and reset cached evidence plus duplicate counters after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
@@ -361,7 +362,7 @@ MVP-2 starts by establishing the adapter boundary:
 
 - Done: `AGENTS.md` durable project instruction context.
 - Done: project MCP server declarations from `.mcp.json`, gated by per-server `trusted: true` before command execution.
-- Done: project-local skills from `.agents/skill`.
+- Done: project-local skills from `.agents/skills`.
 - Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Done: review worker execution for risky tasks.
 - Done: user confirmation flows for risky tool calls in the TUI.

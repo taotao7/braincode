@@ -137,6 +137,8 @@ async function runTask(args: string[]) {
     prompt,
     localToolMode: runPermissions === "yes" ? "all" : runPermissions === "allow-edits" ? "read-write" : "read-only",
     onToolApproval: runPermissions === "read-only" ? undefined : createRunApprovalHandler(runPermissions),
+    mcpLoadingStrategy: "eager",
+    mcpStartupBudgetMs: 10_000,
   })
   if (json) {
     console.log(JSON.stringify(result.finalReport, null, 2))

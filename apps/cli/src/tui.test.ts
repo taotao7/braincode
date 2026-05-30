@@ -21,7 +21,7 @@ test("formatHelp includes dynamically loaded skill commands", () => {
         id: "docs",
         scope: "project",
         content: "# Docs",
-        path: "/repo/.agents/skill/docs/SKILL.md",
+        path: "/repo/.agents/skills/docs/SKILL.md",
       },
     },
   ])

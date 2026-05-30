@@ -139,7 +139,7 @@ Project-local support files live next to code:
   AGENTS.md                 durable project instructions injected into prompts
   .mcp.json                 project MCP server declarations (metadata only in prompts)
   .agents/hooks.json        project lifecycle hooks
-  .agents/skill/<id>/SKILL.md   project-local skills
+  .agents/skills/<id>/SKILL.md   project-local skills
 ```
 
 `packages/config` owns discovery and parsing. `agent-runtime` decides what becomes prompt text vs. a `ContextRef`.

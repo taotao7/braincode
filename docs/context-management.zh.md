@@ -101,7 +101,7 @@ export type ContextRef = {
 编排器是 `packages/agent-runtime/src/index.ts` 里的 `executePromptFromConfig`。和上下文有关的步骤：
 
 1. **Prompt 展开** —— `expandPromptReferences` 把 `@<path>` 和 `@@<session-id>` 标记重写为内联段落，追加到 prompt 末尾。原 token 保留，方便模型引用。上限：单个文件 64 KB，单次会话快照 24 KB。
-2. **项目支持文件组装** —— `readProjectSupport` 收集 `AGENTS.md`、`.mcp.json` 元数据、`.agents/skill/*` 内容。`formatProjectSupportPromptSection` 用于 prompt 文本；`projectSupportContextRefs` 把它打包成 `ContextRef[]` 进 handoff packet。
+2. **项目支持文件组装** —— `readProjectSupport` 收集 `AGENTS.md`、`.mcp.json` 元数据、`.agents/skills/*` 内容。`formatProjectSupportPromptSection` 用于 prompt 文本；`projectSupportContextRefs` 把它打包成 `ContextRef[]` 进 handoff packet。
 3. **运行时 context 计划** —— `packages/agent-runtime/src/router.ts` 里的 `buildRuntimePlan` 创建一个 `BrainTaskContext`；真实执行时它的 id 就是 session id，同时给每个 `RuntimeWorkerPlan` 分配稳定的子 `contextId`。
 4. **Handoff 构造** —— `packages/agent-runtime/src/workers.ts` 里的 `createWorkerHandoff` 给每个 worker 生成一个 `HandoffPacket`，使用 worker 计划里的 `contextId` 作为 `task.id`，`parentId` 设为 Brain session id，`constraints` 填进隔离规则（见下），`expectedResult` 描述 worker 该返回的 JSON 形状。
 5. **Worker 运行** —— `packages/agent-runtime/src/workers.ts` 里的 `runWorkerFromPlan` 为 worker 新建一个 Pi `Agent`。prompt 由 `buildSupportWorkerPrompt` 组装：项目支持段 + 原始用户请求 + todo 依赖需要时由 Brain 提供的上游 worker 摘要 + handoff packet（JSON）+ 期望回复形状。Worker 没法访问编排器的 `Agent` 状态。

@@ -35,7 +35,7 @@ test("createWorkerHandoff includes project support context refs", () => {
         serverNames: ["docs"],
         config: { mcpServers: {} },
       },
-      skills: [{ id: "local-skill", path: "/repo/.agents/skill/local/SKILL.md", content: "skill rules" }],
+      skills: [{ id: "local-skill", path: "/repo/.agents/skills/local/SKILL.md", content: "skill rules" }],
     } as never,
   )
 
@@ -43,7 +43,7 @@ test("createWorkerHandoff includes project support context refs", () => {
   expect(handoff.task.parentId).toBe("parent-task")
   expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/AGENTS.md", label: "AGENTS.md" })
   expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/.mcp.json", label: ".mcp.json" })
-  expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/.agents/skill/local/SKILL.md", label: "skill:local-skill" })
+  expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/.agents/skills/local/SKILL.md", label: "skill:local-skill" })
 })
 
 test("worker prompt helpers expose project support and primary tool guidance", () => {

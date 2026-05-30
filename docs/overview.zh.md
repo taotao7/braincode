@@ -138,7 +138,7 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
   AGENTS.md                 注入到 prompt 的长期项目指令
   .mcp.json                 项目级 MCP server 声明（prompt 中只露元数据）
   .agents/hooks.json        项目级生命周期 hook
-  .agents/skill/<id>/SKILL.md   项目本地 skill
+  .agents/skills/<id>/SKILL.md   项目本地 skill
 ```
 
 `packages/config` 负责发现与解析。`agent-runtime` 决定哪些变成 prompt 文本、哪些变成 `ContextRef`。

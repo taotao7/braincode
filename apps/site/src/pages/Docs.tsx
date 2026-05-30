@@ -168,7 +168,7 @@ export function Docs() {
               <H2 id="docs_skills" k="docs_skills_title" />
               <P k="docs_skills_intro" />
               <h3>{t("docs_skills_file_title")}</h3>
-              <pre>{".agents/skill/\n  run-qa/\n    SKILL.md          ← prompt + workflow\n    reference.md      ← optional supporting docs\n  deploy-staging/\n    SKILL.md"}</pre>
+              <pre>{".agents/skills/\n  run-qa/\n    SKILL.md          ← prompt + workflow\n    reference.md      ← optional supporting docs\n  deploy-staging/\n    SKILL.md"}</pre>
               <P k="docs_skills_file_body" />
               <h3>{t("docs_skills_use_title")}</h3>
               <P k="docs_skills_use_body" />

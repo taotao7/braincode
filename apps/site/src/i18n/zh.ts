@@ -221,7 +221,7 @@ export const zh = {
 
   docs_skills_title: "6. Skills",
   docs_skills_intro:
-    "Skills 是项目本地的 Markdown 文档，教 Braincode 一个专业化工作流。它们放在 .agents/skill/<skill-id>/SKILL.md（或顶级 .agents/skill/*.md），在大脑判断相关时作为提示上下文加载。",
+    "Skills 是项目本地的 Markdown 文档，教 Braincode 一个专业化工作流。它们放在 .agents/skills/<skill-id>/SKILL.md（或顶级 .agents/skills/*.md），在大脑判断相关时作为提示上下文加载。",
   docs_skills_file_title: "Skill 目录结构",
   docs_skills_file_body:
     "一个 skill 文件夹包含 SKILL.md（提示）加任何参考文档。第一个标题是 skill 名称。大脑可能根据用户意图自动选择 skill——你不需要手动调用。",
@@ -301,7 +301,7 @@ export const zh = {
   docs_tui_cmd_auto_radical: "快速切换执行模式为 auto 或 radical，无需打开模式面板。",
   docs_tui_cmd_theme: "显示系统解析的 TUI 主题（dark 或 light）。主题根据终端外观自动检测。",
   docs_tui_cmd_team_test: "诊断：强制每个角色并行运行该提示。用于验证角色行为和模型可用性。",
-  docs_tui_cmd_skill: "列出从 .agents/skill 和 ~/.braincode/skills 加载的项目和用户 Skills。",
+  docs_tui_cmd_skill: "列出从 .agents/skills 和 ~/.braincode/skills 加载的项目和用户 Skills。",
   docs_tui_cmd_agents: "显示 AGENTS.md 文件路径、大小以及是否已加载。",
   docs_tui_cmd_files: "刷新用于文件名自动补全的 @file 索引。",
   docs_tui_cmd_clear: "清空对话记录。这不会开始一个新会话。",

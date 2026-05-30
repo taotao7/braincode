@@ -147,6 +147,8 @@ Tool execution emits a separate, user-visible surface from normal assistant text
 
 Read-only evidence tools are available to `librarian`, `qa`, `security`, and `review` workers. These workers can list files, read files, search content/paths, inspect diffs, and inspect changed files, but they cannot edit files, apply patches, run shell/exec commands, poll exec sessions, or run package scripts. The primary worker receives the configured local/MCP toolset according to the active permission mode.
 
+MCP tool loading supports `eager`, `background`, and `lazy` strategies. Non-interactive CLI runs use short-budget eager loading: each server has a bounded connect timeout and the run continues with local tools if the global startup budget is exceeded. The TUI uses background loading so local tools and the first prompt are not blocked by slow MCP startup; loading, skipped, failed, and connected states are emitted through the MCP report callback and recorded in the session log. While MCP is still loading or deferred, the primary agent can call `mcp__connect` to wait for configured MCP servers and refresh the live tool list for the next provider turn.
+
 When a run creates new untracked files, the review prompt includes capped text previews for those files alongside the normal patch summary, diff snapshot, and check results. Binary untracked files are represented by size and binary markers instead of raw content, so review can see that the artifact exists without polluting the model context.
 
 The runtime keeps a run-level evidence cache for deterministic read-only local tool calls (`list_files`, `read_file`, `search_files`, `git_diff`, `get_changed_files`). Identical calls reuse cached results and repeated calls get progressively stronger reminders. The cache is bounded by max entries, approximate cached-content bytes, and TTL; eviction uses least-recently-used ordering and each cached tool result reports cache size and eviction details. Write/execute tool calls reset cached entries, repeat counters, and consecutive-call state so stale reads and false duplicate loops do not survive patch changes or command output changes.
@@ -228,7 +230,7 @@ Braincode owns:
 - context isolation and handoff protocol;
 - local configuration server;
 - project/user configuration storage;
-- project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skill`, and `.agents/hooks.json`;
+- project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skills`, and `.agents/hooks.json`;
 - coding workflow product behavior.
 
 The adapter boundary is:
@@ -243,7 +245,7 @@ Braincode reads project-local support files from the active project root:
 
 - `AGENTS.md` provides durable project instructions and conventions.
 - `.mcp.json` declares project MCP servers. The runtime may use trusted project entries to configure MCP tools, but model prompts should only receive safe metadata such as server names and the config path, not raw secrets or full command configuration. User-level MCP config is treated as user-installed/trusted; project entries must set `trusted: true` before Braincode starts their commands.
-- `.agents/skill` contains project-local skills. A skill can live at `.agents/skill/<skill-id>/SKILL.md` or as a Markdown file directly under `.agents/skill`.
+- `.agents/skills` contains project-local skills. A skill can live at `.agents/skills/<skill-id>/SKILL.md` or as a Markdown file directly under `.agents/skills`.
 - `.agents/hooks.json` contains project-local lifecycle hooks.
 
 `packages/config` owns discovery and parsing for these project support files. `packages/agent-runtime` injects discovered `AGENTS.md` and skill content into primary, worker, and review prompts, and records support metadata in the Brain task session log. Worker handoff packets carry support file references, but each worker still receives its own isolated task context.

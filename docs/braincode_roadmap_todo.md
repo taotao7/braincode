@@ -421,18 +421,18 @@ type ToolEvidenceCacheOptions = {
 
 ### TODO
 
-- [ ] 增加 MCP loading strategy
+- [x] 增加 MCP loading strategy
 
 ```ts
 type McpLoadingStrategy = "eager" | "lazy" | "background"
 ```
 
-- [ ] TUI 默认 background
-- [ ] CLI run 默认 eager 或 short-budget eager
-- [ ] 本地 tools 先可用，不阻塞 MCP
-- [ ] TUI 展示 MCP loading 状态
-- [ ] MCP ready 后动态更新可用工具列表
-- [ ] 增加全局 MCP startup budget
+- [x] TUI 默认 background
+- [x] CLI run 默认 eager 或 short-budget eager
+- [x] 本地 tools 先可用，不阻塞 MCP
+- [x] TUI 展示 MCP loading 状态
+- [x] MCP ready 后动态更新可用工具列表
+- [x] 增加全局 MCP startup budget
 
 ```txt
 per-server connect timeout: 15s
@@ -441,9 +441,9 @@ global MCP startup budget: 5s / 10s
 
 ### 验收标准
 
-- [ ] 慢 MCP 不阻塞 TUI 首屏
-- [ ] MCP 失败会记录，但不影响本地 tools
-- [ ] 用户能看到 MCP connected / failed / skipped
+- [x] 慢 MCP 不阻塞 TUI 首屏
+- [x] MCP 失败会记录，但不影响本地 tools
+- [x] 用户能看到 MCP connected / failed / skipped
 
 ---
 
@@ -898,7 +898,7 @@ Acceptance:
 - [x] fallback search 优化
 - [x] evidence cache LRU/TTL
 - [x] untracked preview
-- [ ] MCP lazy/background loading
+- [x] MCP lazy/background loading
 
 ## v0.5：Permission & Smart Checks
 
