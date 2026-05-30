@@ -196,7 +196,7 @@ export const configWebHtml = `<!doctype html>
       .status-text { color: var(--accent); }
       .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--gap-md); }
       .panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-lg); }
-      .tools-layout { grid-template-columns: minmax(0, 2fr) minmax(280px, 0.8fr); align-items: start; }
+      .tools-layout { grid-template-columns: minmax(0, 1.3fr) minmax(360px, 1fr); align-items: start; }
       .card { padding: var(--gap-md); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
       .stack { display: flex; flex-direction: column; gap: var(--gap-md); }
       .field { display: flex; flex-direction: column; gap: 4px; }
@@ -222,14 +222,14 @@ export const configWebHtml = `<!doctype html>
       .item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 12px; font: 12px/1.45 var(--font-mono); white-space: pre-line; }
       .item-header { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
       .item-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-      .model-item-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 390px); gap: var(--gap-md); align-items: start; }
-      .model-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; justify-self: end; width: 100%; max-width: 390px; }
-      .model-actions button { width: 100%; min-height: 34px; white-space: nowrap; }
+      .model-item-header { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+      .model-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+      .model-actions button { flex: 0 0 auto; min-height: 30px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
       .model-summary { min-width: 0; overflow-wrap: anywhere; }
-      .tool-item-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); gap: var(--gap-md); align-items: start; }
-      .tool-actions { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(110px, 130px); gap: 10px; justify-self: end; width: 100%; max-width: 340px; }
-      .tool-actions button { width: 100%; min-height: 34px; white-space: normal; line-height: 1.2; }
-      .tool-summary { min-width: 0; overflow-wrap: anywhere; }
+      .tool-item-header { display: flex; gap: var(--gap-md); align-items: flex-start; justify-content: space-between; }
+      .tool-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: 0 0 auto; max-width: 50%; }
+      .tool-actions button { flex: 0 0 auto; min-width: 92px; min-height: 32px; padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+      .tool-summary { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
       .usage-chip { display: inline-flex; align-items: center; max-width: 100%; width: fit-content; margin-top: 8px; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted); font: 11px var(--font-mono); white-space: normal; overflow-wrap: anywhere; }
       .model-edit-form {
         display: grid;

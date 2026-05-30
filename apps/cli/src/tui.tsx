@@ -4405,6 +4405,7 @@ const InputSurface = React.memo(function InputSurface({
   footerRowsStore,
   runStatusStore,
   running,
+  overlayOpen,
   inputWidth,
   contentWidth,
 }: {
@@ -4413,6 +4414,7 @@ const InputSurface = React.memo(function InputSurface({
   footerRowsStore: TuiStore<number>;
   runStatusStore: TuiStore<RunStatusState | null>;
   running: boolean;
+  overlayOpen: boolean;
   inputWidth: number;
   contentWidth: number;
 }) {
