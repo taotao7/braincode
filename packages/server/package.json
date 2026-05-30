@@ -9,10 +9,12 @@
     "check": "bunx tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@braincode/agent-runtime": "workspace:*",
     "@braincode/config": "workspace:*",
     "@braincode/config-web": "workspace:*",
     "@braincode/llm": "workspace:*",
     "@braincode/protocol": "workspace:*",
-    "@braincode/shared": "workspace:*"
+    "@braincode/shared": "workspace:*",
+    "@braincode/tools": "workspace:*"
   }
 }

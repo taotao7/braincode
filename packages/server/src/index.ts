@@ -3,8 +3,10 @@ import {
   defaultModels,
   configureTavilyMcpServer,
   ensureBraincodeHome,
+  readAuth,
   readAuthStatus,
   readBrains,
+  readProjectSupport,
   readUserMcpConfig,
   readModels,
   readSettings,
@@ -23,9 +25,13 @@ import {
   type BraincodeTools,
 } from "@braincode/config"
 import { configWebHtml } from "@braincode/config-web"
-import { getBraincodeOAuthProvider, listBuiltInModelCatalog, listOAuthProviderSummaries, listProviderModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
+import { getBraincodeOAuthProvider, isImageGenerationModel, listBuiltInModelCatalog, listOAuthProviderSummaries, listProviderModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
+import { collectMcpToolServers, McpToolHub } from "@braincode/agent-runtime"
+import { evaluateToolPermissionPolicy, normalizePermissionPolicy, summarizePermissionPolicyEvaluation } from "@braincode/tools"
 import type { ApiResult, HealthResponse } from "@braincode/protocol"
 import { debugLog, DEFAULT_CONFIG_HOST, DEFAULT_CONFIG_PORT } from "@braincode/shared"
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import logoPath from "../../../resources/logo.png" with { type: "file" }
 
 export type ConfigServerOptions = {
@@ -208,6 +214,88 @@ function getOAuthLoginSessionFromPath(pathname: string, suffix = ""): OAuthLogin
   return oauthLoginSessions.get(id)
 }
 
+function detectProjectPackageManager(projectRoot: string): { name: string; lockfile: string | null; detected: boolean } {
+  const candidates: Array<{ name: string; lockfile: string }> = [
+    { name: "bun", lockfile: "bun.lock" },
+    { name: "bun", lockfile: "bun.lockb" },
+    { name: "pnpm", lockfile: "pnpm-lock.yaml" },
+    { name: "yarn", lockfile: "yarn.lock" },
+    { name: "npm", lockfile: "package-lock.json" },
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(resolve(projectRoot, candidate.lockfile))) {
+      return { name: candidate.name, lockfile: candidate.lockfile, detected: true }
+    }
+  }
+  return { name: "npm", lockfile: null, detected: false }
+}
+
+type ProviderKeyStatus = {
+  provider: string
+  kind: "api-key" | "oauth" | "unknown" | "none"
+  modelCount: number
+  hasCredential: boolean
+}
+
+async function buildHealthCheck(projectRoot: string): Promise<{
+  providers: ProviderKeyStatus[]
+  models: Array<{ id: string; provider: string; name: string; supportsTools: boolean; supportsVision: boolean; supportsImageGeneration: boolean; hasCredential: boolean }>
+  packageManager: { name: string; lockfile: string | null; detected: boolean }
+}> {
+  const [models, authStatus] = await Promise.all([readModels(), readAuthStatus()])
+  const authByProvider = new Map(authStatus.providerAuth.map((entry) => [entry.provider, entry]))
+  const modelList = (models.models as BraincodeModel[]) ?? []
+  const providerSet = new Set<string>()
+  for (const model of modelList) providerSet.add(model.provider)
+  for (const entry of authStatus.providerAuth) providerSet.add(entry.provider)
+
+  const providers: ProviderKeyStatus[] = [...providerSet].sort().map((provider) => {
+    const auth = authByProvider.get(provider)
+    return {
+      provider,
+      kind: auth?.kind ?? "none",
+      hasCredential: Boolean(auth),
+      modelCount: modelList.filter((model) => model.provider === provider).length,
+    }
+  })
+
+  const modelRows = modelList.map((model) => ({
+    id: model.id,
+    provider: model.provider,
+    name: model.name,
+    supportsTools: model.supportsTools === true,
+    supportsVision: model.supportsVision === true,
+    supportsImageGeneration: isImageGenerationModel(model),
+    hasCredential: authByProvider.has(model.provider),
+  }))
+
+  return { providers, models: modelRows, packageManager: detectProjectPackageManager(projectRoot) }
+}
+
+async function runMcpHealthCheck(): Promise<{
+  connected: Array<{ scope: "user" | "project"; name: string; toolCount: number }>
+  failed: Array<{ scope: "user" | "project"; name: string; error: string }>
+  skipped: Array<{ scope: "user" | "project"; name: string; reason: string }>
+}> {
+  const [userMcp, projectSupport, auth] = await Promise.all([
+    readUserMcpConfig(),
+    readProjectSupport(),
+    readAuth(),
+  ])
+  const { servers, skipped } = collectMcpToolServers({
+    userMcp,
+    projectMcp: projectSupport.mcp,
+    auth,
+  })
+  const hub = new McpToolHub()
+  try {
+    const report = await hub.connect(servers, { perServerConnectTimeoutMs: 8000 })
+    return { connected: report.connected, failed: report.failed, skipped: [...skipped, ...report.skipped] }
+  } finally {
+    hub.shutdown()
+  }
+}
+
 async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url)
   debugLog("server", "request", { method: request.method, path: url.pathname })
@@ -385,6 +473,26 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "GET" && url.pathname === "/api/usage-stats") {
       return json(ok(await readUsageStats(undefined, { detailLimit: 1000, sessionLimit: 500 })))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/health-check") {
+      return json(ok(await buildHealthCheck(process.cwd())))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/mcp/health") {
+      return json(ok(await runMcpHealthCheck()))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/permission-preview") {
+      const body = (await request.json()) as { toolName?: string; path?: string; command?: string }
+      const toolName = body.toolName?.trim() || "edit_file"
+      const args: Record<string, unknown> = {}
+      if (body.path?.trim()) args.path = body.path.trim()
+      if (body.command?.trim()) args.cmd = body.command.trim()
+      const tools = await readTools()
+      const policy = normalizePermissionPolicy((tools as { permissions?: unknown }).permissions)
+      const evaluation = evaluateToolPermissionPolicy(toolName, args, policy)
+      return json(ok(summarizePermissionPolicyEvaluation(evaluation)))
     }
 
     return json<ApiResult<never>>({ ok: false, error: "Not found" }, 404)

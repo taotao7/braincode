@@ -308,7 +308,8 @@ export const configWebHtml = `<!doctype html>
             <button class="tab-button" type="button" data-tab="settings" data-i18n="tabSettings">Settings</button>
             <button class="tab-button" type="button" data-tab="routing" data-i18n="tabRouting">Routing</button>
             <button class="tab-button" type="button" data-tab="usage" data-i18n="tabUsage">Statistics</button>
-            <button class="tab-button" type="button" data-tab="tools" data-i18n="tabTools">Tools & auth</button>
+            <button class="tab-button" type="button" data-tab="tools" data-i18n="tabTools">Tools</button>
+            <button class="tab-button" type="button" data-tab="health" data-i18n="tabHealth">Health</button>
           </div>
         </section>
 
@@ -365,6 +366,19 @@ export const configWebHtml = `<!doctype html>
               <div id="manual-test-result" class="test-result" hidden></div>
             </form>
             <div class="stack"><h3 data-i18n="configuredModels">Configured models</h3><div id="configured-models" class="list"></div></div>
+          </div>
+          <div class="panel-grid">
+            <div class="stack">
+              <h3 data-i18n="subscriptionAuth">Subscription OAuth</h3>
+              <p class="muted" data-i18n="subscriptionAuthHint">Connect subscription-backed providers through Pi OAuth. Tokens are saved in ~/.braincode/auth.json.</p>
+              <div class="field"><label for="oauth-provider-select" data-i18n="oauthProvider">OAuth provider</label><select id="oauth-provider-select"></select></div>
+              <div class="field"><label for="oauth-enterprise-domain" data-i18n="githubEnterpriseDomain">GitHub Enterprise domain</label><input id="oauth-enterprise-domain" autocomplete="off" placeholder="company.ghe.com" /></div>
+              <div class="row"><button id="start-oauth-login" type="button" data-i18n="startOAuthLogin">Start login</button><button id="cancel-oauth-login" type="button" data-i18n="cancelOAuthLogin">Cancel</button></div>
+              <div id="oauth-login-state" class="test-result" hidden></div>
+              <div class="field"><label for="oauth-manual-code" data-i18n="authorizationCode">Authorization code or redirect URL</label><input id="oauth-manual-code" autocomplete="off" /></div>
+              <button id="submit-oauth-code" type="button" data-i18n="submitOAuthCode">Submit code</button>
+            </div>
+            <div class="stack"><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
           </div>
           </div>
         </section>
@@ -429,7 +443,7 @@ export const configWebHtml = `<!doctype html>
 
         <section class="tab-panel" data-tab-panel="tools">
           <div class="container stack">
-          <h2 data-i18n="toolsAuthTitle">Tools and auth</h2>
+          <h2 data-i18n="toolsAuthTitle">Tools</h2>
           <div class="panel-grid">
             <div class="stack"><h3 data-i18n="tools">Tools</h3><p class="muted" data-i18n="toolsHint">Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.</p><div id="configured-tools" class="list"></div></div>
             <div class="card stack">
@@ -439,17 +453,40 @@ export const configWebHtml = `<!doctype html>
               <div class="row"><button id="configure-tavily" class="primary" type="button" data-i18n="configureTavily">Configure Tavily</button><a href="https://app.tavily.com/home" target="_blank" rel="noreferrer" data-i18n="tavilyGetApiKey">Get API key</a></div>
               <div id="tavily-status" class="test-result" hidden></div>
             </div>
+          </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="health">
+          <div class="container stack">
+          <h2 data-i18n="healthTitle">Health check</h2>
+          <div class="row-between">
+            <p class="muted" data-i18n="healthHint">One place to see whether providers, models, the package manager, MCP servers, and permission rules are usable.</p>
+            <button id="health-refresh" type="button" data-i18n="healthRefresh">Refresh health</button>
+          </div>
+          <div class="panel-grid">
+            <div class="stack"><h3 data-i18n="healthProviders">Provider key status</h3><p class="muted" data-i18n="healthProvidersHint"></p><div id="health-providers" class="list"></div></div>
+            <div class="stack"><h3 data-i18n="healthModels">Model capabilities</h3><p class="muted" data-i18n="healthModelsHint"></p><div id="health-models" class="list"></div></div>
+          </div>
+          <div class="panel-grid">
+            <div class="stack"><h3 data-i18n="healthPackageManager">Package manager</h3><p class="muted" data-i18n="healthPackageManagerHint"></p><div id="health-package-manager" class="list"></div></div>
             <div class="stack">
-              <h3 data-i18n="subscriptionAuth">Subscription OAuth</h3>
-              <p class="muted" data-i18n="subscriptionAuthHint">Connect subscription-backed providers through Pi OAuth. Tokens are saved in ~/.braincode/auth.json.</p>
-              <div class="field"><label for="oauth-provider-select" data-i18n="oauthProvider">OAuth provider</label><select id="oauth-provider-select"></select></div>
-              <div class="field"><label for="oauth-enterprise-domain" data-i18n="githubEnterpriseDomain">GitHub Enterprise domain</label><input id="oauth-enterprise-domain" autocomplete="off" placeholder="company.ghe.com" /></div>
-              <div class="row"><button id="start-oauth-login" type="button" data-i18n="startOAuthLogin">Start login</button><button id="cancel-oauth-login" type="button" data-i18n="cancelOAuthLogin">Cancel</button></div>
-              <div id="oauth-login-state" class="test-result" hidden></div>
-              <div class="field"><label for="oauth-manual-code" data-i18n="authorizationCode">Authorization code or redirect URL</label><input id="oauth-manual-code" autocomplete="off" /></div>
-              <button id="submit-oauth-code" type="button" data-i18n="submitOAuthCode">Submit code</button>
+              <h3 data-i18n="healthMcp">MCP connection status</h3>
+              <p class="muted" data-i18n="healthMcpHint"></p>
+              <div class="row"><button id="health-run-mcp" type="button" data-i18n="healthRunMcp">Run MCP check</button></div>
+              <div id="health-mcp" class="list"></div>
             </div>
-            <div class="stack"><h3 data-i18n="authStatus">Auth status</h3><p class="muted" data-i18n="authHint">Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.</p><pre id="auth-status">{}</pre></div>
+          </div>
+          <div class="card stack">
+            <h3 data-i18n="permPreviewTitle">Permission preview</h3>
+            <p class="muted" data-i18n="permPreviewHint"></p>
+            <div class="grid">
+              <div class="field"><label for="perm-tool" data-i18n="permTool">Tool</label><select id="perm-tool"><option value="edit_file">edit_file</option><option value="apply_patch">apply_patch</option><option value="exec_command">exec_command</option><option value="run_script">run_script</option></select></div>
+              <div class="field"><label for="perm-path" data-i18n="permPath">Target path</label><input id="perm-path" autocomplete="off" placeholder="src/auth/login.ts" /></div>
+              <div class="field"><label for="perm-command" data-i18n="permCommand">Command</label><input id="perm-command" autocomplete="off" placeholder="git push" /></div>
+            </div>
+            <div class="row-between"><span></span><button id="perm-evaluate" class="primary" type="button" data-i18n="permEvaluate">Preview decision</button></div>
+            <div id="perm-result" class="test-result" hidden></div>
           </div>
           </div>
         </section>
@@ -460,7 +497,7 @@ export const configWebHtml = `<!doctype html>
       const translations = {
         en: {
           kicker: "LOCAL AI CONTROL PANEL", title: "BRAIN / CODE", subtitle: "Brutalist configuration surface for brains, agents, models, tools, and local runtime policy.", language: "LANG", refresh: "Refresh", runtimeActive: "Runtime Active",
-          tabSettings: "Settings", tabModels: "Models", tabUsage: "Statistics", tabRouting: "Routing", tabTools: "Tools & auth",
+          tabSettings: "Settings", tabModels: "Models", tabUsage: "Statistics", tabRouting: "Routing", tabTools: "Tools", tabHealth: "Health",
           settingsTitle: "Settings", host: "Config server host", port: "Config server port", mode: "Mode", modeAuto: "auto — plan and route agents automatically", modeRadical: "radical — more aggressive autonomous execution", restartHint: "Changing host or port affects the next config server start.", saveSettings: "Save settings",
           modelsTitle: "Model selection", modelsHint: "Add normal agent models from Pi's built-in providers, saved providers, /models endpoints, or manual OpenAI/Anthropic-compatible metadata. Image generation is configured only on the Image Maker route.", addModel: "Add model", addModelHint: "Use one entry point for built-in Pi providers, user providers that expose /models, and manual OpenAI/Anthropic-compatible models.", addFromCatalog: "Add from catalog", addManualModel: "Add custom model manually", manualModelHint: "Use this when a provider cannot list /models. The API key is optional and will be saved for the provider.", savedProviders: "Saved providers", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "Model ID", modelName: "Name", apiType: "API type", contextWindow: "Context window", thinkingLevel: "Thinking level", supportsVision: "Vision (image input)", visionBadge: "vision", loadProviderModels: "Load /models", subscriptionModels: "Authenticated subscriptions", useSubscriptionProvider: "Use subscription", subscriptionProviderApplied: "Subscription provider selected", apiKeyOptional: "Optional token saved for the selected provider", apiKeyOptionalAuthenticated: "Optional; authenticated subscription token is used if empty", providerCatalog: "Provider catalog", catalogModel: "Model", addSelectedModel: "Add selected model", addManualModelButton: "Add custom model", addModelButton: "Add model", configuredModels: "Configured models",
           usageStatsTitle: "Usage statistics", usageStatsHint: "Token usage collected from local session records, grouped by model, agent role, and runtime phase.", usageByModel: "By model", usageByRole: "By role", usageByPhase: "By phase", usageDetails: "Details", usageRecent: "Recent details", usageShowAll: "Show all details", usageCalls: "Calls", usageTokens: "Tokens", usageInput: "Input", usageOutput: "Output", usageCache: "Cache", usageSessions: "Sessions", usageForModel: "Model details", usageForRole: "Role details", usageForPhase: "Phase details", usageNoData: "No token usage collected yet.", usageClickHint: "Click a model, role, or phase row to filter recent detail records.", usageChartModels: "Model token chart", usageChartRoles: "Role token chart", usageChartPhases: "Phase share",
@@ -468,6 +505,9 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", tavilyQuickConfig: "Tavily web search", tavilyQuickConfigHint: "Configure Tavily MCP for web search. The API key is saved in ~/.braincode/auth.json; ~/.braincode/mcp.json only stores a Braincode auth reference.", tavilyApiKey: "Tavily API key", configureTavily: "Configure Tavily", tavilyGetApiKey: "Get API key", tavilyConfigured: "Tavily MCP configured", tavilyNotConfigured: "Tavily MCP is not configured", tavilyNeedsApiKey: "Add a Tavily API key to finish setup", tavilyServerReady: "MCP server ready", tavilyAuthReady: "API key saved", tavilyApiKeyRequired: "Tavily API key is required", tavilyRestartHint: "Start a new agent run or use /mcp to recheck the server.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth.", oauthProvider: "OAuth provider", githubEnterpriseDomain: "GitHub Enterprise domain", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
+          healthTitle: "Health check", healthHint: "One place to see whether providers, models, the package manager, MCP servers, and permission rules are actually usable.", healthRefresh: "Refresh health", healthProviders: "Provider key status", healthProvidersHint: "Which providers have a saved credential. Models from a provider without a key cannot run.", healthModels: "Model capabilities", healthModelsHint: "Tools, vision, and image generation per configured model. An image prompt needs a model with image generation; a screenshot prompt needs vision.", healthPackageManager: "Package manager", healthPackageManagerHint: "Detected from lockfiles in the current project. Checks and run_script use this.", healthMcp: "MCP connection status", healthMcpHint: "Live connection attempt against configured MCP servers. Shows which connected, which failed, and which were skipped (blocked).", healthRunMcp: "Run MCP check", healthMcpRunning: "Connecting to MCP servers...", capTools: "tools", capVision: "vision", capImage: "image", keyPresent: "key present", keyMissing: "no key", pmDetected: "Detected", pmNotDetected: "No lockfile detected — defaulting to npm", mcpConnected: "Connected", mcpFailed: "Failed", mcpSkipped: "Skipped / blocked", mcpNone: "No MCP servers configured", mcpToolCount: "tools",
+          permPreviewTitle: "Permission preview", permPreviewHint: "Check how the permission policy would judge a file edit or command before an agent runs it.", permTool: "Tool", permPath: "Target path", permCommand: "Command", permEvaluate: "Preview decision", permAction: "Decision", permReviewRequired: "review required", permReviewNot: "no review required", permNoMatch: "No rule matched — falls back to tool default approval.", permActionAllow: "allow", permActionAsk: "ask", permActionDeny: "deny", permActionNone: "no match",
+
           petCardTitle: "BrainPet model — used when the pet panel calls a model to summarize the live agent run",
           roleLabel_routeBrain: "Router Brain", roleLabel_frontend: "Frontend", roleLabel_backend: "Backend", roleLabel_designer: "Designer", roleLabel_imageMaker: "Image Maker", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "Security", roleLabel_qa: "QA", roleLabel_review: "Review", roleLabel_summarize: "Summarize", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "Rush", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "Main router: reads user intent, creates the todo/dependency plan, and decides which role handles the task.",
@@ -488,7 +528,7 @@ export const configWebHtml = `<!doctype html>
         },
         zh: {
           kicker: "本地 AI 控制台", title: "BRAIN / CODE", subtitle: "用于配置 brain、agent、模型、工具和本地运行策略的高密度技术界面。", language: "语言", refresh: "刷新", runtimeActive: "运行时活跃",
-          tabSettings: "基础设置", tabModels: "模型", tabUsage: "数据统计", tabRouting: "路由", tabTools: "工具与认证",
+          tabSettings: "基础设置", tabModels: "模型", tabUsage: "数据统计", tabRouting: "路由", tabTools: "工具", tabHealth: "健康检查",
           settingsTitle: "基础设置", host: "配置服务主机", port: "配置服务端口", mode: "模式", modeAuto: "auto — 根据意图自动规划并路由 agent", modeRadical: "radical — 更激进的自治执行", restartHint: "修改主机或端口会在下次启动配置服务时生效。", saveSettings: "保存设置",
           modelsTitle: "模型选择", modelsHint: "添加普通 agent 模型：Pi 内置 provider、已保存 provider、/models 端点，或手动填写 OpenAI/Anthropic-compatible 元数据。图片生成只在图片制造者路由里配置。", addModel: "添加模型", addModelHint: "同一个入口支持 Pi 内置 provider、用户添加且能暴露 /models 的 provider，以及手动 OpenAI/Anthropic-compatible 模型。", addFromCatalog: "从目录添加", addManualModel: "手动添加自定义模型", manualModelHint: "当 provider 无法列出 /models 时使用。API key 可选，会保存到该 provider。", savedProviders: "已保存 Provider", provider: "Provider", baseUrl: "Base URL", apiKey: "API key", modelId: "模型 ID", modelName: "名称", apiType: "API 类型", contextWindow: "上下文窗口", thinkingLevel: "思考等级", supportsVision: "视觉（图像输入）", visionBadge: "视觉", loadProviderModels: "加载 /models", subscriptionModels: "已认证订阅", useSubscriptionProvider: "使用订阅", subscriptionProviderApplied: "已选择订阅 Provider", apiKeyOptional: "可选；会保存到选中的 Provider", apiKeyOptionalAuthenticated: "可选；留空会使用已认证订阅 token", providerCatalog: "Provider 目录", catalogModel: "模型", addSelectedModel: "添加选中模型", addManualModelButton: "添加自定义模型", addModelButton: "添加模型", configuredModels: "已配置模型",
           usageStatsTitle: "数据统计", usageStatsHint: "从本地 session 记录收集 token 用量，并按模型、agent 角色和运行阶段汇总。", usageByModel: "按模型", usageByRole: "按角色", usageByPhase: "按阶段", usageDetails: "详情", usageRecent: "最近详情", usageShowAll: "显示全部详情", usageCalls: "调用", usageTokens: "Tokens", usageInput: "输入", usageOutput: "输出", usageCache: "缓存", usageSessions: "Session", usageForModel: "模型详情", usageForRole: "角色详情", usageForPhase: "阶段详情", usageNoData: "还没有收集到 token 用量。", usageClickHint: "点击模型、角色或阶段行可以过滤最近的明细记录。", usageChartModels: "模型 token 图表", usageChartRoles: "角色 token 图表", usageChartPhases: "阶段占比",
@@ -496,6 +536,9 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", tavilyQuickConfig: "Tavily 网页搜索", tavilyQuickConfigHint: "为 web_search 配置 Tavily MCP。API key 会保存到 ~/.braincode/auth.json；~/.braincode/mcp.json 只保存 Braincode 认证引用。", tavilyApiKey: "Tavily API key", configureTavily: "配置 Tavily", tavilyGetApiKey: "获取 API key", tavilyConfigured: "Tavily MCP 已配置", tavilyNotConfigured: "Tavily MCP 尚未配置", tavilyNeedsApiKey: "添加 Tavily API key 才能完成配置", tavilyServerReady: "MCP server 已就绪", tavilyAuthReady: "API key 已保存", tavilyApiKeyRequired: "需要 Tavily API key", tavilyRestartHint: "开始新的 agent run，或用 /mcp 重新检查 server。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。", oauthProvider: "OAuth Provider", githubEnterpriseDomain: "GitHub Enterprise 域名", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
+          healthTitle: "健康检查", healthHint: "在一个地方看清 provider、模型、包管理器、MCP server 和权限规则是否真的可用。", healthRefresh: "刷新健康状态", healthProviders: "Provider key 状态", healthProvidersHint: "哪些 provider 已保存凭证。没有 key 的 provider 下的模型无法运行。", healthModels: "模型能力", healthModelsHint: "每个已配置模型的 tools / 视觉 / 图片生成能力。image prompt 需要带图片生成能力的模型；截图类 prompt 需要视觉能力。", healthPackageManager: "包管理器", healthPackageManagerHint: "根据当前项目的 lockfile 检测，checks 和 run_script 会用到。", healthMcp: "MCP 连接状态", healthMcpHint: "对已配置的 MCP server 发起实时连接，显示哪些已连接、哪些失败、哪些被跳过（blocked）。", healthRunMcp: "运行 MCP 检查", healthMcpRunning: "正在连接 MCP server...", capTools: "工具", capVision: "视觉", capImage: "图片", keyPresent: "已有 key", keyMissing: "无 key", pmDetected: "已检测", pmNotDetected: "未检测到 lockfile —— 默认用 npm", mcpConnected: "已连接", mcpFailed: "失败", mcpSkipped: "跳过 / blocked", mcpNone: "未配置 MCP server", mcpToolCount: "个工具",
+          permPreviewTitle: "权限预览", permPreviewHint: "在 agent 真正执行之前，先看看权限策略会怎么判定一次文件编辑或命令。", permTool: "工具", permPath: "目标路径", permCommand: "命令", permEvaluate: "预览判定", permAction: "判定", permReviewRequired: "需要 review", permReviewNot: "无需 review", permNoMatch: "没有规则命中——回退到工具默认的审批策略。", permActionAllow: "允许", permActionAsk: "询问", permActionDeny: "拒绝", permActionNone: "未命中",
+
           petCardTitle: "BrainPet 模型 — pet 面板调用模型给当前 agent 运行生成进度文字时使用",
           roleLabel_routeBrain: "路由大脑", roleLabel_frontend: "前端", roleLabel_backend: "后端", roleLabel_designer: "设计师", roleLabel_imageMaker: "图片制造者", roleLabel_dba: "DBA", roleLabel_devops: "DevOps", roleLabel_security: "安全", roleLabel_qa: "QA", roleLabel_review: "审查", roleLabel_summarize: "总结", roleLabel_oracle: "Oracle", roleLabel_librarian: "Librarian", roleLabel_rush: "打杂", roleLabel_pet: "BrainPet",
           roleDesc_routeBrain: "主控路由：读取用户意图，生成 todo / 依赖计划，并决定交给哪个角色处理。",
@@ -583,6 +626,17 @@ export const configWebHtml = `<!doctype html>
       const tavilyApiKeyInput = document.querySelector("#tavily-api-key")
       const configureTavilyButton = document.querySelector("#configure-tavily")
       const tavilyStatus = document.querySelector("#tavily-status")
+      const healthRefreshButton = document.querySelector("#health-refresh")
+      const healthProviders = document.querySelector("#health-providers")
+      const healthModels = document.querySelector("#health-models")
+      const healthPackageManager = document.querySelector("#health-package-manager")
+      const healthRunMcpButton = document.querySelector("#health-run-mcp")
+      const healthMcp = document.querySelector("#health-mcp")
+      const permToolSelect = document.querySelector("#perm-tool")
+      const permPathInput = document.querySelector("#perm-path")
+      const permCommandInput = document.querySelector("#perm-command")
+      const permEvaluateButton = document.querySelector("#perm-evaluate")
+      const permResult = document.querySelector("#perm-result")
 
       let currentSettings = null
       let currentBrains = { brains: [] }
@@ -626,6 +680,7 @@ export const configWebHtml = `<!doctype html>
           panel.classList.toggle("active", panel.dataset.tabPanel === nextTab)
         }
         if (nextTab === "usage") renderUsageCharts()
+        if (nextTab === "health") loadHealthCheck().catch(showError)
         if (options.scroll !== false) document.querySelector(".tab-section")?.scrollIntoView({ block: "start" })
       }
 
@@ -1785,6 +1840,7 @@ export const configWebHtml = `<!doctype html>
         status.textContent = t("loaded")
         loadCatalog().catch(showCatalogError)
         loadSavedProviderModels().catch(showCatalogError)
+        loadHealthCheck().catch(showError)
       }
 
       async function loadCatalog() {
@@ -1834,6 +1890,84 @@ export const configWebHtml = `<!doctype html>
       async function removeModel(modelId) {
         currentModels = await putJson("/api/models", { ...currentModels, models: currentModels.models.filter((model) => model.id !== modelId) })
         renderConfiguredModels(); renderBrainRouting(); status.textContent = t("saved") + " models"
+      }
+
+      function healthRow(mainText, metaText, ok) {
+        const row = document.createElement("div")
+        row.className = "stats-row"
+        const main = document.createElement("div")
+        main.className = "stats-row-main"
+        main.textContent = mainText
+        const meta = document.createElement("div")
+        meta.className = "stats-row-meta"
+        meta.textContent = metaText
+        if (ok === true) row.style.boxShadow = "inset 4px 0 0 var(--accent)"
+        if (ok === false) row.style.boxShadow = "inset 4px 0 0 var(--danger-fg)"
+        row.append(main, meta)
+        return row
+      }
+
+      async function loadHealthCheck() {
+        status.textContent = t("loading")
+        const data = await getJson("/api/health-check")
+        if (!data.providers.length) healthProviders.innerHTML = '<div class="item">' + t("none") + '</div>'
+        else healthProviders.replaceChildren(...data.providers.map((entry) =>
+          healthRow(entry.provider + " · " + entry.modelCount + " " + t("configuredModels"), entry.hasCredential ? t("keyPresent") + " (" + entry.kind + ")" : t("keyMissing"), entry.hasCredential)))
+        if (!data.models.length) healthModels.innerHTML = '<div class="item">' + t("none") + '</div>'
+        else healthModels.replaceChildren(...data.models.map((model) => {
+          const caps = [model.supportsTools ? t("capTools") : null, model.supportsVision ? t("capVision") : null, model.supportsImageGeneration ? t("capImage") : null].filter(Boolean).join(" · ") || "-"
+          return healthRow(model.name + " · " + model.id, caps + " · " + (model.hasCredential ? t("keyPresent") : t("keyMissing")), model.hasCredential)
+        }))
+        const pm = data.packageManager
+        healthPackageManager.replaceChildren(healthRow(pm.name, pm.detected ? t("pmDetected") + ": " + pm.lockfile : t("pmNotDetected"), pm.detected))
+        status.textContent = t("loaded")
+      }
+
+      async function runMcpHealth() {
+        const previous = healthRunMcpButton.textContent
+        healthRunMcpButton.disabled = true
+        healthRunMcpButton.textContent = t("testing") + "..."
+        healthMcp.innerHTML = '<div class="item">' + t("healthMcpRunning") + '</div>'
+        try {
+          const data = await postJson("/api/mcp/health", {})
+          const rows = []
+          for (const entry of data.connected) rows.push(healthRow(entry.scope + " / " + entry.name, t("mcpConnected") + " · " + entry.toolCount + " " + t("mcpToolCount"), true))
+          for (const entry of data.failed) rows.push(healthRow(entry.scope + " / " + entry.name, t("mcpFailed") + ": " + entry.error, false))
+          for (const entry of data.skipped) rows.push(healthRow(entry.scope + " / " + entry.name, t("mcpSkipped") + ": " + entry.reason, false))
+          if (!rows.length) healthMcp.innerHTML = '<div class="item">' + t("mcpNone") + '</div>'
+          else healthMcp.replaceChildren(...rows)
+          status.textContent = t("loaded")
+        } finally {
+          healthRunMcpButton.disabled = false
+          healthRunMcpButton.textContent = previous
+        }
+      }
+
+      function permActionLabel(action) {
+        return action === "allow" ? t("permActionAllow") : action === "ask" ? t("permActionAsk") : action === "deny" ? t("permActionDeny") : t("permActionNone")
+      }
+
+      async function evaluatePermissionPreview() {
+        const toolName = permToolSelect.value
+        const path = permPathInput.value.trim()
+        const command = permCommandInput.value.trim()
+        const previous = permEvaluateButton.textContent
+        permEvaluateButton.disabled = true
+        permEvaluateButton.textContent = t("testing") + "..."
+        permResult.hidden = false
+        permResult.className = "test-result"
+        try {
+          const result = await postJson("/api/permission-preview", { toolName, path, command })
+          const ok = result.action === "allow" || result.action === "none"
+          permResult.className = "test-result " + (result.action === "deny" ? "fail" : ok ? "ok" : "")
+          const reviewLine = result.reviewRequired ? t("permReviewRequired") : t("permReviewNot")
+          const reason = (result.matches && result.matches.length) ? result.reason : t("permNoMatch")
+          permResult.textContent = [t("permAction") + ": " + permActionLabel(result.action) + " · " + reviewLine, reason].join("\\n")
+          status.textContent = t("permAction") + ": " + permActionLabel(result.action)
+        } finally {
+          permEvaluateButton.disabled = false
+          permEvaluateButton.textContent = previous
+        }
       }
 
       function connectionFailureMessage(result) {
@@ -1950,6 +2084,9 @@ export const configWebHtml = `<!doctype html>
       submitOAuthCodeButton.addEventListener("click", () => submitOAuthCode().catch(showError))
       cancelOAuthLoginButton.addEventListener("click", () => cancelOAuthLogin().catch(showError))
       configureTavilyButton.addEventListener("click", () => configureTavily().catch(showError))
+      healthRefreshButton.addEventListener("click", () => loadHealthCheck().catch(showError))
+      healthRunMcpButton.addEventListener("click", () => runMcpHealth().catch(showError))
+      permEvaluateButton.addEventListener("click", () => evaluatePermissionPreview().catch((error) => showResultError(permResult, error)))
       providerSelect.addEventListener("change", renderCatalogModels)
       catalogModelSelect.addEventListener("change", syncCatalogVision)
       brainSelect.addEventListener("change", renderBrainRouting)
