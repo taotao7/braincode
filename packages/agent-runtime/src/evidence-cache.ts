@@ -24,6 +24,9 @@ export type ToolEvidenceCache = {
 }
 
 const CACHEABLE_EVIDENCE_TOOLS = new Set(["list_files", "read_file", "search_files", "git_diff", "get_changed_files"])
+// Read-only tools whose names collide with the write/exec invalidation heuristic
+// but must not reset the cache.
+const NON_INVALIDATING_TOOLS = new Set(["dispatch_specialist"])
 const EVIDENCE_CACHE_SUPPRESS_CONTENT_AFTER_CONSECUTIVE = 8
 const DEFAULT_EVIDENCE_CACHE_OPTIONS: Required<ToolEvidenceCacheOptions> = {
   maxEntries: 200,
@@ -215,6 +218,11 @@ function isCacheableEvidenceToolCall(toolName: string, _args: unknown): boolean 
 function toolInvalidatesEvidenceCache(toolName: string, args: unknown): boolean {
   if (isCacheableEvidenceToolCall(toolName, args)) return false
   const name = toolName.toLowerCase()
+  // Brain-mediated, read-only tools must never reset the cache even when their
+  // name happens to contain a write/exec substring. `dispatch_specialist`
+  // matches /patch/ but only ever spawns read-only specialist workers, so it
+  // does not change the primary's workspace.
+  if (NON_INVALIDATING_TOOLS.has(name)) return false
   return /(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write|shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)
 }
 

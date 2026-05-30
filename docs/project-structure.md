@@ -312,7 +312,7 @@ Do not turn this into a dumping ground. If code has a domain owner, keep it in t
 
 ## Current implementation phase
 
-The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, structured review decisions, permission policy, read-only evidence workers, package-manager-aware checks, review artifacts for untracked files, and tool-call evidence caching are in place.
+The project is no longer in a "framework skeleton" phase. Runtime orchestration, routeBrain routing, worker execution, review worker execution, TUI interaction, sessions/handoff, MCP tools, hooks, approval UI, patch summaries, checks, structured review decisions, permission policy, read-only evidence workers, package-manager-aware checks, review artifacts for untracked files, tool-call evidence caching, and Brain-mediated dynamic specialist dispatch are in place.
 
 The coding patch engine now follows this path:
 

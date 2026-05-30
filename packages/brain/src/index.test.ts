@@ -45,6 +45,11 @@ test("mode policies distinguish auto and radical", () => {
   expect(getModePolicy("radical").requiresExplicitApprovalForRiskyActions).toBe(false)
 })
 
+test("mode policies bound dynamic dispatch more tightly in auto than radical", () => {
+  expect(getModePolicy("auto").routing.maxDynamicDispatches).toBe(2)
+  expect(getModePolicy("radical").routing.maxDynamicDispatches).toBe(4)
+})
+
 test("mode routing limits make radical materially more parallel", () => {
   expect(getModeRoutingLimits("auto", 2)).toEqual({
     configuredMaxParallelAgents: 2,

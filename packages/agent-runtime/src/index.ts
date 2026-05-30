@@ -52,6 +52,9 @@ import { buildPrimaryPrompt, formatProjectSupportPromptSection, runSupportWorker
 export { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, readOnlyToolWorkerRoles, runSupportWorkers, runWorkerFromPlan } from "./workers"
 export type { ExecutedWorkerResult, WorkerLifecycleEvent, WorkerTodoStatusHandler } from "./workers"
 import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFAULT_MCP_STARTUP_BUDGET_MS, normalizeRuntimeInteger } from "./mcp-loading"
+import { createDispatchSpecialistTool, formatDispatchToolGuidance, type DispatchSpecialistTool } from "./dynamic-dispatch"
+export { createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchToolGuidance } from "./dynamic-dispatch"
+export type { DispatchSpecialistTool, DispatchSpecialistToolOptions } from "./dynamic-dispatch"
 import { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker, type RuntimeMetricsPhase, type RuntimeMetricsSummary } from "./metrics"
 export { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker } from "./metrics"
 export type { RuntimeMetricsPhase, RuntimeMetricsSummary, RuntimeTokenUsageSummary, RuntimeToolCallPhaseSummary, RuntimeToolCallSummary } from "./metrics"
@@ -219,6 +222,18 @@ function todoIdsForRole(plan: RuntimePlan, role: RoutedAgentRole): string[] {
   return plan.todos.filter((todo) => todo.role === role).map((todo) => todo.id)
 }
 
+// Fold dispatched-specialist results into the worker-result list without
+// duplicating ones already merged. Dispatched results carry a unique task id
+// (the worker context id), so identity-by-taskId is a safe dedup key.
+function mergeDispatchedResults(workerResults: ExecutedWorkerResult[], dispatchedResults: ExecutedWorkerResult[]): void {
+  const present = new Set(workerResults.map((result) => result.taskId))
+  for (const result of dispatchedResults) {
+    if (present.has(result.taskId)) continue
+    present.add(result.taskId)
+    workerResults.push(result)
+  }
+}
+
 function setTodoStatus(plan: RuntimePlan, todoIds: string[], status: AgentTodoStatus, detail?: { summary?: string; error?: string }): AgentTodoItem[] {
   const todoIdSet = new Set(todoIds)
   const update = (todo: AgentTodoItem): AgentTodoItem => {
@@ -358,6 +373,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   }
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
+  const runtimeSettings = await readSettings(home)
   const requirements = runtimeModelRequirementsForRole(plan.role, promptImages)
   const candidates = plan.role === "imageMaker"
     ? await selectImageMakerModelCandidates(plan.policy, models, home)
@@ -394,8 +410,38 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
   const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
   const toolEvidenceCache = createToolEvidenceCache()
-  const runtimeTools = [...localTools]
   const toolCallMetrics = createRuntimeToolCallMetricsTracker()
+  // Dispatched specialist worker results, collected mid-run when the primary
+  // agent calls the dispatch_specialist tool. Folded into workerResults so the
+  // review worker and final report see them. Forced multi-agent (/team) runs and
+  // imageMaker primaries do not get the tool; review never gets it either.
+  const dispatchedResults: ExecutedWorkerResult[] = []
+  const dynamicDispatchEnabled = runtimeSettings.features?.dynamicDispatch !== false
+    && !(request.forceRoles && request.forceRoles.length > 0)
+    && plan.role !== "review"
+    && plan.role !== "imageMaker"
+  const dispatchTool: DispatchSpecialistTool | undefined = dynamicDispatchEnabled
+    ? createDispatchSpecialistTool({
+        plan,
+        models,
+        home,
+        sessionId,
+        projectSupport,
+        hookContext,
+        readOnlyTools,
+        toolEvidenceCache,
+        onWorkerEvent: request.onWorkerEvent,
+        onWorkerTodoStatus,
+        onEvent: createPhaseEventHandler("support", toolCallMetrics, request.onEvent),
+        signal: request.signal,
+        dispatchedResults,
+      })
+    : undefined
+  // The dispatch tool lives in the local prefix so the MCP loader's tool sync,
+  // which splices everything after localToolCount, never removes it. It only
+  // reaches the primary runtime; workers receive their own tool lists.
+  const primaryLocalTools = dispatchTool ? [...localTools, dispatchTool.tool] : [...localTools]
+  const runtimeTools = [...primaryLocalTools]
   let permissionPolicyReviewRequired = false
   const onPermissionPolicyEvaluation = (evaluation: PermissionPolicyEvaluation) => {
     if (evaluation.reviewRequired) {
@@ -412,7 +458,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     startupBudgetMs: normalizeRuntimeInteger(request.mcpStartupBudgetMs, 0, 120_000, DEFAULT_MCP_STARTUP_BUDGET_MS),
     perServerConnectTimeoutMs: normalizeRuntimeInteger(request.mcpPerServerConnectTimeoutMs, 250, 120_000, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS),
     runtimeTools,
-    localToolCount: localTools.length,
+    localToolCount: primaryLocalTools.length,
     toolEvidenceCache,
     publishReport: async (report) => {
       if (request.onMcpReport) {
@@ -530,7 +576,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       throw lastError instanceof Error ? lastError : new Error(String(lastError))
     }
 
-    const primaryPrompt = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name))
+    const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name))
+    const dispatchGuidance = dispatchTool ? formatDispatchToolGuidance(plan.mode) : ""
+    const primaryPrompt = dispatchGuidance ? `${dispatchGuidance}\n${primaryPromptBase}` : primaryPromptBase
     let lastError: unknown
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
       plan.model = selection.configured
@@ -639,6 +687,10 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         // mode-scoped (auto: 1, radical: 2). `blocked` does not auto-fix.
         while (true) {
           throwIfRunAborted(request.signal)
+          // Fold any specialists the primary dispatched (initial turn or a prior
+          // fix iteration) into workerResults so review and the final report see
+          // them. Idempotent: dispatched results have unique task ids.
+          mergeDispatchedResults(workerResults, dispatchedResults)
           const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
           checks = hasPatchActivity(patchAfterPrimary)
             ? await runPatchChecksWithApproval(cwd, { ...checkOptions, patch: patchAfterPrimary }, {

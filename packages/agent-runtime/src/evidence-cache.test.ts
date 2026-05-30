@@ -124,3 +124,36 @@ test("wrapToolsWithEvidenceCache expires entries by ttl", async () => {
     evictedEntries: 1,
   })
 })
+
+test("read-only dispatch_specialist call does not invalidate cached evidence despite the 'patch' substring", async () => {
+  let reads = 0
+  const cache = createToolEvidenceCache()
+  const [readTool, dispatchTool] = wrapToolsWithEvidenceCache([
+    {
+      name: "read_file",
+      label: "Read File",
+      description: "test read",
+      parameters: Type.Object({ path: Type.String() }),
+      execute: async () => {
+        reads += 1
+        return { content: [{ type: "text", text: `read ${reads}` }], details: { reads } }
+      },
+    },
+    {
+      name: "dispatch_specialist",
+      label: "Dispatch Specialist",
+      description: "test dispatch",
+      parameters: Type.Object({ role: Type.String(), goal: Type.String() }),
+      execute: async () => ({ content: [{ type: "text", text: "specialist findings" }], details: { ok: true } }),
+    },
+  ] satisfies AgentTool[], cache)
+
+  if (!readTool || !dispatchTool) throw new Error("missing wrapped tools")
+  await readTool.execute("r1", { path: "a.ts" } as never)
+  // A dispatch in between must not reset the read-only cache.
+  await dispatchTool.execute("d1", { role: "security", goal: "audit" } as never)
+  const second = await readTool.execute("r2", { path: "a.ts" } as never)
+
+  expect(reads).toBe(1)
+  expect(second.content[0]?.type === "text" ? second.content[0].text : "").toContain("Reusing cached read-only result")
+})

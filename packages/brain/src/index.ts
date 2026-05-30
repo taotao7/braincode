@@ -534,6 +534,12 @@ export type ModePolicy = {
     minParallelAgents: number
     minWorkerAgents: number
     maxFixIterations: number
+    // Upper bound on specialist workers the primary agent may request mid-run
+    // through the Brain-mediated dispatch tool. Like maxFixIterations this is
+    // mode-scoped: it caps the worst-case fan-out when the primary discovers it
+    // needs a role the router did not plan for. Does not include planned
+    // support/review workers, which run before the primary.
+    maxDynamicDispatches: number
     strategy: "focused" | "expansive"
   }
 }
@@ -548,6 +554,7 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
       minParallelAgents: 1,
       minWorkerAgents: 1,
       maxFixIterations: 1,
+      maxDynamicDispatches: 2,
       strategy: "focused",
     },
   },
@@ -560,6 +567,7 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
       minParallelAgents: 4,
       minWorkerAgents: 4,
       maxFixIterations: 2,
+      maxDynamicDispatches: 4,
       strategy: "expansive",
     },
   },

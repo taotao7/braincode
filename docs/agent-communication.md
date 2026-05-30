@@ -144,8 +144,11 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
 5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
 6. Try each model candidate for the primary role:
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
+     (+ dispatch guidance when dynamic dispatch is enabled)
      runtime.agent.prompt(...)
      primarySummary = last assistant text
+     - the primary may call dispatch_specialist mid-turn to consult an isolated
+       specialist (Brain-mediated, budget-capped); results fold into workerResults
 7. Bounded fix loop (collect patch -> checks -> review -> gate), repeated while a
    trigger fires, up to the mode budget (auto: 1, radical: 2):
      - trigger = checks failed OR review decision == changes_requested
@@ -296,6 +299,38 @@ When you add a new lifecycle moment that the UI should know about, prefer extend
 
 Because each worker is still isolated, `/team` outputs are genuinely independent perspectives — not a debate. If you want a debate flow later, build it as a new role (e.g. `moderator`) that runs after the fanned-out workers and consumes their `WorkerResult`s.
 
+## Dynamic dispatch: the primary asks for a specialist mid-run
+
+The router freezes the plan before the primary runs. But the primary sometimes discovers, mid-task, that it needs expertise the router did not anticipate — a backend agent hits an auth question, a frontend agent needs a schema fact. Dynamic dispatch is the bounded, Brain-mediated channel for that.
+
+The mechanism is a **tool**, `dispatch_specialist`, defined in `packages/agent-runtime/src/dynamic-dispatch.ts` and attached only to the primary agent's runtime (never to workers, never to review, never to the imageMaker primary or `/team` forced-roles runs). When the primary calls it, the tool handler runs Brain-side:
+
+```
+primary agent
+  -> dispatch_specialist tool call { role, goal, reason }
+       (handler runs in Brain's process, not the worker's)
+  -> validate role against the dispatchable allow-list
+  -> reserve a budget slot (denies once the per-run cap is hit)
+  -> createRuntimeWorkerPlan(role)  ->  runWorkerFromPlan(phase="support")
+       (a fresh isolated worker: own context id, own model policy,
+        sees only its goal + the original request, never the primary transcript)
+  -> WorkerResult formatted back into the tool result the primary reads
+  -> result also pushed into dispatchedResults, folded into workerResults
+     so the review worker and final report see it
+```
+
+This is *not* a peer link, and it does not violate the topology above. The dispatched specialist is an ordinary isolated worker; the only new thing is *who initiates it* (the primary, via a tool) rather than the router up front. Brain is still the sole executor and merger — the tool handler is Brain code. The three reasons in "Why we do not let workers message each other" all still hold:
+
+- **Context budget.** The cap is mode policy: `ModePolicy.routing.maxDynamicDispatches` (auto: 2, radical: 4). Slots are reserved at call time, counting in-flight dispatches, so a batch of parallel tool calls cannot collectively overrun the budget.
+- **Failure surface.** A dispatched worker returns a structured `WorkerResult` (including the `failed` path) exactly like a planned worker. The primary never catches a raw worker exception.
+- **Replay/audit.** Each dispatch is recorded in the session JSONL as `dynamic_dispatch` (`phase: "request"` then `phase: "result"`), and the worker's own `agent_message` handoff/result records are written by `runWorkerFromPlan` as usual.
+
+Dispatchable roles are `routedAgentRoles` minus `review` (the review gate runs through its own post-primary path), `rush` (a catch-all with no value as an isolated consult), and `imageMaker` (artifact generation is a planned-worker concern). Dispatched specialists are advisory and read-only: they receive read-only project tools only when their role is in `readOnlyToolWorkerRoles`, and never write/execute tools. The primary is told about the tool, its budget, and the isolation contract via `formatDispatchToolGuidance`, prepended to `buildPrimaryPrompt`'s output.
+
+The feature is gated by `settings.features.dynamicDispatch` (default `true`). Set it to `false` to freeze the plan at routing time and force the primary to complete with only the planned workers.
+
+If you are extending this: keep the handler the only initiation point, keep dispatched workers going through `runWorkerFromPlan` (do not hand-roll a second worker driver), and keep the budget in mode policy rather than hard-coding a number at the call site.
+
 ## Why we do not let workers message each other
 
 It is tempting to let two workers exchange a quick question without going through Brain. We do not, for three reasons:
@@ -324,6 +359,7 @@ Steps 1–3 are the contract. Steps 4–6 are how the rest of Braincode stays co
 - Envelope: `packages/protocol/src/index.ts` — `AgentMessage`, `ContextRef`.
 - Payloads: `packages/context/src/index.ts` — `HandoffPacket`, `WorkerResult`, task contexts, direction constants.
 - Worker driver: `runWorkerFromPlan` in `packages/agent-runtime/src/workers.ts`.
+- Dynamic dispatch: `createDispatchSpecialistTool` in `packages/agent-runtime/src/dynamic-dispatch.ts`; budget in `ModePolicy.routing.maxDynamicDispatches`.
 - Plan composition: `buildRuntimePlan`, `routePromptWithBrain`, `normalizeRouterDecision` in `packages/agent-runtime/src/router.ts`.
 - Prompt builders: `buildSupportWorkerPrompt`, `buildPrimaryPrompt`, `buildReviewPrompt`, `formatWorkerResults`.
 - Reliability: `selectRuntimeModelCandidatesWithApiKey` in `packages/agent-runtime/src/model-selection.ts`.

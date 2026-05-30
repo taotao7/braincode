@@ -4341,9 +4341,11 @@ const TranscriptSurface = React.memo(function TranscriptSurface({
     draftMetrics,
     running,
   });
-  const showEmptyIntro = items.length === 0 && draftMetrics.empty;
-  const transcriptChromeRows =
-    items.length > 0 ? 1 : showEmptyIntro ? BRAIN_LOGO.length + 4 : 0;
+  // Keep the logo on screen while the transcript is empty, even as the user
+  // types a draft. It only disappears once a prompt is submitted (which appends
+  // the first transcript item).
+  const showEmptyIntro = items.length === 0;
+  const transcriptChromeRows = items.length > 0 ? 1 : BRAIN_LOGO.length + 4;
   const nonTranscriptRows =
     fixedRows + transcriptChromeRows + estimateFooterRows(queueLength, toast);
   const transcriptLayout = useMemo(
@@ -4385,8 +4387,20 @@ const TranscriptSurface = React.memo(function TranscriptSurface({
       : "";
 
   if (showEmptyIntro) {
+    // Fill the same middle region the transcript would occupy so the input box
+    // and footer settle at the bottom of the terminal instead of bunching up
+    // under the header. The logo is centered vertically within that region.
+    const introHeight = Math.max(
+      BRAIN_LOGO.length + 2,
+      availableTranscriptRows + transcriptChromeRows,
+    );
     return (
-      <Box flexDirection="column" alignItems="center" marginY={1}>
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+        height={introHeight}
+      >
         {BRAIN_LOGO.map((line, index) => (
           <Text key={`logo-${index}`} color={colors.cyan} bold>
             {line}
