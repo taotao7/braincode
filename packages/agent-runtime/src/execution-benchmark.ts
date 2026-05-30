@@ -41,6 +41,20 @@ export type ExecutionBenchmarkExecutor = (request: {
   finalReport?: {
     status: string
     warnings?: string[]
+    metrics?: {
+      tokens?: {
+        total?: {
+          total?: number
+        }
+        byPhase?: Array<{
+          phase?: string
+          total?: number
+        }>
+      }
+      toolCalls?: {
+        total?: number
+      }
+    }
   }
 }>
 
@@ -62,6 +76,10 @@ export type ExecutionBenchmarkTaskMetrics = {
   durationMs: number
   toolCallCount: number
   tokenUsage: number
+  tokenUsageByPhase: Array<{ phase: string; total: number }>
+  primaryTokenUsage: number
+  nonPrimaryTokenUsage: number
+  brainToPrimaryTokenRatio?: number
   approvalCount: number
   fallbackCount: number
 }
@@ -196,6 +214,9 @@ async function runExecutionBenchmarkTask(
       durationMs: elapsed(started),
       toolCallCount: 0,
       tokenUsage: 0,
+      tokenUsageByPhase: [],
+      primaryTokenUsage: 0,
+      nonPrimaryTokenUsage: 0,
       approvalCount: 0,
       fallbackCount: 0,
     }
@@ -250,7 +271,9 @@ async function runRealExecutionTask(
   }
   const result = await executor({ prompt: task.task, projectRoot })
   const metrics = collectExecutionBenchmarkMetrics(result.patch, result.checks, result.reviewDecision, {
-    toolCallCount: 0,
+    toolCallCount: result.finalReport?.metrics?.toolCalls?.total ?? 0,
+    tokenUsage: result.finalReport?.metrics?.tokens?.total?.total ?? 0,
+    tokenUsageByPhase: normalizeBenchmarkTokenUsageByPhase(result.finalReport?.metrics?.tokens?.byPhase),
     fallbackCount: result.finalReport?.warnings?.some((warning) => /fallback/i.test(warning)) ? 1 : 0,
   })
   const resultChecks = evaluateExecutionBenchmarkResult(task, metrics)
@@ -261,9 +284,15 @@ function collectExecutionBenchmarkMetrics(
   patch: PatchSummary | undefined,
   checks: PatchCheckSummary | undefined,
   reviewDecision: ReviewDecision | undefined,
-  usage: Pick<ExecutionBenchmarkTaskMetrics, "toolCallCount"> & Partial<Pick<ExecutionBenchmarkTaskMetrics, "tokenUsage" | "approvalCount" | "fallbackCount">>,
+  usage: Pick<ExecutionBenchmarkTaskMetrics, "toolCallCount"> & Partial<Pick<ExecutionBenchmarkTaskMetrics, "tokenUsage" | "tokenUsageByPhase" | "approvalCount" | "fallbackCount">>,
 ): ExecutionBenchmarkTaskMetrics {
   const patchActive = hasPatchActivity(patch)
+  const tokenUsage = usage.tokenUsage ?? 0
+  const tokenUsageByPhase = usage.tokenUsageByPhase ?? []
+  const primaryTokenUsage = tokenUsageByPhase
+    .filter((phase) => phase.phase === "primary")
+    .reduce((total, phase) => total + phase.total, 0)
+  const nonPrimaryTokenUsage = Math.max(0, tokenUsage - primaryTokenUsage)
   return {
     success: false,
     changedFiles: patchActive ? patch.changedFiles.map((change) => change.path).sort() : [],
@@ -272,10 +301,25 @@ function collectExecutionBenchmarkMetrics(
     reviewDecision: reviewDecision?.decision ?? "not-run",
     durationMs: 0,
     toolCallCount: usage.toolCallCount,
-    tokenUsage: usage.tokenUsage ?? 0,
+    tokenUsage,
+    tokenUsageByPhase,
+    primaryTokenUsage,
+    nonPrimaryTokenUsage,
+    ...(primaryTokenUsage > 0 ? { brainToPrimaryTokenRatio: tokenUsage / primaryTokenUsage } : {}),
     approvalCount: usage.approvalCount ?? 0,
     fallbackCount: usage.fallbackCount ?? 0,
   }
+}
+
+function normalizeBenchmarkTokenUsageByPhase(value: unknown): Array<{ phase: string; total: number }> {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const record = item as { phase?: unknown; total?: unknown }
+    const phase = typeof record.phase === "string" && record.phase.trim() ? record.phase.trim() : "unknown"
+    const total = typeof record.total === "number" && Number.isFinite(record.total) ? Math.max(0, Math.round(record.total)) : 0
+    return total > 0 ? [{ phase, total }] : []
+  })
 }
 
 function evaluateExecutionBenchmarkResult(

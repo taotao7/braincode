@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, mergeCheckRunnerConfiguration, normalizeToolConfiguration } from "./index"
+import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, mergeCheckRunnerConfiguration, normalizeToolConfiguration } from "../src/index"
 
 function getTool(name: string, projectRoot: string) {
   const tool = createLocalCodingTools({ projectRoot }).find((candidate) => candidate.name === name)

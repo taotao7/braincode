@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, listSessions, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectChecks, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, listSessions, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectChecks, readProjectSupport, readProviderApiKey, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "../src/index"
 
 const tempHomes: string[] = []
 
@@ -631,6 +631,7 @@ test("token usage records aggregate by model, role, and phase", async () => {
   }, home)
 
   const stats = await readUsageStats(home)
+  const sessionUsage = await readSessionTokenUsageSummary("usage-session", home)
 
   expect(stats.sessions).toBe(1)
   expect(stats.totals).toMatchObject({ calls: 2, input: 50, output: 25, cacheRead: 3, total: 78 })
@@ -644,6 +645,11 @@ test("token usage records aggregate by model, role, and phase", async () => {
   expect(stats.recent[0]?.prompt).toBe("implement stats")
   expect(stats.recent[0]?.brainId).toBe("brain")
   expect(stats.recent[0]?.primaryRole).toBe("backend")
+  expect(sessionUsage.totals).toMatchObject({ calls: 2, input: 50, output: 25, cacheRead: 3, total: 78 })
+  expect(sessionUsage.byPhase.map((bucket) => [bucket.id, bucket.total])).toEqual([
+    ["primary", 63],
+    ["router", 15],
+  ])
 })
 
 test("listSessions limits after sorting by recent session file time", async () => {

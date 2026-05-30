@@ -161,7 +161,9 @@ bun run braincode                                  # Ink TUI
 bun run config                                     # 浏览器配置 UI
 ```
 
-测试就放在源码旁边：`packages/<name>/src/index.test.ts`。新逻辑就近放在归属的包里，**不要** 让 `packages/shared` 膨胀。
+测试位置按 ownership 归属放置。窄范围单元测试放在对应源码旁边，例如 `packages/<name>/src/<module>.test.ts` 或 `apps/<name>/src/<module>.test.tsx`。包级集成测试、公共入口测试、跨多个源码模块的测试放到 `<workspace>/test/*.test.ts`，例如 `packages/agent-runtime/test/runtime-integration.test.ts`。根目录 `tests/` 只留给未来跨 workspace 或端到端测试；fixtures 放在最近的 `test/fixtures/`，benchmark fixtures 继续放在 `benchmarks/fixtures/`。
+
+新逻辑就近放在归属的包里，**不要** 让 `packages/shared` 膨胀。
 
 ## 接下来去哪里
 

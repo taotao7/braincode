@@ -1,6 +1,6 @@
 # Project Structure and Plan
 
-This document is the source of truth for workspace layout, package ownership, and implementation status. The current implementation has passed the initial skeleton/runtime/TUI/MCP/coding-workflow phases; ongoing work is focused on product polish, usage/cost visibility, configuration health checks, and targeted test coverage.
+This document is the source of truth for workspace layout, package ownership, and implementation status. The current implementation has passed the initial skeleton/runtime/TUI/MCP/coding-workflow phases; ongoing work is focused on product polish, token-usage visibility, configuration health checks, and targeted test coverage.
 
 ## Goals
 
@@ -66,6 +66,10 @@ braincode/
       src/
         index.ts
         tui.tsx
+        *.test.ts
+        *.test.tsx
+      test/
+        run-report.test.ts
     config-web/
       src/
         index.ts
@@ -79,12 +83,16 @@ braincode/
     config/
       src/
         index.ts
+      test/
+        config-store.test.ts
     server/
       src/
         index.ts
     llm/
       src/
         index.ts
+      test/
+        provider-runtime.test.ts
     brain/
       src/
         index.ts
@@ -104,9 +112,13 @@ braincode/
         patch.ts
         prompt-references.ts
         review.ts
+      test/
+        runtime-integration.test.ts
     tools/
       src/
         index.ts
+      test/
+        local-tools.test.ts
 ```
 
 ## Package responsibilities
@@ -394,4 +406,5 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Done: execution benchmark fixtures under `benchmarks/fixtures` plus `braincode benchmark --execute`, with offline mock execution by default, `--real` for configured provider runs, isolated temp git worktrees, and JSON metrics for changed files, diff stats, checks, review, duration, tool calls, token usage, approvals, and fallbacks.
 - Done: login validation safe-review demo under `examples/login-validation-demo`, including a TS/Bun/React fixture, focused `.braincode/checks.json`, expected patch, and asciinema transcript.
+- Done: token-only usage metrics in final reports, session `tool_call_count` records, runtime-phase token aggregation, and benchmark brain/primary token comparison. Braincode intentionally does not estimate dollar cost because user-connected providers and model access modes may not expose reliable pricing.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

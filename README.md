@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-205%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-206%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -155,6 +155,7 @@ See [RELEASES.md](./RELEASES.md).
 - Automated patch checks: file-changing runs classify the patch kind, select `check`, `typecheck`, `lint`, and `test` package scripts according to smart policy, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.
 - Check runner policy in `tools.json` plus project `.braincode/checks.json`: checks can be disabled, pinned to explicit package scripts, customized per patch kind, and bounded by timeout/output limits.
 - Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked` with severity-ranked findings, file/line evidence, required changes, blocking issues, and residual risks; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
+- Token-only usage metrics: session ledgers record provider token usage by router/support/primary/review phase plus `tool_call_count`; final reports and execution benchmarks show token totals, phase breakdowns, tool calls, and brain-agent versus primary-phase token ratios without estimating dollar cost.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 - Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.
 - Demo benchmark CLI for representative coding tasks covering docs edits, failing tests, auth-risk implementation, package/script changes, and security-review-only prompts.

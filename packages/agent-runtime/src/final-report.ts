@@ -2,6 +2,7 @@ import type { AgentTodoStatus, BraincodeMode, RoutedAgentRole } from "@braincode
 import type { PatchCheckSummary } from "./checks"
 import { hasPatchActivity, type PatchSummary } from "./patch"
 import type { ReviewDecision, ReviewDecisionStatus } from "./review"
+import type { RuntimeMetricsSummary } from "./metrics"
 
 export type FinalReportStatus = ReviewDecisionStatus | "answered" | "read_only"
 
@@ -34,6 +35,7 @@ export type FinalReport = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   review?: ReviewDecision
+  metrics?: RuntimeMetricsSummary
   modelSummary: string
   warnings: string[]
 }
@@ -78,6 +80,7 @@ export type BuildFinalReportInput = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   review?: ReviewDecision
+  metrics?: RuntimeMetricsSummary
   runtimeToolCount?: number
 }
 
@@ -120,6 +123,7 @@ export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
     ...(input.patch ? { patch: input.patch } : {}),
     ...(input.checks ? { checks: input.checks } : {}),
     ...(input.review ? { review: input.review } : {}),
+    ...(input.metrics ? { metrics: input.metrics } : {}),
     modelSummary: input.modelSummary,
     warnings,
   }

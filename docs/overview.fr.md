@@ -159,7 +159,9 @@ bun run braincode                                  # Ink TUI
 bun run config                                     # interface configuration navigateur
 ```
 
-Les tests vivent à côté de la source : `packages/<name>/src/index.test.ts`. Gardez la nouvelle logique près du paquet auquel elle appartient ; résistez à l'envie de faire grossir `packages/shared`.
+Le placement des tests suit l'ownership du code. Les tests unitaires ciblés restent à côté du module source, par exemple `packages/<name>/src/<module>.test.ts` ou `apps/<name>/src/<module>.test.tsx`. Les tests d'intégration au niveau d'un package, les tests d'entrypoint public et les tests qui couvrent plusieurs modules source vont dans `<workspace>/test/*.test.ts`, par exemple `packages/agent-runtime/test/runtime-integration.test.ts`. Réservez un futur répertoire racine `tests/` aux suites cross-workspace ou end-to-end, et gardez les fixtures sous le `test/fixtures/` le plus proche sauf pour les fixtures de benchmark, qui restent sous `benchmarks/fixtures/`.
+
+Gardez la nouvelle logique près du paquet auquel elle appartient ; résistez à l'envie de faire grossir `packages/shared`.
 
 ## Où aller ensuite
 

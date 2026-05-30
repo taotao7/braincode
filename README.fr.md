@@ -195,4 +195,6 @@ Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs u
 
 La TUI actuelle prend en charge `/help` pour afficher les commandes et `/plan <tâche>` pour prévisualiser le routage Brain Model ; utilisez `/plan --heuristic <tâche>` pour un diagnostic sans provider. Elle n'offre volontairement aucune commande de changement direct de modèle ; la configuration des modèles et providers appartient à `braincode config`.
 
+Les rapports et le session ledger enregistrent des métriques token-only : tokens par phase router/support/primary/review, `tool_call_count`, et comparaison benchmark entre le total brain-agent et la phase primary. Braincode n'estime pas le coût en dollars, car les providers, proxies, abonnements et modèles OAuth connectés par l'utilisateur n'exposent pas toujours un prix fiable.
+
 Pour l'architecture complète, les responsabilités des paquets, la disposition des configurations et la feuille de route, consultez la version anglaise du [README.md](./README.md).

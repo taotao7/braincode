@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, loadExecutionBenchmarkTasks, planRuntimeFromConfig, runDemoBenchmarkSuite, runExecutionBenchmarkSuite, type DemoBenchmarkSuiteResult, type ExecutionBenchmarkSuiteResult, type ExecutionBenchmarkTask, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, loadExecutionBenchmarkTasks, planRuntimeFromConfig, runDemoBenchmarkSuite, runExecutionBenchmarkSuite, type DemoBenchmarkSuiteResult, type ExecutionBenchmarkSuiteResult, type ExecutionBenchmarkTask, type ExecutionBenchmarkTaskResult, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -172,6 +172,7 @@ export function formatRunReport(report: FinalReport): string {
   const review = report.review
     ? `${report.review.decision}${report.review.confidence !== undefined ? ` (${Math.round(report.review.confidence * 100)}%)` : ""}`
     : "not run"
+  const usage = formatFinalReportUsageLine(report)
   const warnings = report.warnings.length > 0
     ? ["", "Warnings:", ...report.warnings.map((warning) => `- ${warning}`)]
     : []
@@ -189,10 +190,27 @@ export function formatRunReport(report: FinalReport): string {
     `Patch: ${patch}`,
     `Checks: ${checks}`,
     `Review: ${review}`,
+    ...(usage ? [`Usage: ${usage}`] : []),
     `Session: ${report.sessionId}`,
     ...warnings,
     ...summary,
   ].join("\n")
+}
+
+function formatFinalReportUsageLine(report: FinalReport): string | undefined {
+  const metrics = report.metrics
+  if (!metrics) return undefined
+  const tokenSummary = metrics.tokens.byPhase.length > 0
+    ? `${formatCompactCount(metrics.tokens.total.total)} tokens (by phase: ${metrics.tokens.byPhase.map((phase) => `${phase.phase ?? "unknown"} ${formatCompactCount(phase.total)}`).join(", ")})`
+    : `${formatCompactCount(metrics.tokens.total.total)} tokens`
+  const toolCalls = `${metrics.toolCalls.total} tool call${metrics.toolCalls.total === 1 ? "" : "s"}${metrics.toolCalls.failed > 0 ? `, ${metrics.toolCalls.failed} failed` : ""}`
+  return `${tokenSummary}; ${toolCalls}`
+}
+
+function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`
+  return String(value)
 }
 
 function createRunApprovalHandler(mode: "yes" | "allow-edits") {
@@ -366,7 +384,8 @@ function formatExecutionBenchmarkReport(result: ExecutionBenchmarkSuiteResult): 
     const diff = metrics.diffStats
       ? ` +${metrics.diffStats.insertions} -${metrics.diffStats.deletions}`
       : ""
-    lines.push(`${taskResult.task.id.padEnd(22)} ${taskResult.status.toUpperCase().padEnd(6)} changed=${changed}${diff} checks=${metrics.checksStatus} review=${metrics.reviewDecision} (${metrics.durationMs}ms)`)
+    const usage = formatBenchmarkUsage(metrics)
+    lines.push(`${taskResult.task.id.padEnd(22)} ${taskResult.status.toUpperCase().padEnd(6)} changed=${changed}${diff} checks=${metrics.checksStatus} review=${metrics.reviewDecision}${usage ? ` ${usage}` : ""} (${metrics.durationMs}ms)`)
 
     for (const check of taskResult.checks.filter((item) => item.status !== "passed")) {
       lines.push(`  ${check.status.toUpperCase().padEnd(7)} ${check.name}: expected ${check.expected}, got ${check.actual}`)
@@ -382,6 +401,16 @@ function formatExecutionBenchmarkReport(result: ExecutionBenchmarkSuiteResult): 
   )
 
   return lines.join("\n")
+}
+
+function formatBenchmarkUsage(metrics: ExecutionBenchmarkTaskResult["metrics"]): string {
+  const phase = metrics.tokenUsageByPhase.length > 0
+    ? ` phases=${metrics.tokenUsageByPhase.map((item) => `${item.phase}:${formatCompactCount(item.total)}`).join(",")}`
+    : ""
+  const comparison = metrics.brainToPrimaryTokenRatio !== undefined && Number.isFinite(metrics.brainToPrimaryTokenRatio)
+    ? ` brain/primary=${metrics.brainToPrimaryTokenRatio.toFixed(2)}x`
+    : ""
+  return `tokens=${formatCompactCount(metrics.tokenUsage)}${phase}${comparison} tools=${metrics.toolCallCount}`
 }
 
 async function main() {

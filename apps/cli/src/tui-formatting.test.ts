@@ -117,6 +117,17 @@ test("final report formatting exposes compact and expandable run facts", () => {
       blockingIssues: [],
       residualRisks: [],
     },
+    metrics: {
+      tokens: {
+        total: { input: 1000, output: 250, cacheRead: 0, cacheWrite: 0, total: 1250, calls: 2 },
+        byPhase: [
+          { phase: "router", input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150, calls: 1 },
+          { phase: "primary", input: 900, output: 200, cacheRead: 0, cacheWrite: 0, total: 1100, calls: 1 },
+        ],
+        byModel: [],
+      },
+      toolCalls: { total: 3, failed: 0, byPhase: [{ phase: "primary", calls: 3, failed: 0 }] },
+    },
     modelSummary: "Updated validation logic.",
     warnings: ["Failed checks override review approval."],
   } as FinalReport
@@ -124,11 +135,14 @@ test("final report formatting exposes compact and expandable run facts", () => {
   expect(formatTuiFinalReportCompact(report)).toContain("Braincode Run Report · changes_requested")
   expect(formatTuiFinalReportCompact(report)).toContain("patch 1 file, +8 -2")
   expect(formatTuiFinalReportCompact(report)).toContain("review changes_requested (76%)")
+  expect(formatTuiFinalReportCompact(report)).toContain("usage 1.3k tokens; 3 tool calls")
 
   const sections = formatTuiFinalReportSections(report).join("\n")
   expect(sections).toContain("Workers: librarian completed, backend completed, review changes_requested")
   expect(sections).toContain("Changed: M src/auth.ts")
   expect(sections).toContain("Check details: test failed")
   expect(sections).toContain("Review: changes_requested (76%)")
+  expect(sections).toContain("Usage: 1.3k tokens; 3 tool calls")
+  expect(sections).toContain("Token phases: router 150, primary 1.1k")
   expect(sections).toContain("Warnings:")
 })

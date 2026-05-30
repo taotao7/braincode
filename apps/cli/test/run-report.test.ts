@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { FinalReport } from "@braincode/agent-runtime"
-import { formatRunReport } from "./index"
+import { formatRunReport } from "../src/index"
 
 test("formatRunReport renders runtime-owned final report facts", () => {
   const report: FinalReport = {
@@ -61,6 +61,17 @@ test("formatRunReport renders runtime-owned final report facts", () => {
       blockingIssues: [],
       residualRisks: [],
     },
+    metrics: {
+      tokens: {
+        total: { input: 1200, output: 345, cacheRead: 0, cacheWrite: 0, total: 1545, calls: 3 },
+        byPhase: [
+          { phase: "router", input: 200, output: 45, cacheRead: 0, cacheWrite: 0, total: 245, calls: 1 },
+          { phase: "primary", input: 1000, output: 300, cacheRead: 0, cacheWrite: 0, total: 1300, calls: 2 },
+        ],
+        byModel: [],
+      },
+      toolCalls: { total: 4, failed: 1, byPhase: [{ phase: "primary", calls: 4, failed: 1 }] },
+    },
     modelSummary: "Updated validation logic.",
     warnings: ["Failed checks override review approval."],
   }
@@ -73,6 +84,7 @@ test("formatRunReport renders runtime-owned final report facts", () => {
   expect(text).toContain("Patch: 1 file, +8 -2")
   expect(text).toContain("Checks: failed (test failed)")
   expect(text).toContain("Review: changes_requested (76%)")
+  expect(text).toContain("Usage: 1.5k tokens (by phase: router 245, primary 1.3k); 4 tool calls, 1 failed")
   expect(text).toContain("Session: session-1")
   expect(text).toContain("Updated validation logic.")
 })

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
 import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings } from "@braincode/config"
-import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan, type ToolApprovalRequest } from "./index"
+import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan, type ToolApprovalRequest } from "../src/index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 

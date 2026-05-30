@@ -34,6 +34,23 @@ test("buildFinalReport uses runtime facts for routing, todos, workers, and model
     patch: patchSummary(),
     checks: { status: "passed", results: [] },
     review: approvedReview(),
+    metrics: {
+      tokens: {
+        total: { input: 100, output: 40, cacheRead: 0, cacheWrite: 0, total: 140, calls: 2 },
+        byPhase: [
+          { phase: "router", input: 20, output: 10, cacheRead: 0, cacheWrite: 0, total: 30, calls: 1 },
+          { phase: "primary", input: 80, output: 30, cacheRead: 0, cacheWrite: 0, total: 110, calls: 1 },
+        ],
+        byModel: [
+          { modelId: "provider/model", provider: "provider", input: 100, output: 40, cacheRead: 0, cacheWrite: 0, total: 140, calls: 2 },
+        ],
+      },
+      toolCalls: {
+        total: 3,
+        failed: 1,
+        byPhase: [{ phase: "primary", calls: 3, failed: 1 }],
+      },
+    },
     runtimeToolCount: 4,
   })
 
@@ -53,6 +70,8 @@ test("buildFinalReport uses runtime facts for routing, todos, workers, and model
     ["review", "completed"],
   ])
   expect(report.modelSummary).toBe("Changed validation and ran tests.")
+  expect(report.metrics?.tokens.total.total).toBe(140)
+  expect(report.metrics?.toolCalls.total).toBe(3)
   expect(report.warnings).toEqual([])
   expect(JSON.parse(JSON.stringify(report)).sessionId).toBe("session-1")
 })

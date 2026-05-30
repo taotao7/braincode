@@ -6610,8 +6610,9 @@ export function formatTuiFinalReportCompact(report: FinalReport): string {
     `patch ${formatFinalReportPatchLabel(report)}`,
     `checks ${formatFinalReportChecksLabel(report)}`,
     `review ${formatFinalReportReviewLabel(report)}`,
+    report.metrics ? `usage ${formatFinalReportUsageLabel(report)}` : "",
     `session ${report.sessionId.slice(0, 8)}`,
-  ].join(" · ");
+  ].filter(Boolean).join(" · ");
 }
 
 export function formatTuiFinalReportSections(report: FinalReport): string[] {
@@ -6634,6 +6635,12 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
     lines.push(`Check details: ${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")}`);
   }
   lines.push(`Review: ${formatFinalReportReviewLabel(report)}`);
+  if (report.metrics) {
+    lines.push(`Usage: ${formatFinalReportUsageLabel(report)}`);
+    if (report.metrics.tokens.byPhase.length) {
+      lines.push(`Token phases: ${report.metrics.tokens.byPhase.map((phase) => `${phase.phase ?? "unknown"} ${formatCompactTokenCount(phase.total)}`).join(", ")}`);
+    }
+  }
   if (report.review?.requiredChanges.length) {
     lines.push(`Required: ${report.review.requiredChanges.slice(0, 3).join("; ")}`);
   }
@@ -6667,6 +6674,14 @@ function formatFinalReportChecksLabel(report: FinalReport): string {
     report.checks.results.map((result) => `${result.name} ${result.status}`).join(", "),
     report.checks.reason,
   ].filter(Boolean).join("; ")})`;
+}
+
+function formatFinalReportUsageLabel(report: FinalReport): string {
+  const metrics = report.metrics;
+  if (!metrics) return "not recorded";
+  const tokens = `${formatCompactTokenCount(metrics.tokens.total.total)} tokens`;
+  const toolCalls = `${metrics.toolCalls.total} tool call${metrics.toolCalls.total === 1 ? "" : "s"}`;
+  return `${tokens}; ${toolCalls}${metrics.toolCalls.failed > 0 ? `, ${metrics.toolCalls.failed} failed` : ""}`;
 }
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {

@@ -16,7 +16,7 @@ import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
 import { getAgentRoleSystemPrompt, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
@@ -52,6 +52,9 @@ import { buildPrimaryPrompt, formatProjectSupportPromptSection, runSupportWorker
 export { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, readOnlyToolWorkerRoles, runSupportWorkers, runWorkerFromPlan } from "./workers"
 export type { ExecutedWorkerResult, WorkerLifecycleEvent, WorkerTodoStatusHandler } from "./workers"
 import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFAULT_MCP_STARTUP_BUDGET_MS, normalizeRuntimeInteger } from "./mcp-loading"
+import { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker, type RuntimeMetricsPhase, type RuntimeMetricsSummary } from "./metrics"
+export { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker } from "./metrics"
+export type { RuntimeMetricsPhase, RuntimeMetricsSummary, RuntimeTokenUsageSummary, RuntimeToolCallPhaseSummary, RuntimeToolCallSummary } from "./metrics"
 
 export type AgentRunRequest = {
   prompt: string
@@ -92,6 +95,42 @@ export type AgentRunResult = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   reviewDecision?: ReviewDecision
+}
+
+async function buildRunMetrics(
+  sessionId: string,
+  home: string | undefined,
+  toolCalls: ReturnType<typeof createRuntimeToolCallMetricsTracker>["summary"],
+): Promise<RuntimeMetricsSummary> {
+  const usage = await readSessionTokenUsageSummary(sessionId, home)
+  return buildRuntimeMetricsSummary(usage, toolCalls())
+}
+
+async function appendToolCallCountRecord(
+  sessionId: string,
+  home: string | undefined,
+  metrics: RuntimeMetricsSummary,
+  attempt: number,
+): Promise<void> {
+  await appendSessionRecord(sessionId, {
+    type: "tool_call_count",
+    total: metrics.toolCalls.total,
+    failed: metrics.toolCalls.failed,
+    byPhase: metrics.toolCalls.byPhase,
+    attempt,
+  }, home)
+}
+
+function createPhaseEventHandler(
+  phase: RuntimeMetricsPhase,
+  tracker: ReturnType<typeof createRuntimeToolCallMetricsTracker>,
+  onEvent: AgentRunRequest["onEvent"],
+): AgentRunRequest["onEvent"] {
+  return async (event) => {
+    tracker.onEvent(phase, event)
+    if (!onEvent) return
+    await onEvent(event)
+  }
 }
 
 export function humanizeAgentRuntimeError(error: unknown): string {
@@ -355,6 +394,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
   const toolEvidenceCache = createToolEvidenceCache()
   const runtimeTools = [...localTools]
+  const toolCallMetrics = createRuntimeToolCallMetricsTracker()
   let permissionPolicyReviewRequired = false
   const onPermissionPolicyEvaluation = (evaluation: PermissionPolicyEvaluation) => {
     if (evaluation.reviewRequired) {
@@ -388,7 +428,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal)
     if (plan.role === "imageMaker") {
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
@@ -451,6 +491,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           )
           const summary = `${primarySummary}${formatStopHookFeedback(stopHooks)}`
           const patch = await collectPatchSummary(cwd, patchBaseline)
+          const metrics = await buildRunMetrics(sessionId, home, toolCallMetrics.summary)
+          await appendToolCallCountRecord(sessionId, home, metrics, attempt + 1)
           const finalReport = buildFinalReport({
             task: request.prompt,
             sessionId,
@@ -458,7 +500,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             workerResults,
             modelSummary: primarySummary,
             patch,
-            runtimeToolCount: runtimeTools.length,
+            metrics,
+            runtimeToolCount: metrics.toolCalls.total,
           })
           await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
           await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, finalReport, attempt: attempt + 1 }, home)
@@ -528,7 +571,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         tools: runtimeTools,
         toolEvidenceCache,
         getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
-        onEvent: request.onEvent,
+        onEvent: createPhaseEventHandler("primary", toolCallMetrics, request.onEvent),
         onToolApproval: request.onToolApproval,
         permissionPolicy: toolConfig.permissions,
         onPermissionPolicyEvaluation,
@@ -618,7 +661,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         }
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)
+            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
             : undefined
         const reviewDecision = reviewResult
           ? applyCheckGateToReviewDecision(
@@ -652,6 +695,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         if (hasPatchActivity(patch)) {
           await appendSessionRecord(sessionId, { type: "patch_summary", ...patch, attempt: attempt + 1 }, home)
         }
+        const metrics = await buildRunMetrics(sessionId, home, toolCallMetrics.summary)
+        await appendToolCallCountRecord(sessionId, home, metrics, attempt + 1)
         const finalReport = buildFinalReport({
           task: request.prompt,
           sessionId,
@@ -661,7 +706,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           patch,
           checks,
           review: reviewDecision,
-          runtimeToolCount: runtimeTools.length,
+          metrics,
+          runtimeToolCount: metrics.toolCalls.total,
         })
         await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
         await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, finalReport, attempt: attempt + 1 }, home)

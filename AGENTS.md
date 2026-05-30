@@ -89,5 +89,8 @@ When changing architecture, structure, or planning, update the relevant `docs/` 
 - Each workspace package should declare its own dependencies.
 - Use Conventional Commits-style messages for commits and commit-like summaries, such as `feat: add routing policy` or `fix: restore config web theme`.
 - Add tests near behavior that has meaningful risk: routing, config migration, context isolation, tool permissions.
+- Put narrow unit tests next to their owning module as `src/<module>.test.ts` or `src/<module>.test.tsx`.
+- Put package-level integration tests, public-entrypoint tests, and tests spanning several source modules in `<workspace>/test/*.test.ts` with descriptive names such as `runtime-integration.test.ts`; avoid growing catch-all `src/index.test.ts` files.
+- Reserve a root `tests/` tree for future cross-workspace or end-to-end suites only. Keep fixtures under the nearest `test/fixtures/` directory unless they are benchmark fixtures, which belong under `benchmarks/fixtures/`.
 - Prefer focused tests over broad end-to-end tests for early development.
 - Avoid adding one-off abstractions unless they remove real complexity or match an existing package boundary.

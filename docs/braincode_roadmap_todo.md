@@ -668,17 +668,18 @@ routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
 
 ### TODO
 
-- [ ] Session ledger 增加 tool call count
-- [ ] Usage stats 增加 by phase：router/support/primary/review
-- [ ] Final report 显示 token summary
-- [ ] benchmark report 显示 estimated cost，如果模型价格未知则显示 token usage only
-- [ ] TUI status line 展示本轮 tokens 和 elapsed
+- [x] Session ledger 增加 tool call count
+- [x] Usage stats 增加 by phase：router/support/primary/review
+- [x] Final report 显示 token summary
+- [x] benchmark report 显示 token usage only
+  - Braincode 不估算美元成本：用户可能接入自定义代理、订阅模型、OAuth 模型或非公开价格模型，runtime 不能可靠知道真实成本。
+- [x] TUI status line 展示本轮 tokens 和 elapsed
 
 ### 验收标准
 
-- [ ] 用户能看到多 worker 是否真的增加成本
-- [ ] 用户能看到 review gate 成本
-- [ ] benchmark 能比较 single-agent vs brain-agent
+- [x] 用户能看到多 worker 是否真的增加 token 开销
+- [x] 用户能看到 review gate token 开销
+- [x] benchmark 能用 primary phase token 作为 single-agent 基线，对比 brain-agent 总 token
 
 ---
 

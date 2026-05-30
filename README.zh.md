@@ -198,4 +198,6 @@ harness 暴露 **14 个角色**，整体以角色（专业人设）为主，并�
 
 当前 TUI 支持 `/help` 查看命令、`/plan <任务>` 预览 Brain Model 路由；需要无 provider 诊断时使用 `/plan --heuristic <任务>`。TUI 不提供直接切换模型的命令；模型和 provider 配置属于 `braincode config`。
 
+运行报告和 session ledger 会记录 token-only usage：router/support/primary/review 分阶段 token、`tool_call_count`、benchmark 的 brain-agent 总 token 与 primary-phase 基线对比。Braincode 不估算美元成本，因为用户接入的 provider、代理、订阅模型或 OAuth 模型未必能暴露可靠价格。
+
 完整的架构、包职责、配置布局、路线图等，请参考英文版的 [README.md](./README.md)。

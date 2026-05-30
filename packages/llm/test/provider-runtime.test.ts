@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, mock, test } from "bun:test"
 import { writeProviderApiKey, writeProviderOAuthCredentials } from "@braincode/config"
-import type { BraincodeModel } from "./index"
+import type { BraincodeModel } from "../src/index"
 
 const fakePiModels = {
   anthropic: [
@@ -145,7 +145,7 @@ const {
   testModelConnection,
   toBraincodeModel,
   toOpenAICompatibleBraincodeModel,
-} = await import("./index")
+} = await import("../src/index")
 
 const originalFetch = globalThis.fetch
 

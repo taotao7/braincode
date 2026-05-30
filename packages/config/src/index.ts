@@ -259,6 +259,15 @@ export type UsageStats = {
   recent: UsageStatsDetail[];
 };
 
+export type SessionTokenUsageSummary = {
+  sessionId: string;
+  totals: TokenUsageTotals;
+  byModel: UsageStatsBucket[];
+  byRole: UsageStatsBucket[];
+  byPhase: UsageStatsBucket[];
+  records: UsageStatsDetail[];
+};
+
 export type UsageStatsOptions = {
   detailLimit?: number;
   sessionLimit?: number;
@@ -1273,6 +1282,107 @@ export async function readUsageStats(
   stats.recent.sort((left, right) => (right.timestamp ?? 0) - (left.timestamp ?? 0));
   stats.recent = stats.recent.slice(0, detailLimit);
   return stats;
+}
+
+export async function readSessionTokenUsageSummary(
+  sessionId: string,
+  home = getBraincodeHome(),
+): Promise<SessionTokenUsageSummary> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(sessionId)) {
+    throw new Error(
+      "sessionId may only contain letters, numbers, dots, underscores, and dashes",
+    );
+  }
+
+  const paths = await ensureBraincodeHome(home);
+  const path = join(paths.sessions, `${sessionId}.jsonl`);
+  const summary: SessionTokenUsageSummary = {
+    sessionId,
+    totals: emptyTokenUsageTotals(),
+    byModel: [],
+    byRole: [],
+    byPhase: [],
+    records: [],
+  };
+  const modelBuckets = new Map<string, UsageStatsBucket>();
+  const roleBuckets = new Map<string, UsageStatsBucket>();
+  const phaseBuckets = new Map<string, UsageStatsBucket>();
+
+  let lines: string[] = [];
+  try {
+    const text = await Bun.file(path).text();
+    lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return summary;
+  }
+
+  let prompt: string | undefined;
+  let brainId: string | undefined;
+  let primaryRole: string | undefined;
+  for (const line of lines) {
+    const record = parseSessionRecordLine(line);
+    if (!record || record.type !== "run_start") continue;
+    prompt = prompt ?? stringField(record, "prompt");
+    const plan = planFields(record.plan);
+    brainId = brainId ?? plan.brainId;
+    primaryRole = primaryRole ?? plan.role;
+  }
+
+  for (const line of lines) {
+    const record = parseSessionRecordLine(line);
+    if (!record || record.type !== "token_usage") continue;
+    const usage = normalizeTokenUsage(record.usage);
+    if (!usage) continue;
+    const timestamp = numberField(record, "timestamp");
+    const modelId = stringField(record, "modelId") ?? stringField(record, "model");
+    const provider = stringField(record, "provider");
+    const role = stringField(record, "role") ?? "unknown";
+    const phase = stringField(record, "phase") ?? "unknown";
+    const detail: UsageStatsDetail = {
+      sessionId,
+      path,
+      timestamp,
+      prompt,
+      brainId: brainId ?? stringField(record, "brainId"),
+      primaryRole,
+      role,
+      phase,
+      modelId,
+      provider,
+      agentSessionId: stringField(record, "agentSessionId"),
+      taskId: stringField(record, "taskId"),
+      parentId: stringField(record, "parentId"),
+      turnId: stringField(record, "turnId"),
+      attempt: numberField(record, "attempt"),
+      usage,
+    };
+    summary.records.push(detail);
+    addTokenUsage(summary.totals, usage);
+    if (modelId) {
+      addUsageBucket(modelBuckets, {
+        id: modelId,
+        label: modelId,
+        provider,
+        modelId,
+      }, usage, timestamp);
+    }
+    addUsageBucket(roleBuckets, {
+      id: role,
+      label: role,
+      role,
+    }, usage, timestamp);
+    addUsageBucket(phaseBuckets, {
+      id: phase,
+      label: phase,
+      phase,
+    }, usage, timestamp);
+  }
+
+  summary.byModel = sortedUsageBuckets(modelBuckets);
+  summary.byRole = sortedUsageBuckets(roleBuckets);
+  summary.byPhase = sortedUsageBuckets(phaseBuckets);
+  summary.records.sort((left, right) => (right.timestamp ?? 0) - (left.timestamp ?? 0));
+  return summary;
 }
 
 function parseSessionRecordLine(line: string): Record<string, unknown> | undefined {

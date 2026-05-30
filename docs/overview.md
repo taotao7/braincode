@@ -163,7 +163,9 @@ bun run braincode                                  # Ink TUI
 bun run config                                     # config browser UI
 ```
 
-Tests live next to source: `packages/<name>/src/index.test.ts`. Keep new logic close to the package it belongs to; resist growing `packages/shared`.
+Test placement follows ownership. Put narrow unit tests next to their source module, for example `packages/<name>/src/<module>.test.ts` or `apps/<name>/src/<module>.test.tsx`. Put package-level integration tests and public-entrypoint tests in `<workspace>/test/*.test.ts`, such as `packages/agent-runtime/test/runtime-integration.test.ts`. Reserve a root `tests/` tree for future cross-workspace or end-to-end suites, and keep fixtures under the nearest `test/fixtures/` directory unless they are benchmark fixtures under `benchmarks/fixtures/`.
+
+Keep new logic close to the package it belongs to; resist growing `packages/shared`.
 
 ## Where to go next
 
