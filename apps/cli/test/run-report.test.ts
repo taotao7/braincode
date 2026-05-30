@@ -4,6 +4,7 @@ import { formatRunReport } from "../src/index"
 
 test("formatRunReport renders runtime-owned final report facts", () => {
   const report: FinalReport = {
+    version: 1,
     status: "changes_requested",
     task: "fix failing auth test",
     sessionId: "session-1",

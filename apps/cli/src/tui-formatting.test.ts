@@ -61,6 +61,7 @@ test("plan preview formatting exposes role, model, routing, workers, and budget"
 
 test("final report formatting exposes compact and expandable run facts", () => {
   const report = {
+    version: 1,
     status: "changes_requested",
     task: "fix failing auth test",
     sessionId: "session-abcdef",

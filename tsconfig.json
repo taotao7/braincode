@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"]
 }

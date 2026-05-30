@@ -65,7 +65,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   configChecks.push(
     homeExists
       ? ok("home", `home: ${paths.home}`)
-      : error("home", `home directory not found: ${paths.home}`, "Run any braincode command to initialize the home directory."),
+      : errorCheck("home", `home directory not found: ${paths.home}`, "Run any braincode command to initialize the home directory."),
   )
 
   let settings: BraincodeSettings | undefined
@@ -125,7 +125,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     modelChecks.push(
       routeBrainModel
         ? ok("routeBrain-model", `routeBrain: ${routeBrainModel}`)
-        : error("routeBrain-model", "routeBrain model not configured"),
+        : errorCheck("routeBrain-model", "routeBrain model not configured"),
     )
 
     const primaryRole = roles?.backend ?? roles?.frontend ?? roles?.rush
@@ -133,7 +133,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     modelChecks.push(
       primaryModel
         ? ok("primary-model", `primary: ${primaryModel}`)
-        : error("primary-model", "primary role model not configured"),
+        : errorCheck("primary-model", "primary role model not configured"),
     )
 
     const routeBrainProvider = String(routeBrainModel ?? "").split("/")[0]
@@ -174,7 +174,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
 
   toolChecks.push(gitOk ? ok("git", "git available") : warning("git", "git not found in PATH"))
   toolChecks.push(rgOk ? ok("rg", "rg (ripgrep) available") : warning("rg", "rg not found in PATH", "Install ripgrep for faster file search."))
-  toolChecks.push(bunOk ? ok("bun", "bun available") : error("bun", "bun not found in PATH", "Braincode requires Bun."))
+  toolChecks.push(bunOk ? ok("bun", "bun available") : errorCheck("bun", "bun not found in PATH", "Braincode requires Bun."))
   toolChecks.push(npmOk ? ok("npm", "npm available") : warning("npm", "npm not found in PATH"))
   toolChecks.push(pnpmOk ? ok("pnpm", "pnpm available") : warning("pnpm", "pnpm not found in PATH"))
   toolChecks.push(yarnOk ? ok("yarn", "yarn available") : warning("yarn", "yarn not found in PATH"))
