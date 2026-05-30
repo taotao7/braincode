@@ -331,6 +331,66 @@ export async function runWorkerFromPlan(
   return failure
 }
 
+/**
+ * Continuous-concurrency worker pool. Keeps up to `limit` workers in flight and
+ * refills a freed slot the instant any worker settles, instead of waiting for a
+ * whole wave to finish. A pending worker is launched only when `isReady` returns
+ * true for it; when no worker is in flight and none is ready, the remaining
+ * pending workers are blocked via `onBlocked` (dependency deadlock or cycle).
+ *
+ * Results are written back at the worker's original index so the returned array
+ * preserves input order regardless of completion order. Blocked workers are
+ * recorded at their index via `onBlocked`, so they remain in the returned array.
+ */
+export async function runWorkerPool(options: {
+  count: number
+  limit: number
+  isReady: (index: number, results: ReadonlyArray<ExecutedWorkerResult | undefined>) => boolean
+  runWorker: (index: number, priorResults: ExecutedWorkerResult[]) => Promise<ExecutedWorkerResult>
+  onBlocked: (index: number, results: ExecutedWorkerResult[]) => Promise<ExecutedWorkerResult>
+  throwIfAborted?: () => void
+}): Promise<ExecutedWorkerResult[]> {
+  const { count, isReady, runWorker, onBlocked, throwIfAborted } = options
+  const limit = Math.max(1, Math.min(count, Math.floor(options.limit)))
+  const results = new Array<ExecutedWorkerResult | undefined>(count)
+  const pending = new Set<number>()
+  for (let index = 0; index < count; index++) pending.add(index)
+  const inflight = new Map<number, Promise<number>>()
+
+  const launch = (index: number) => {
+    pending.delete(index)
+    const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
+    const settled = runWorker(index, priorResults).then((result) => {
+      results[index] = result
+      return index
+    })
+    inflight.set(index, settled)
+  }
+
+  while (pending.size > 0 || inflight.size > 0) {
+    throwIfAborted?.()
+    while (inflight.size < limit) {
+      const next = Array.from(pending).find((index) => isReady(index, results))
+      if (next === undefined) break
+      launch(next)
+    }
+    if (inflight.size === 0) {
+      // No worker is running and none is ready: the remaining pending workers
+      // have unsatisfiable dependencies (failed/blocked upstream or a cycle).
+      for (const index of Array.from(pending)) {
+        pending.delete(index)
+        const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
+        results[index] = await onBlocked(index, priorResults)
+      }
+      break
+    }
+    const finished = await Promise.race(inflight.values())
+    inflight.delete(finished)
+  }
+
+  return results.filter((result): result is ExecutedWorkerResult => Boolean(result))
+}
+
 export async function runSupportWorkers(
   workers: RuntimeWorkerPlan[],
   originalPrompt: string,
@@ -358,8 +418,6 @@ export async function runSupportWorkers(
   const limit = Number.isFinite(concurrencyCap) && (concurrencyCap as number) > 0
     ? Math.min(workers.length, Math.floor(concurrencyCap as number))
     : workers.length
-  const results: ExecutedWorkerResult[] = new Array(workers.length)
-  const pending = new Set(workers.map((_, index) => index))
   const todoOwnerById = new Map<string, number>()
   for (const [index, worker] of workers.entries()) {
     for (const todoId of worker.todoIds ?? []) {
@@ -367,73 +425,74 @@ export async function runSupportWorkers(
     }
   }
 
-  const workerIsReady = (index: number) => {
+  // A worker is ready when every dependency edge into one of its todos has an
+  // upstream owner that has already completed. `results[owner]?.status` is only
+  // set once that worker settles, so a `completed` upstream is necessarily both
+  // settled and successful; a failed/blocked upstream keeps the dependent
+  // pending until the pool detects the deadlock and blocks it.
+  const isReady = (index: number, results: ReadonlyArray<ExecutedWorkerResult | undefined>): boolean => {
     const workerTodoIds = new Set(workers[index]?.todoIds ?? [])
     if (workerTodoIds.size === 0) return true
     return dependencies.every((dependency) => {
       if (!workerTodoIds.has(dependency.toTodoId)) return true
       const owner = todoOwnerById.get(dependency.fromTodoId)
-      return owner !== undefined && (owner === index || (!pending.has(owner) && results[owner]?.status === "completed"))
+      return owner !== undefined && (owner === index || results[owner]?.status === "completed")
     })
   }
 
-  while (pending.size > 0) {
-    throwIfRunAborted(signal)
-    const pendingIndexes = Array.from(pending)
-    const readyIndexes = pendingIndexes.filter(workerIsReady)
-    if (readyIndexes.length === 0) {
-      const reason = "Worker dependency graph is blocked or cyclic; no pending worker has all upstream todos completed successfully."
-      await Promise.all(pendingIndexes.map(async (index) => {
-        pending.delete(index)
-        const worker = workers[index]!
-        const result = blockedWorkerResult(worker, sessionId, reason)
-        results[index] = result
-        await appendSessionRecord(sessionId, { type: "agent_message", phase: "support", worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
-        await appendSessionRecord(sessionId, { type: "worker_end", phase: "support", worker: worker.role, result }, home)
-        await onTodoStatus?.(worker, "support", "blocked", { error: reason })
-        await emitWorkerLifecycleEvent(onWorkerEvent, {
-          type: "worker_end",
-          role: worker.role,
-          phase: "support",
-          status: "blocked",
-          handoffId: result.handoffId,
-          taskId: result.taskId,
-          parentId: result.parentId,
-          progress: result.progress,
-          error: result.error,
-          todoIds: worker.todoIds,
-        })
-      }))
-      break
-    }
-    const wave = readyIndexes.slice(0, limit)
-    await Promise.all(wave.map(async (index) => {
-      pending.delete(index)
-      const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
-      const worker = workers[index]!
-      const workerTools = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
-      results[index] = await runWorkerFromPlan(
-        worker,
-        (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
-        sessionId,
-        home,
-        models,
-        mode,
-        "support",
-        projectSupport,
-        hookContext,
-        onWorkerEvent,
-        onTodoStatus,
-        promptImages,
-        workerTools,
-        workerTools.length > 0 ? toolEvidenceCache : undefined,
-        workerTools.length > 0 ? onEvent : undefined,
-        signal,
-      )
-    }))
+  const runWorker = (index: number, priorResults: ExecutedWorkerResult[]): Promise<ExecutedWorkerResult> => {
+    const worker = workers[index]!
+    const workerTools = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
+    return runWorkerFromPlan(
+      worker,
+      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
+      sessionId,
+      home,
+      models,
+      mode,
+      "support",
+      projectSupport,
+      hookContext,
+      onWorkerEvent,
+      onTodoStatus,
+      promptImages,
+      workerTools,
+      workerTools.length > 0 ? toolEvidenceCache : undefined,
+      workerTools.length > 0 ? onEvent : undefined,
+      signal,
+    )
   }
 
-  return results
+  const onBlocked = async (index: number): Promise<ExecutedWorkerResult> => {
+    const reason = "Worker dependency graph is blocked or cyclic; no pending worker has all upstream todos completed successfully."
+    const worker = workers[index]!
+    const result = blockedWorkerResult(worker, sessionId, reason)
+    await appendSessionRecord(sessionId, { type: "agent_message", phase: "support", worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }) }, home)
+    await appendSessionRecord(sessionId, { type: "worker_end", phase: "support", worker: worker.role, result }, home)
+    await onTodoStatus?.(worker, "support", "blocked", { error: reason })
+    await emitWorkerLifecycleEvent(onWorkerEvent, {
+      type: "worker_end",
+      role: worker.role,
+      phase: "support",
+      status: "blocked",
+      handoffId: result.handoffId,
+      taskId: result.taskId,
+      parentId: result.parentId,
+      progress: result.progress,
+      error: result.error,
+      todoIds: worker.todoIds,
+    })
+    return result
+  }
+
+  return runWorkerPool({
+    count: workers.length,
+    limit,
+    isReady,
+    runWorker,
+    onBlocked,
+    throwIfAborted: () => throwIfRunAborted(signal),
+  })
 }
 
 function projectSupportContextRefs(projectSupport?: ProjectSupport): ContextRef[] {
