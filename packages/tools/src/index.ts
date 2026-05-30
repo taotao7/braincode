@@ -24,9 +24,33 @@ export type CheckRunnerConfiguration = {
   maxOutputBytes: number
 }
 
+export {
+  createDefaultPermissionPolicy,
+  evaluateToolPermissionPolicy,
+  extractPatchTargetPaths,
+  extractToolCommand,
+  extractToolTargetPaths,
+  formatPermissionPolicyDenial,
+  formatPermissionPolicyReason,
+  normalizePermissionPolicy,
+  summarizePermissionPolicyEvaluation,
+} from "./permission-policy"
+export type {
+  CommandPermissionRule,
+  PathPermissionRule,
+  PermissionPolicyAction,
+  PermissionPolicyDecision,
+  PermissionPolicyDocument,
+  PermissionPolicyEvaluation,
+  PermissionPolicyMatch,
+  PermissionPolicyReview,
+} from "./permission-policy"
+import { createDefaultPermissionPolicy, normalizePermissionPolicy, type PermissionPolicyDocument } from "./permission-policy"
+
 export type ToolConfigDocument = {
   tools: ToolConfiguration[]
   checks?: CheckRunnerConfiguration
+  permissions?: PermissionPolicyDocument
 }
 
 const DEFAULT_CHECK_TIMEOUT_MS = 180_000
@@ -138,6 +162,7 @@ export function createDefaultToolConfiguration(): ToolConfigDocument {
       enabled: tool.defaultEnabled,
     })),
     checks: { ...defaultCheckRunnerConfiguration, scripts: [] },
+    permissions: createDefaultPermissionPolicy(),
   }
 }
 
@@ -162,7 +187,11 @@ export function normalizeToolConfiguration(document: ToolConfigDocument): ToolCo
       approvalPolicy: normalizeApprovalPolicy(tool, tool),
     }))
 
-  return { tools: [...knownTools, ...customTools], checks: normalizeCheckRunnerConfiguration(document.checks) }
+  return {
+    tools: [...knownTools, ...customTools],
+    checks: normalizeCheckRunnerConfiguration(document.checks),
+    permissions: normalizePermissionPolicy(document.permissions),
+  }
 }
 
 export function normalizeCheckRunnerConfiguration(value: unknown): CheckRunnerConfiguration {

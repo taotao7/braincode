@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDefaultToolConfiguration, createLocalCodingTools, normalizeToolConfiguration } from "./index"
+import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, normalizeToolConfiguration } from "./index"
 
 function getTool(name: string, projectRoot: string) {
   const tool = createLocalCodingTools({ projectRoot }).find((candidate) => candidate.name === name)
@@ -37,6 +37,8 @@ test("default tool configuration enables the first-party local coding toolset", 
     timeoutMs: 180_000,
     maxOutputBytes: 24_000,
   })
+  expect(config.permissions?.paths).toContainEqual({ pattern: "src/auth/**", edit: "ask", review: "required" })
+  expect(config.permissions?.commands).toContainEqual({ pattern: "git push", policy: "deny" })
 })
 
 test("normalizeToolConfiguration preserves and clamps check runner configuration", () => {
@@ -67,6 +69,27 @@ test("normalizeToolConfiguration preserves and clamps check runner configuration
     maxOutputBytes: 512_000,
   })
   expect(config.tools.find((tool) => tool.name === "custom_tool")?.approvalPolicy).toBe("allow")
+  expect(config.permissions?.paths).toContainEqual({ pattern: "package.json", edit: "ask", review: "required" })
+})
+
+test("permission policy evaluates path and command rules", () => {
+  const authEdit = evaluateToolPermissionPolicy("edit_file", { path: "src/auth/login.ts" }, undefined)
+  expect(authEdit.action).toBe("ask")
+  expect(authEdit.reviewRequired).toBe(true)
+  expect(authEdit.matches[0]).toMatchObject({
+    kind: "path",
+    pattern: "src/auth/**",
+    action: "ask",
+    target: "src/auth/login.ts",
+  })
+
+  const testCommand = evaluateToolPermissionPolicy("shell", { command: "bun test --watch" }, undefined)
+  expect(testCommand.action).toBe("allow")
+  expect(testCommand.reviewRequired).toBe(false)
+
+  const pushCommand = evaluateToolPermissionPolicy("exec_command", { cmd: "git push origin main" }, undefined)
+  expect(pushCommand.action).toBe("deny")
+  expect(pushCommand.reason).toContain("git push")
 })
 
 test("createLocalCodingTools respects disabled tools from tools.json", async () => {
@@ -335,6 +358,29 @@ test("local write tools reject paths outside the project root", async () => {
   try {
     const editFile = getTool("edit_file", projectRoot)
     await expect(editFile.execute("edit-outside", { path: "../escape.txt", content: "nope" } as never)).rejects.toThrow("escapes project root")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("local tools attach permission policy details and deny blocked commands", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-policy-test-"))
+  try {
+    await mkdir(join(projectRoot, "src", "auth"), { recursive: true })
+    const editFile = getTool("edit_file", projectRoot)
+    const editResult = await editFile.execute("edit-auth", {
+      path: "src/auth/login.ts",
+      content: "export const ok = true\n",
+    } as never)
+    expect((editResult.details as { permissionPolicy?: { action?: string; reviewRequired?: boolean } }).permissionPolicy).toMatchObject({
+      action: "ask",
+      reviewRequired: true,
+    })
+
+    const shell = getTool("shell", projectRoot)
+    await expect(shell.execute("shell-denied", { command: "git push origin main" } as never)).rejects.toThrow("Permission policy denied")
+    const runScript = getTool("run_script", projectRoot)
+    await expect(runScript.execute("script-denied", { script: "publish" } as never)).rejects.toThrow("Permission policy denied")
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }

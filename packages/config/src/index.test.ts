@@ -310,6 +310,8 @@ test("default tool configuration enables local coding tools with approval for wr
     timeoutMs: 180_000,
     maxOutputBytes: 24_000,
   })
+  expect(tools.permissions?.paths).toContainEqual({ pattern: "src/auth/**", edit: "ask", review: "required" })
+  expect(tools.permissions?.commands).toContainEqual({ pattern: "git push", policy: "deny" })
 })
 
 test("legacy tool approval fields migrate to approval policies", async () => {
@@ -410,6 +412,7 @@ test("non-secret config documents can be read and written from an explicit home"
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
   expect(tools.tools.find((tool) => tool.name === "shell")?.enabled).toBe(true)
   expect(tools.checks?.enabled).toBe(true)
+  expect(tools.permissions?.paths).toContainEqual({ pattern: "package.json", edit: "ask", review: "required" })
 })
 
 test("readModels migrates legacy OpenAI chat completions API ids", async () => {

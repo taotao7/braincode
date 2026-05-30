@@ -4,6 +4,14 @@ import { isAbsolute, relative, resolve, dirname } from "node:path"
 import { Type } from "typebox"
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
 import type { ToolConfiguration, ToolPermission } from "./index"
+import {
+  createDefaultPermissionPolicy,
+  evaluateToolPermissionPolicy,
+  formatPermissionPolicyDenial,
+  summarizePermissionPolicyEvaluation,
+  type PermissionPolicyDocument,
+  type PermissionPolicyEvaluation,
+} from "./permission-policy"
 
 export type LocalToolMode = "all" | "read-only" | "read-write"
 
@@ -17,6 +25,7 @@ export type LocalCodingToolOptions = {
   commandTimeoutMs?: number
   fallbackSearchConcurrency?: number
   maxSearchableFileBytes?: number
+  permissionPolicy?: PermissionPolicyDocument
 }
 
 type LocalToolSpec = {
@@ -34,6 +43,7 @@ type LocalToolContext = {
   commandTimeoutMs: number
   fallbackSearchConcurrency: number
   maxSearchableFileBytes: number
+  permissionPolicy: PermissionPolicyDocument
   execSessions: ExecSessionManager
 }
 
@@ -92,6 +102,7 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
     commandTimeoutMs: options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
     fallbackSearchConcurrency: clampInteger(options.fallbackSearchConcurrency, 1, 64, DEFAULT_FALLBACK_SEARCH_CONCURRENCY),
     maxSearchableFileBytes: clampInteger(options.maxSearchableFileBytes, 1, 50_000_000, DEFAULT_MAX_SEARCHABLE_FILE_BYTES),
+    permissionPolicy: options.permissionPolicy ?? createDefaultPermissionPolicy(),
     execSessions: new ExecSessionManager(),
   }
   const enabled = new Map((options.tools ?? []).map((tool) => [tool.name, tool.enabled]))
@@ -362,6 +373,7 @@ function createEditFileTool(context: LocalToolContext): AgentTool {
     execute: async (_toolCallId, params) => {
       const input = params as { path: string; content?: string; oldString?: string; newString?: string; replaceAll?: boolean }
       const target = await resolveProjectPath(context.projectRoot, input.path, { allowMissing: true })
+      const policy = enforceLocalPermissionPolicy(context, "edit_file", { path: target.relativePath })
       let nextContent: string
       let operation: "write" | "replace"
       let replacements = 0
@@ -385,13 +397,13 @@ function createEditFileTool(context: LocalToolContext): AgentTool {
       }
       await mkdir(dirname(target.absolutePath), { recursive: true })
       await writeFile(target.absolutePath, nextContent, "utf8")
-      return textResult(`${operation} ${target.relativePath} (${nextContent.length} chars)`, {
+      return textResult(`${operation} ${target.relativePath} (${nextContent.length} chars)`, withPermissionPolicyDetails({
         tool: "edit_file",
         path: target.relativePath,
         operation,
         replacements,
         chars: nextContent.length,
-      })
+      }, policy))
     },
     executionMode: "sequential",
   }
@@ -413,6 +425,7 @@ function createApplyPatchTool(context: LocalToolContext): AgentTool {
     execute: async (_toolCallId, params) => {
       const input = params as { patch: string }
       validatePatchPaths(input.patch)
+      const policy = enforceLocalPermissionPolicy(context, "apply_patch", { patch: input.patch })
       const result = await runProcess("git", ["apply", "--whitespace=nowarn", "-"], {
         cwd: context.projectRoot,
         input: input.patch,
@@ -420,7 +433,7 @@ function createApplyPatchTool(context: LocalToolContext): AgentTool {
         timeoutMs: context.commandTimeoutMs,
       })
       if (result.exitCode !== 0) throw new Error(`git apply failed: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`)
-      return textResult("Patch applied.", { tool: "apply_patch", exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr })
+      return textResult("Patch applied.", withPermissionPolicyDetails({ tool: "apply_patch", exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }, policy))
     },
     executionMode: "sequential",
   }
@@ -458,6 +471,7 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
     execute: async (_toolCallId, params, signal) => {
       const input = params as { cmd: string; workdir?: string; shell?: string; yieldTimeMs?: number; timeoutMs?: number; maxOutputBytes?: number }
       const cwd = await resolveCommandCwd(context.projectRoot, input.workdir)
+      const policy = enforceLocalPermissionPolicy(context, "exec_command", { cmd: input.cmd })
       const result = await context.execSessions.exec({
         command: input.cmd,
         cwd,
@@ -467,7 +481,7 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
         timeoutMs: clampInteger(input.timeoutMs, 1_000, 900_000, context.commandTimeoutMs),
         maxOutputBytes: clampInteger(input.maxOutputBytes, 1_000, 512_000, context.maxOutputBytes),
       })
-      return textResult(formatExecSessionResult(result), { tool: "exec_command", ...result })
+      return textResult(formatExecSessionResult(result), withPermissionPolicyDetails({ tool: "exec_command", ...result }, policy))
     },
     executionMode: "sequential",
   }
@@ -533,6 +547,7 @@ function createShellTool(context: LocalToolContext): AgentTool {
     },
     execute: async (_toolCallId, params, signal) => {
       const input = params as { command: string; timeoutMs?: number }
+      const policy = enforceLocalPermissionPolicy(context, "shell", { command: input.command })
       const result = await runProcess(input.command, [], {
         cwd: context.projectRoot,
         shell: true,
@@ -541,7 +556,7 @@ function createShellTool(context: LocalToolContext): AgentTool {
         timeoutMs: clampInteger(input.timeoutMs, 1000, 600_000, context.commandTimeoutMs),
         allowExitCodes: ALL_EXIT_CODES,
       })
-      return textResult(formatProcessResult(result), { tool: "shell", ...result })
+      return textResult(formatProcessResult(result), withPermissionPolicyDetails({ tool: "shell", ...result }, policy))
     },
     executionMode: "sequential",
   }
@@ -633,14 +648,16 @@ function createRunScriptTool(context: LocalToolContext): AgentTool {
       const input = params as { script: string; args?: string[]; timeoutMs?: number }
       const packageManager = await detectPackageManager(context.projectRoot)
       const scriptArgs = input.args ?? []
-      const result = await runProcess(packageManager.command, packageManager.runArgs(input.script, scriptArgs), {
+      const args = packageManager.runArgs(input.script, scriptArgs)
+      const policy = enforceLocalPermissionPolicy(context, "exec_command", { cmd: `${packageManager.command} ${args.join(" ")}` })
+      const result = await runProcess(packageManager.command, args, {
         cwd: context.projectRoot,
         signal,
         maxOutputBytes: context.maxOutputBytes,
         timeoutMs: clampInteger(input.timeoutMs, 1000, 600_000, context.commandTimeoutMs),
         allowExitCodes: ALL_EXIT_CODES,
       })
-      return textResult(formatProcessResult(result), { ...result, tool: "run_script", packageManager: packageManager.name, script: input.script, scriptArgs })
+      return textResult(formatProcessResult(result), withPermissionPolicyDetails({ ...result, tool: "run_script", packageManager: packageManager.name, script: input.script, scriptArgs }, policy))
     },
     executionMode: "sequential",
   }
@@ -941,6 +958,20 @@ type FallbackContentSearchResult = {
     maxSearchableFileBytes: number
     concurrency: number
     stoppedAfterMaxResults: boolean
+  }
+}
+
+function enforceLocalPermissionPolicy(context: LocalToolContext, toolName: string, args: unknown): PermissionPolicyEvaluation {
+  const evaluation = evaluateToolPermissionPolicy(toolName, args, context.permissionPolicy)
+  if (evaluation.action === "deny") throw new Error(formatPermissionPolicyDenial(evaluation))
+  return evaluation
+}
+
+function withPermissionPolicyDetails<TDetails extends Record<string, unknown>>(details: TDetails, evaluation: PermissionPolicyEvaluation): TDetails & { permissionPolicy?: ReturnType<typeof summarizePermissionPolicyEvaluation> } {
+  if (evaluation.matches.length === 0) return details
+  return {
+    ...details,
+    permissionPolicy: summarizePermissionPolicyEvaluation(evaluation),
   }
 }
 

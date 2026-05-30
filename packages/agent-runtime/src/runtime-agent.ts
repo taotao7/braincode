@@ -4,6 +4,13 @@ import { appendSessionRecord, appendTokenUsageRecord, normalizeTokenUsage, type 
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
 import { debugLog, isDebugEnabled } from "@braincode/shared"
+import {
+  evaluateToolPermissionPolicy,
+  formatPermissionPolicyDenial,
+  summarizePermissionPolicyEvaluation,
+  type PermissionPolicyDocument,
+  type PermissionPolicyEvaluation,
+} from "@braincode/tools"
 import { ContextHandoffRequiredError, enforceHandoffContextBudget, isHandoffRequiredError } from "./context-budget"
 import { wrapToolsWithEvidenceCache, type ToolEvidenceCache } from "./evidence-cache"
 import type { RuntimeModelSelection } from "./model-selection"
@@ -12,6 +19,7 @@ export type ToolApprovalRequest = {
   toolCallId: string
   toolName: string
   args: unknown
+  permissionPolicy?: ReturnType<typeof summarizePermissionPolicyEvaluation>
 }
 
 export type ToolApprovalDecision = {
@@ -27,6 +35,8 @@ export type BraincodeAgentRuntimeOptions = {
   sessionId?: string
   tools?: AgentTool[]
   toolEvidenceCache?: ToolEvidenceCache
+  permissionPolicy?: PermissionPolicyDocument
+  onPermissionPolicyEvaluation?: (evaluation: PermissionPolicyEvaluation) => void | Promise<void>
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
@@ -114,13 +124,21 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     },
     toolExecution: options.mode === "radical" ? "parallel" : "sequential",
     beforeToolCall: async (context, signal) => {
+      const policyEvaluation = evaluateToolPermissionPolicy(context.toolCall.name, context.args, options.permissionPolicy)
+      if (policyEvaluation.matches.length > 0) {
+        await options.onPermissionPolicyEvaluation?.(policyEvaluation)
+      }
+      if (policyEvaluation.action === "deny") {
+        return { block: true, reason: formatPermissionPolicyDenial(policyEvaluation) }
+      }
       if (options.mode === "radical") return undefined
-      const requiresApproval = toolCallRequiresApproval(context.toolCall.name, context.args)
+      const requiresApproval = toolCallRequiresApproval(context.toolCall.name, context.args, policyEvaluation)
       if (options.onToolApproval && requiresApproval) {
         const decision = await options.onToolApproval({
           toolCallId: context.toolCall.id,
           toolName: context.toolCall.name,
           args: context.args,
+          ...(policyEvaluation.matches.length > 0 ? { permissionPolicy: summarizePermissionPolicyEvaluation(policyEvaluation) } : {}),
         }, signal)
         if (decision?.approved === false) {
           return { block: true, reason: decision.reason ?? `User blocked tool call: ${context.toolCall.name}` }
@@ -391,7 +409,9 @@ function summarizeToolResultForDebug(result: unknown): Record<string, unknown> {
   }
 }
 
-function toolCallRequiresApproval(toolName: string, args: unknown): boolean {
+function toolCallRequiresApproval(toolName: string, args: unknown, policyEvaluation?: PermissionPolicyEvaluation): boolean {
+  if (policyEvaluation?.action === "ask") return true
+  if (policyEvaluation?.action === "allow") return false
   const name = toolName.toLowerCase()
   if (name === "web_search" || name.startsWith("mcp__")) return false
   if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)) return true

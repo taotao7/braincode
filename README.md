@@ -41,7 +41,7 @@ braincode run --dry-run --heuristic "add login validation"
 braincode benchmark
 ```
 
-`braincode run` uses the configured Brain Model. Non-interactive runs are read-only by default because there is no approval UI; use `--allow-edits` to auto-approve first-party local reads and file edits while blocking command execution, MCP tools, and unknown tools, or `--yes` to auto-approve tool calls. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
+`braincode run` uses the configured Brain Model. Non-interactive runs are read-only by default because there is no approval UI; use `--allow-edits` to auto-approve first-party local reads and file edits while blocking command execution, MCP tools, and unknown tools, or `--yes` to auto-approve tool calls that are not denied by policy. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
 
 `braincode benchmark` runs a deterministic demo suite of representative coding prompts: README edits, failing-test fixes, auth-risk changes, package/script changes, and security-review-only runs. By default it asks routeBrain when credentials are available and labels heuristic fallback checks; use `--heuristic` for a no-provider diagnostic run.
 
@@ -91,7 +91,8 @@ See [RELEASES.md](./RELEASES.md).
 - First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, long-running exec sessions with stdin polling, git diffs, changed-file inspection, and package scripts.
 - Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.
 - Tool-call evidence cache for repeated deterministic read-only local tool calls, with duplicate reminders plus cached-entry and duplicate-counter invalidation after write/execute tools.
-- Tool approval UI for risky write/execute tool calls, with basic tool-level allow/confirm policy from `tools.json`.
+- Tool approval UI for risky write/execute tool calls, with tool-level allow/confirm policy plus path-aware and command-aware permission rules from `tools.json`.
+- Permission Policy v2: sensitive paths such as `src/auth/**`, `db/**`, `package.json`, and `.github/workflows/**` ask and force review, while commands such as `git push`, package publish commands, and `rm -rf` are denied before execution.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
 - Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.
 - Check runner policy in `tools.json`: checks can be disabled, pinned to explicit package scripts, and bounded by timeout/output limits.

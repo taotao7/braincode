@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
 import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings } from "@braincode/config"
-import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan } from "./index"
+import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan, type ToolApprovalRequest } from "./index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
@@ -526,6 +526,75 @@ test("createBraincodeAgentRuntime auto-approves exposed tools in radical mode", 
   } as never)
 
   expect(decision).toBeUndefined()
+})
+
+test("createBraincodeAgentRuntime enforces permission policy before approval mode", async () => {
+  const runtime = createBraincodeAgentRuntime({
+    mode: "radical",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+  })
+
+  const decision = await runtime.agent.beforeToolCall?.({
+    toolCall: { id: "tool-call-1", name: "shell" },
+    args: { command: "git push origin main" },
+  } as never)
+
+  expect(decision?.block).toBe(true)
+  expect(decision?.reason).toContain("Permission policy denied")
+})
+
+test("createBraincodeAgentRuntime includes permission policy context in approval requests", async () => {
+  let approvalRequest: ToolApprovalRequest | undefined
+  let reviewRequired = false
+  const runtime = createBraincodeAgentRuntime({
+    mode: "auto",
+    systemPrompt: "test",
+    model: {
+      id: "custom/fast",
+      provider: "custom",
+      modelId: "fast",
+      name: "Fast",
+      api: "openai-responses",
+      baseUrl: "http://localhost:9999/v1",
+      contextWindow: 128000,
+      supportsTools: true,
+    },
+    policy: { modelId: "custom/fast", thinkingLevel: "low" },
+    onPermissionPolicyEvaluation: (evaluation) => {
+      reviewRequired = evaluation.reviewRequired
+    },
+    onToolApproval: (request) => {
+      approvalRequest = request
+      return { approved: true }
+    },
+  })
+
+  const decision = await runtime.agent.beforeToolCall?.({
+    toolCall: { id: "tool-call-1", name: "edit_file" },
+    args: { path: "package.json", content: "{}" },
+  } as never)
+
+  expect(decision).toBeUndefined()
+  expect(reviewRequired).toBe(true)
+  expect(approvalRequest?.permissionPolicy).toMatchObject({
+    action: "ask",
+    reviewRequired: true,
+  })
+  expect(approvalRequest?.permissionPolicy?.matches[0]).toMatchObject({
+    kind: "path",
+    pattern: "package.json",
+  })
 })
 
 test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", async () => {

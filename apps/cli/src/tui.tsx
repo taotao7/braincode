@@ -377,6 +377,7 @@ type DecisionPanelState = {
   toolName: string;
   toolCategory: ToolCategory;
   argsSummary: string;
+  policySummary?: string;
   selected: number;
   options: DecisionOption[];
 };
@@ -2727,8 +2728,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       signal?: AbortSignal,
     ): Promise<ToolApprovalDecision> => {
       const toolCategory = classifyToolCall(request.toolName, request.args);
-      if (!requiresToolDecision(toolCategory, request.toolName, request.args))
+      const policyRequiresDecision = request.permissionPolicy?.action === "ask";
+      if (
+        !policyRequiresDecision &&
+        !requiresToolDecision(toolCategory, request.toolName, request.args)
+      )
         return { approved: true };
+      const policySummary = formatPermissionPolicySummary(
+        request.permissionPolicy,
+      );
       if (approvalMode === "radical") {
         return { approved: true, reason: "auto-approved in radical mode" };
       }
@@ -2741,6 +2749,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       try {
         const configuredTools = await readTools();
         if (
+          !policyRequiresDecision &&
           toolApprovalAllowedByConfig(
             request.toolName,
             toolCategory,
@@ -2805,6 +2814,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           toolName: request.toolName,
           toolCategory,
           argsSummary,
+          policySummary,
           selected: 0,
           options: [
             {
@@ -4061,6 +4071,11 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             </Text>
             {decisionPanel.argsSummary ? (
               <Text color={colors.gray}>args: {decisionPanel.argsSummary}</Text>
+            ) : null}
+            {decisionPanel.policySummary ? (
+              <Text color={colors.gray}>
+                policy: {decisionPanel.policySummary}
+              </Text>
             ) : null}
             {decisionPanel.options.map((option, index) => (
               <Text
@@ -5340,7 +5355,10 @@ function estimateFixedFrameRows({
 
   if (decisionPanel) {
     rows += borderedPanelRows(
-      3 + decisionPanel.options.length + (decisionPanel.argsSummary ? 1 : 0),
+      3 +
+        decisionPanel.options.length +
+        (decisionPanel.argsSummary ? 1 : 0) +
+        (decisionPanel.policySummary ? 1 : 0),
     );
   }
   if (runtimeErrorPanel) {
@@ -7302,6 +7320,20 @@ function requiresToolDecision(
   return /\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from|truncate\s+table)\b/.test(
     text,
   );
+}
+
+function formatPermissionPolicySummary(
+  policy: ToolApprovalRequest["permissionPolicy"],
+): string | undefined {
+  if (!policy || policy.matches.length === 0) return undefined;
+  const matches = policy.matches.slice(0, 3).map((match) => {
+    const review = match.reviewRequired ? ", review required" : "";
+    return `${match.kind} ${match.target} -> ${match.action} (${match.pattern}${review})`;
+  });
+  if (policy.matches.length > matches.length) {
+    matches.push(`${policy.matches.length - matches.length} more`);
+  }
+  return matches.join("; ");
 }
 
 function toolApprovalAllowedByConfig(

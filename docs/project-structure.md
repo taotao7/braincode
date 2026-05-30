@@ -115,7 +115,7 @@ Expected commands:
 - `braincode run --dry-run --heuristic <task>` — inspect deterministic fallback routing without making provider calls.
 - `braincode run <task>` — execute one non-interactive prompt through the configured provider in read-only mode by default.
 - `braincode run --allow-edits <task>` — non-interactive execution with first-party local read/write tools and auto-approved file edits, while command execution, MCP tools, and unknown tools remain blocked.
-- `braincode run --yes <task>` — non-interactive execution with all local tools and auto-approved tool calls.
+- `braincode run --yes <task>` — non-interactive execution with all local tools and auto-approved tool calls except permission-policy deny matches.
 - MCP startup is bounded: CLI runs use short-budget eager loading, while the TUI loads MCP servers in the background and keeps local tools available immediately.
 - `braincode benchmark [--heuristic] [--task <id>] [--json]` — run the representative coding-task plan benchmark suite.
 
@@ -234,6 +234,7 @@ Responsibilities:
 - Connect tools to the underlying agent runtime, including eager/background/lazy MCP loading and dynamic primary-agent tool refresh when MCP becomes ready.
 - Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and reset cached evidence plus duplicate counters after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
+- Apply path-aware and command-aware permission policy before local writes, patches, shell/exec commands, and package scripts; deny matches are not bypassable, ask matches can be approved by the active permission mode, and `review: required` matches add a review worker.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
 - Record provider token usage per routeBrain, support, primary, and review model call into session JSONL.
@@ -375,6 +376,7 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
 - Done: bounded run-level read-only evidence cache with duplicate tool-call reminders, LRU/TTL/byte-limit eviction, cache-size details, and write/execute invalidation.
+- Done: Permission Policy v2 in `tools.json`, with path-aware edit/patch checks, command-aware shell/exec/script checks, non-bypassable deny rules, policy details on tool results, and forced review for sensitive path matches.
 - Done: Brain preset inheritance through `extends`.
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

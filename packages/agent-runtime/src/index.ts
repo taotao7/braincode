@@ -13,12 +13,13 @@ export type { ToolEvidenceCache, ToolEvidenceCacheOptions } from "./evidence-cac
 import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey, selectRuntimeModelWithApiKey, toPiModelSummary } from "./model-selection"
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
-import { getAgentRoleSystemPrompt, selectBrain, type AgentTodoItem, type AgentTodoStatus, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { getAgentRoleSystemPrompt, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
-import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode } from "@braincode/tools"
+import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
+export type { PermissionPolicyDocument, PermissionPolicyEvaluation, PermissionPolicyMatch } from "@braincode/tools"
 import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
 export { runConfiguredHooks } from "./hooks"
 export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
@@ -42,7 +43,7 @@ export type { BuildFinalReportInput, FinalReport, FinalReportStatus } from "./fi
 import { createBraincodeAgentRuntime, createRunAbortedError, linkRuntimeAbort, recordAgentTokenUsage, recordAutomaticHandoffIfNeeded, requireAssistantText, throwIfRunAborted, type ToolApprovalDecision, type ToolApprovalRequest } from "./runtime-agent"
 export { createBraincodeAgentRuntime, extractAssistantText, requireAssistantText } from "./runtime-agent"
 export type { BraincodeAgentRuntime, BraincodeAgentRuntimeOptions, TokenUsageScope, ToolApprovalDecision, ToolApprovalRequest } from "./runtime-agent"
-import { buildRuntimePlan, formatRoleModelCapabilityDirective, normalizeRouterDecision, normalizeRouterModelId, type PlanRuntimeOptions, type RuntimePlan } from "./router"
+import { buildRuntimePlan, createRuntimeWorkerPlan, formatRoleModelCapabilityDirective, normalizeRouterDecision, normalizeRouterModelId, type PlanRuntimeOptions, type RuntimePlan, type RuntimeWorkerPlan } from "./router"
 export { buildRuntimePlan, createRuntimeWorkerPlan, formatInputModalityRoutingDirective, formatRoleModelCapabilityDirective, normalizeRouterDecision, normalizeRouterModelId, routePromptWithBrain } from "./router"
 export type { PlanRuntimeOptions, RouterPlanDecision, RouterWorkerPlan, RuntimePlan, RuntimeWorkerPlan } from "./router"
 import { buildPrimaryPrompt, formatProjectSupportPromptSection, runSupportWorkers, runWorkerFromPlan, summarizeProjectSupport, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
@@ -216,6 +217,59 @@ async function updateTodoStatus(
   }
 }
 
+async function ensurePermissionPolicyReviewWorker(
+  plan: RuntimePlan,
+  models: BraincodeModel[],
+  home: string | undefined,
+  sessionId: string,
+  onTodoEvent: AgentRunRequest["onTodoEvent"],
+): Promise<RuntimeWorkerPlan> {
+  const existing = plan.workers.find((worker) => worker.role === "review")
+  if (existing) return existing
+
+  const reviewWorkerInput: AgentWorkerPlan = {
+    role: "review",
+    goal: "Review permission-policy sensitive changes for correctness, regressions, and safety risks.",
+    reason: "Permission policy requires independent review for this tool call.",
+  }
+  const brainDocument = await readBrains(home)
+  const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
+  const brain = selectBrain(brains as BrainPreset[], plan.brain.id) as BrainModel
+  const normalized = normalizeAgentTodos([...plan.agentPlan.workers, reviewWorkerInput], plan.agentPlan.todos)
+  const normalizedReviewWorker = normalized.workers.find((worker) => worker.role === "review") ?? reviewWorkerInput
+  const reviewWorker = createRuntimeWorkerPlan(normalizedReviewWorker, brain, models)
+  plan.agentPlan = {
+    ...plan.agentPlan,
+    workers: normalized.workers,
+    todos: normalized.todos,
+    requiresReview: true,
+  }
+  plan.workers.push(reviewWorker)
+  plan.todos = normalized.todos
+  plan.context.childContextIds.push(reviewWorker.contextId)
+
+  await appendSessionRecord(sessionId, {
+    type: "todo_plan",
+    todos: plan.todos,
+    dependencies: plan.dependencies,
+    reason: "permission policy requires review",
+  }, home)
+
+  if (onTodoEvent) {
+    for (const todoId of reviewWorker.todoIds ?? []) {
+      const todo = plan.todos.find((item) => item.id === todoId)
+      if (!todo) continue
+      try {
+        await onTodoEvent({ type: "todo_update", todo, status: todo.status, phase: "planning", role: "review" })
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  return reviewWorker
+}
+
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
   throwIfRunAborted(request.signal)
   const sessionId = request.sessionId ?? crypto.randomUUID()
@@ -272,7 +326,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const primaryWorker = plan.workers.find((worker) => worker.role === plan.role)
-  const reviewWorker = plan.workers.find((worker) => worker.role === "review")
+  let reviewWorker = plan.workers.find((worker) => worker.role === "review")
   const onWorkerTodoStatus: WorkerTodoStatusHandler = (worker, phase, status, detail) =>
     updateTodoStatus(plan, worker.todoIds ?? [], status, phase, sessionId, home, request.onTodoEvent, { ...detail, role: worker.role })
   const emitWorkerEvent = async (event: WorkerLifecycleEvent) => {
@@ -293,10 +347,17 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const toolConfig = await readTools(home)
   const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
-  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools })
-  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools })
+  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
+  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
   const toolEvidenceCache = createToolEvidenceCache()
   const runtimeTools = [...localTools]
+  let permissionPolicyReviewRequired = false
+  const onPermissionPolicyEvaluation = (evaluation: PermissionPolicyEvaluation) => {
+    if (evaluation.reviewRequired) {
+      permissionPolicyReviewRequired = true
+      plan.agentPlan.requiresReview = true
+    }
+  }
   const mcpLoadingStrategy = request.mcpLoadingStrategy ?? "eager"
   const mcpLoader = createRuntimeMcpLoader({
     hub: mcpHub,
@@ -465,6 +526,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         getApiKey: (provider) => (provider === plan.piModel.provider ? apiKey : undefined),
         onEvent: request.onEvent,
         onToolApproval: request.onToolApproval,
+        permissionPolicy: toolConfig.permissions,
+        onPermissionPolicyEvaluation,
       })
       mcpLoader.activeRuntimes.add(runtime)
       mcpLoader.refreshRuntimeTools(runtime)
@@ -535,6 +598,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
               untrackedPreviews: await collectUntrackedFilePreviews(cwd, patchAfterPrimary),
             }
           : undefined
+        if (permissionPolicyReviewRequired && plan.role !== "review") {
+          reviewWorker = await ensurePermissionPolicyReviewWorker(plan, models, home, sessionId, request.onTodoEvent)
+        }
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
             ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)

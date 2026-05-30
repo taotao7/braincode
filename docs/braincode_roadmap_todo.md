@@ -30,7 +30,7 @@ Braincode 当前已经具备以下基础能力：
 
 - [ ] 让 final report 更稳定、更结构化
 - [ ] 让本地工具在大项目里更快更安全
-- [ ] 让权限策略从 tool-level 升级到 path/command-level
+- [x] 让权限策略从 tool-level 升级到 path/command-level
 - [ ] 让 review artifacts 覆盖更多真实 patch 情况
 - [ ] 让 benchmark 从“规划评估”升级到“真实执行评估”
 
@@ -86,7 +86,7 @@ Session:
 - [ ] 不再优先堆新角色、新面板、新概念
 - [ ] 优先打磨完整 patch engine 链路
 - [x] runtime 负责事实报告，模型只负责自然语言总结
-- [ ] 本地工具默认安全，危险动作必须清晰可控
+- [x] 本地工具默认安全，危险动作必须清晰可控
 - [ ] benchmark 必须能证明 routing / review / checks 的实际价值
 - [x] TUI 和 CLI 共用同一套 final report 数据结构
 - [x] 支持大仓库时不能靠“把文件全读进内存”
@@ -457,7 +457,7 @@ global MCP startup budget: 5s / 10s
 
 ### TODO
 
-- [ ] 设计 `permissions.json` 或扩展 `tools.json`
+- [x] 设计 `permissions.json` 或扩展 `tools.json`
 
 ```json
 {
@@ -479,18 +479,18 @@ global MCP startup budget: 5s / 10s
 }
 ```
 
-- [ ] edit/apply_patch 前判断 path policy
-- [ ] shell/exec/run_script 前判断 command policy
-- [ ] policy 命中结果写入 tool details
-- [ ] 命中 `review: required` 时强制 requiresReview
-- [ ] TUI approval panel 展示 path/command policy 命中原因
+- [x] edit/apply_patch 前判断 path policy
+- [x] shell/exec/run_script 前判断 command policy
+- [x] policy 命中结果写入 tool details
+- [x] 命中 `review: required` 时强制 requiresReview
+- [x] TUI approval panel 展示 path/command policy 命中原因
 
 ### 验收标准
 
-- [ ] `src/auth/**` 改动强制 review
-- [ ] `git push` / `npm publish` 默认 deny
-- [ ] 项目外写入仍然 deny
-- [ ] `--yes` 是否绕过 policy 需要明确：建议 deny 不可绕过，ask 可绕过
+- [x] `src/auth/**` 改动强制 review
+- [x] `git push` / `npm publish` 默认 deny
+- [x] 项目外写入仍然 deny
+- [x] `--yes` 是否绕过 policy 需要明确：deny 不可绕过，ask 可由 `--yes` / radical 自动批准
 
 ---
 
@@ -764,7 +764,7 @@ braincode run --yes "fix failing test and run checks"
 ## 第 3 周：review 和安全
 
 - [x] P1-3 untracked file preview
-- [ ] P2-1 permission policy v2
+- [x] P2-1 permission policy v2
 - [ ] P2-3 review gate v2
 
 ## 第 4 周：评估和传播
@@ -846,9 +846,9 @@ Goal:
 Support path-aware and command-aware permission rules.
 
 Acceptance:
-- auth/db/package/workflow edits force review
-- git push/npm publish/rm -rf deny by default
-- TUI approval shows matched rule
+- [x] auth/db/package/workflow edits force review
+- [x] git push/npm publish/rm -rf deny by default
+- [x] TUI approval shows matched rule
 ```
 
 ## Issue 006：Execution benchmark fixtures
@@ -902,9 +902,9 @@ Acceptance:
 
 ## v0.5：Permission & Smart Checks
 
-- [ ] path-aware policy
-- [ ] command-aware policy
-- [ ] risky file force review
+- [x] path-aware policy
+- [x] command-aware policy
+- [x] risky file force review
 - [ ] smart check selection
 
 ## v0.6：Execution Benchmark & Demo
