@@ -1,5 +1,80 @@
 import { expect, test } from "bun:test"
-import { applyReviewGatesToReviewDecision, buildReviewPrompt, mergeReviewResult, normalizeReviewDecisionText } from "./review"
+import { applyReviewGatesToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, mergeReviewResult, normalizeReviewDecisionText, type ReviewDecision } from "./review"
+import type { PatchCheckSummary } from "./checks"
+
+const failedChecks: PatchCheckSummary = {
+  status: "failed",
+  results: [{
+    name: "test",
+    command: "bun",
+    args: ["run", "test"],
+    status: "failed",
+    exitCode: 1,
+    signal: null,
+    durationMs: 10,
+    stdout: "",
+    stderr: "AssertionError: expected 2 to equal 3",
+    timedOut: false,
+  }],
+}
+
+const passedChecks: PatchCheckSummary = { status: "passed", results: [] }
+
+const changesRequested: ReviewDecision = {
+  decision: "changes_requested",
+  rationale: "needs fixes",
+  findings: [{ severity: "high", issue: "null deref", file: "src/a.ts", line: 4, suggestion: "guard the value" }],
+  requiredChanges: ["Add a null guard before access"],
+  blockingIssues: [],
+  residualRisks: [],
+}
+
+const blocked: ReviewDecision = {
+  decision: "blocked",
+  rationale: "cannot verify",
+  findings: [],
+  requiredChanges: [],
+  blockingIssues: ["missing artifacts"],
+  residualRisks: [],
+}
+
+test("fixLoopTrigger fires on failed checks", () => {
+  expect(fixLoopTrigger(failedChecks, undefined)).toBe("checks_failed")
+})
+
+test("fixLoopTrigger fires on changes_requested review", () => {
+  expect(fixLoopTrigger(passedChecks, changesRequested)).toBe("changes_requested")
+})
+
+test("fixLoopTrigger does not fire on blocked review", () => {
+  expect(fixLoopTrigger(passedChecks, blocked)).toBeUndefined()
+})
+
+test("fixLoopTrigger does not fire on passed checks and approved review", () => {
+  expect(fixLoopTrigger(passedChecks, { ...changesRequested, decision: "approved" })).toBeUndefined()
+  expect(fixLoopTrigger(undefined, undefined)).toBeUndefined()
+})
+
+test("fixLoopTrigger prioritizes failing checks over review", () => {
+  expect(fixLoopTrigger(failedChecks, changesRequested)).toBe("checks_failed")
+})
+
+test("buildPrimaryFixPrompt includes failing check evidence and required changes", () => {
+  const prompt = buildPrimaryFixPrompt({ checks: failedChecks, reviewDecision: changesRequested }, 1)
+  expect(prompt).toContain("fix iteration 1")
+  expect(prompt).toContain("test:")
+  expect(prompt).toContain("AssertionError")
+  expect(prompt).toContain("Add a null guard before access")
+  expect(prompt).toContain("null deref")
+  expect(prompt).toContain("minimal edits")
+})
+
+test("buildPrimaryFixPrompt omits review section when review approved", () => {
+  const prompt = buildPrimaryFixPrompt({ checks: failedChecks }, 2)
+  expect(prompt).toContain("fix iteration 2")
+  expect(prompt).toContain("Failing checks")
+  expect(prompt).not.toContain("Required changes from review")
+})
 
 test("buildReviewPrompt includes patch checks diff and untracked previews", () => {
   const prompt = buildReviewPrompt(

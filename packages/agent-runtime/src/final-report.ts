@@ -38,6 +38,7 @@ export type FinalReport = {
   review?: ReviewDecision
   metrics?: RuntimeMetricsSummary
   modelSummary: string
+  fixIterations?: number
   warnings: string[]
 }
 
@@ -83,6 +84,7 @@ export type BuildFinalReportInput = {
   review?: ReviewDecision
   metrics?: RuntimeMetricsSummary
   runtimeToolCount?: number
+  fixIterations?: number
 }
 
 export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
@@ -127,6 +129,7 @@ export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
     ...(input.review ? { review: input.review } : {}),
     ...(input.metrics ? { metrics: input.metrics } : {}),
     modelSummary: input.modelSummary,
+    ...(input.fixIterations ? { fixIterations: input.fixIterations } : {}),
     warnings,
   }
 }
@@ -139,7 +142,7 @@ export function resolveFinalReportStatus(input: Pick<BuildFinalReportInput, "pat
   return (input.runtimeToolCount ?? 0) > 0 ? "read_only" : "answered"
 }
 
-function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review">): string[] {
+function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review" | "fixIterations">): string[] {
   const warnings: string[] = []
   if (!hasPatchActivity(input.patch)) {
     warnings.push("No patch activity detected.")
@@ -152,6 +155,13 @@ function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "check
   }
   if (input.review?.decision === "blocked") {
     warnings.push("Review blocked final approval.")
+  }
+  if ((input.fixIterations ?? 0) > 0) {
+    if (input.checks?.status === "failed") {
+      warnings.push(`Fix budget exhausted after ${input.fixIterations} iteration(s); checks still failing.`)
+    } else if (input.review?.decision === "changes_requested") {
+      warnings.push(`Fix budget exhausted after ${input.fixIterations} iteration(s); review still requests changes.`)
+    }
   }
   return uniqueStrings(warnings)
 }

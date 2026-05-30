@@ -179,10 +179,12 @@ export async function recordAgentTokenUsage(
   messages: unknown[],
   scope: TokenUsageScope | undefined,
   model: BraincodeModel,
+  startIndex = 0,
 ): Promise<void> {
   if (!scope) return
   let usageIndex = 0
   for (const [messageIndex, message] of messages.entries()) {
+    if (messageIndex < startIndex) continue
     if (!message || typeof message !== "object") continue
     const usage = normalizeTokenUsage((message as { usage?: unknown }).usage)
     if (!usage) continue

@@ -533,6 +533,7 @@ export type ModePolicy = {
     maxTodos: number
     minParallelAgents: number
     minWorkerAgents: number
+    maxFixIterations: number
     strategy: "focused" | "expansive"
   }
 }
@@ -546,6 +547,7 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
       maxTodos: 6,
       minParallelAgents: 1,
       minWorkerAgents: 1,
+      maxFixIterations: 1,
       strategy: "focused",
     },
   },
@@ -557,6 +559,7 @@ export const modePolicies: Record<BraincodeMode, ModePolicy> = {
       maxTodos: 8,
       minParallelAgents: 4,
       minWorkerAgents: 4,
+      maxFixIterations: 2,
       strategy: "expansive",
     },
   },

@@ -146,10 +146,17 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
      runtime.agent.prompt(...)
      primarySummary = last assistant text
-7. If plan.requiresReview && primary !== "review":
+7. Bounded fix loop (collect patch -> checks -> review -> gate), repeated while a
+   trigger fires, up to the mode budget (auto: 1, radical: 2):
+     - trigger = checks failed OR review decision == changes_requested
+     - on trigger: re-prompt the SAME primary agent with buildPrimaryFixPrompt(...)
+       (it keeps its working context), then re-collect patch, re-run checks, re-review
+     - `blocked` is NOT a fix trigger; it is reported as-is for a human
+     - skipped for the primary == "review" role and for /team forced-roles runs
+8. If plan.requiresReview && primary !== "review":
      runWorkerFromPlan(reviewWorker, buildReviewPrompt(...), phase="review")
      mergeReviewResult appends review decision, findings, residual risks, and risks to primarySummary.
-8. Run Stop hook. Append run_end. Return { sessionId, summary, plan, workerResults, mcp }.
+9. Run Stop hook. Append run_end. Return { sessionId, summary, plan, workerResults, mcp, fixIterations }.
 ```
 
 Notes worth internalizing before changing this code:
@@ -157,7 +164,9 @@ Notes worth internalizing before changing this code:
 - **Support workers and the primary are not the same kind of call.** Support workers return a normalized `WorkerResult`. The primary returns free-form assistant text that is shown to the user. Confusing the two breaks the contract for both.
 - **Support worker tools are evidence-only.** Read-only support tools help selected workers inspect code and diffs, but tool transcripts do not cross into the primary context except through the worker's structured summary/artifacts/risks.
 - **Review is post-primary, not parallel.** Review needs the primary's output to do its job.
-- **The forced-roles path (`/team`) skips review** by setting `requiresReview = false`. That is intentional — team mode is for independent multi-agent answers, not a workflow.
+- **The fix loop re-prompts the same primary `Agent`, not a fresh one.** The corrective turn must see what it already edited and why, so the loop reuses `runtime.agent`. Token usage is recorded per iteration on the *new* messages only (via `recordAgentTokenUsage(..., startIndex)`), because `readUsageStats` sums records without `turnId` dedup — re-recording the full message list would double-count earlier turns.
+- **The fix budget is mode policy.** `ModePolicy.routing.maxFixIterations` (auto: 1, radical: 2) is the single source of truth. Exhausting it while still failing surfaces a `FinalReport` warning, not an error.
+- **The forced-roles path (`/team`) skips review** by setting `requiresReview = false`, and likewise never enters the fix loop. That is intentional — team mode is for independent multi-agent answers, not a workflow.
 
 ## Routing: heuristic + router brain
 

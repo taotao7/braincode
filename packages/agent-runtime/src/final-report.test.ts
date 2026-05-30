@@ -103,6 +103,53 @@ test("resolveFinalReportStatus makes failed checks override review approval", ()
   expect(status).toBe("changes_requested")
 })
 
+test("buildFinalReport surfaces fix budget exhaustion when checks still fail", () => {
+  const report = buildFinalReport({
+    task: "fix failing test",
+    sessionId: "session-fix",
+    plan: testPlan(),
+    workerResults: [],
+    modelSummary: "Attempted fix.",
+    patch: patchSummary(),
+    checks: {
+      status: "failed",
+      results: [{
+        name: "test",
+        command: "bun",
+        args: ["test"],
+        status: "failed",
+        exitCode: 1,
+        signal: null,
+        durationMs: 10,
+        stdout: "",
+        stderr: "still failing",
+        timedOut: false,
+      }],
+    },
+    fixIterations: 1,
+  })
+
+  expect(report.fixIterations).toBe(1)
+  expect(report.warnings).toContain("Fix budget exhausted after 1 iteration(s); checks still failing.")
+})
+
+test("buildFinalReport omits fixIterations when zero and adds no exhaustion warning", () => {
+  const report = buildFinalReport({
+    task: "fix passing test",
+    sessionId: "session-fix-2",
+    plan: testPlan(),
+    workerResults: [],
+    modelSummary: "Fixed it.",
+    patch: patchSummary(),
+    checks: { status: "passed", results: [] },
+    review: approvedReview(),
+    fixIterations: 0,
+  })
+
+  expect(report.fixIterations).toBeUndefined()
+  expect(report.warnings).toEqual([])
+})
+
 test("buildFinalReport reports no patch activity instead of inventing patch facts", () => {
   const report = buildFinalReport({
     task: "answer a question",

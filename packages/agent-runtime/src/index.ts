@@ -15,7 +15,7 @@ export type { ToolEvidenceCache, ToolEvidenceCacheOptions } from "./evidence-cac
 import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey, selectRuntimeModelWithApiKey, toPiModelSummary } from "./model-selection"
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
-import { getAgentRoleSystemPrompt, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
@@ -31,7 +31,7 @@ export type { PatchCheckOptions, PatchCheckResult, PatchCheckStatus, PatchCheckS
 import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews, hasPatchActivity, type PatchSummary } from "./patch"
 export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews } from "./patch"
 export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary, UntrackedFilePreview } from "./patch"
-import { applyCheckGateToReviewDecision, buildReviewPrompt, mergeReviewResult, normalizeReviewDecisionText, type PatchReviewArtifacts, type ReviewDecision } from "./review"
+import { applyCheckGateToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, mergeReviewResult, normalizeReviewDecisionText, type PatchReviewArtifacts, type ReviewDecision } from "./review"
 export { applyCheckGateToReviewDecision, applyReviewGatesToReviewDecision, buildReviewPrompt, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText } from "./review"
 export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity, ReviewGateOptions } from "./review"
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
@@ -95,6 +95,7 @@ export type AgentRunResult = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   reviewDecision?: ReviewDecision
+  fixIterations?: number
 }
 
 async function buildRunMetrics(
@@ -603,7 +604,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             selection.configured,
           )
         }
-        const primarySummary = requireAssistantText(runtime.agent.state.messages, {
+        let primarySummary = requireAssistantText(runtime.agent.state.messages, {
           stage: "primary",
           role: plan.role,
           attempt: attempt + 1,
@@ -624,59 +625,144 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           summary: primarySummary.trim(),
           todoIds: primaryTodoIds,
         })
-        const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
-        const checks = hasPatchActivity(patchAfterPrimary)
-          ? await runPatchChecksWithApproval(cwd, { ...checkOptions, patch: patchAfterPrimary }, {
-              mode: plan.mode,
-              sessionId,
-              attempt: attempt + 1,
-              onToolApproval: request.onToolApproval,
-              signal: request.signal,
+
+        const maxFixIterations = getModePolicy(plan.mode).routing.maxFixIterations
+        const fixLoopEligible = plan.role !== "review" && !(request.forceRoles && request.forceRoles.length > 0)
+        let recordedMessageCount = runtime.agent.state.messages.length
+        let fixIterations = 0
+        let checks: PatchCheckSummary | undefined
+        let reviewResult: ExecutedWorkerResult | undefined
+        let reviewDecision: ReviewDecision | undefined
+        // Bounded fix loop: when automated checks fail or review requests
+        // changes, re-handoff the failing evidence to the same primary agent
+        // (so it keeps its working context) and re-run checks/review. Budget is
+        // mode-scoped (auto: 1, radical: 2). `blocked` does not auto-fix.
+        while (true) {
+          throwIfRunAborted(request.signal)
+          const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
+          checks = hasPatchActivity(patchAfterPrimary)
+            ? await runPatchChecksWithApproval(cwd, { ...checkOptions, patch: patchAfterPrimary }, {
+                mode: plan.mode,
+                sessionId,
+                attempt: attempt + 1,
+                onToolApproval: request.onToolApproval,
+                signal: request.signal,
+              })
+            : undefined
+          if (checks) {
+            await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1, fixIteration: fixIterations }, home)
+          }
+          if (checks?.reviewRequired) {
+            plan.agentPlan.requiresReview = true
+          }
+          const reviewArtifacts: PatchReviewArtifacts | undefined = hasPatchActivity(patchAfterPrimary)
+            ? {
+                patch: patchAfterPrimary,
+                checks,
+                diff: await collectPatchDiffSnapshot(cwd),
+                untrackedPreviews: await collectUntrackedFilePreviews(cwd, patchAfterPrimary),
+              }
+            : undefined
+          if ((permissionPolicyReviewRequired || checks?.reviewRequired) && plan.role !== "review") {
+            const reason = checks?.reviewRequired
+              ? checks.reason ?? "Smart check policy requires independent review."
+              : "Permission policy requires independent review for this tool call."
+            reviewWorker = await ensureReviewWorker(plan, models, home, sessionId, request.onTodoEvent, {
+              goal: checks?.reviewRequired
+                ? "Review smart-check sensitive changes for correctness, regressions, and safety risks."
+                : "Review permission-policy sensitive changes for correctness, regressions, and safety risks.",
+              reason,
             })
-          : undefined
-        if (checks) {
-          await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
-        }
-        if (checks?.reviewRequired) {
-          plan.agentPlan.requiresReview = true
-        }
-        const reviewArtifacts: PatchReviewArtifacts | undefined = hasPatchActivity(patchAfterPrimary)
-          ? {
-              patch: patchAfterPrimary,
-              checks,
-              diff: await collectPatchDiffSnapshot(cwd),
-              untrackedPreviews: await collectUntrackedFilePreviews(cwd, patchAfterPrimary),
-            }
-          : undefined
-        if ((permissionPolicyReviewRequired || checks?.reviewRequired) && plan.role !== "review") {
-          const reason = checks?.reviewRequired
-            ? checks.reason ?? "Smart check policy requires independent review."
-            : "Permission policy requires independent review for this tool call."
-          reviewWorker = await ensureReviewWorker(plan, models, home, sessionId, request.onTodoEvent, {
-            goal: checks?.reviewRequired
-              ? "Review smart-check sensitive changes for correctness, regressions, and safety risks."
-              : "Review permission-policy sensitive changes for correctness, regressions, and safety risks.",
-            reason,
+          }
+          reviewResult =
+            plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
+              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
+              : undefined
+          reviewDecision = reviewResult
+            ? applyCheckGateToReviewDecision(
+                reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult),
+                checks,
+                reviewArtifacts,
+                { missingArtifacts: "changes_requested" },
+              )
+            : undefined
+          if (reviewResult) {
+            reviewResult.reviewDecision = reviewDecision
+          }
+          if (reviewDecision) {
+            await appendSessionRecord(sessionId, { type: "review_decision", ...reviewDecision, attempt: attempt + 1, fixIteration: fixIterations }, home)
+          }
+
+          const trigger = fixLoopTrigger(checks, reviewDecision)
+          if (!trigger || !fixLoopEligible || fixIterations >= maxFixIterations) break
+
+          fixIterations += 1
+          await appendSessionRecord(sessionId, { type: "fix_iteration", iteration: fixIterations, trigger, attempt: attempt + 1 }, home)
+          await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
+          await emitWorkerEvent({
+            type: "worker_start",
+            role: plan.role,
+            goal: `Apply check/review fixes (iteration ${fixIterations})`,
+            phase: "primary",
+            modelId: selection.configured.id,
+            handoffId: primaryHandoffId,
+            taskId: primaryTaskId,
+            parentId: plan.context.id,
+            progress: { status: "running", summary: `fix iteration ${fixIterations}` },
+            todoIds: primaryTodoIds,
+          })
+          const fixPrompt = buildPrimaryFixPrompt({ checks, reviewDecision }, fixIterations)
+          const unlinkFixAbort = linkRuntimeAbort(runtime, request.signal)
+          try {
+            throwIfRunAborted(request.signal)
+            await runtime.agent.prompt(fixPrompt, promptImages.length > 0 ? promptImages : undefined)
+            throwIfRunAborted(request.signal)
+          } finally {
+            unlinkFixAbort()
+            await recordAgentTokenUsage(
+              runtime.agent.state.messages,
+              {
+                sessionId,
+                home,
+                role: plan.role,
+                phase: "primary",
+                agentSessionId: sessionId,
+                taskId: primaryTaskId,
+                parentId: plan.context.id,
+                attempt: attempt + 1,
+                brainId: plan.brain.id,
+              },
+              selection.configured,
+              recordedMessageCount,
+            )
+            recordedMessageCount = runtime.agent.state.messages.length
+          }
+          primarySummary = requireAssistantText(runtime.agent.state.messages, {
+            stage: "primary",
+            role: plan.role,
+            attempt: attempt + 1,
+            modelId: selection.configured.id,
+            provider: selection.piModel.provider,
+            api: selection.configured.api,
+          })
+          await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
+          await emitWorkerEvent({
+            type: "worker_end",
+            role: plan.role,
+            phase: "primary",
+            status: "completed",
+            handoffId: primaryHandoffId,
+            taskId: primaryTaskId,
+            parentId: plan.context.id,
+            progress: { status: "completed", summary: primarySummary.trim() },
+            summary: primarySummary.trim(),
+            todoIds: primaryTodoIds,
           })
         }
-        const reviewResult =
-          plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-            ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
-            : undefined
-        const reviewDecision = reviewResult
-          ? applyCheckGateToReviewDecision(
-              reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult),
-              checks,
-              reviewArtifacts,
-              { missingArtifacts: "changes_requested" },
-            )
-          : undefined
+        // Push only the final review result so the merger/report reflect the
+        // last decision (the loop recomputes review each iteration).
         if (reviewResult) {
-          reviewResult.reviewDecision = reviewDecision
           workerResults.push(reviewResult)
-        }
-        if (reviewDecision) {
-          await appendSessionRecord(sessionId, { type: "review_decision", ...reviewDecision, attempt: attempt + 1 }, home)
         }
 
         const stopHooks = await runAndRecordHooks(
@@ -708,10 +794,11 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           review: reviewDecision,
           metrics,
           runtimeToolCount: metrics.toolCalls.total,
+          fixIterations,
         })
         await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: attempt + 1 }, home)
-        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, finalReport, attempt: attempt + 1 }, home)
-        return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpLoader.report(), patch, checks, reviewDecision }
+        await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults, patch: hasPatchActivity(patch) ? patch : undefined, checks, reviewDecision, finalReport, fixIterations, attempt: attempt + 1 }, home)
+        return { sessionId, summary, finalReport, plan, workerResults, mcp: mcpLoader.report(), patch, checks, reviewDecision, fixIterations }
       } catch (error) {
         lastError = error
         const message = error instanceof Error ? error.message : String(error)

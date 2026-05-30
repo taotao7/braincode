@@ -142,6 +142,52 @@ export function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | und
   return sections.join("\n\n")
 }
 
+export type PrimaryFixReason = {
+  checks?: PatchCheckSummary
+  reviewDecision?: ReviewDecision
+}
+
+export function fixLoopTrigger(
+  checks: PatchCheckSummary | undefined,
+  reviewDecision: ReviewDecision | undefined,
+): "checks_failed" | "changes_requested" | undefined {
+  if (checks?.status === "failed") return "checks_failed"
+  if (reviewDecision?.decision === "changes_requested") return "changes_requested"
+  return undefined
+}
+
+export function buildPrimaryFixPrompt(reason: PrimaryFixReason, iteration: number): string {
+  const sections: string[] = []
+  const failedChecks = reason.checks?.results.filter((result) => result.status === "failed") ?? []
+  if (failedChecks.length > 0) {
+    const lines = failedChecks.map((result) => {
+      const output = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode ?? "n/a"}`
+      return `- ${result.name}: ${clipContextText(output, 1600)}`
+    })
+    sections.push(`Failing checks:\n${lines.join("\n")}`)
+  }
+  const decision = reason.reviewDecision
+  if (decision?.decision === "changes_requested") {
+    if (decision.requiredChanges.length > 0) {
+      sections.push(`Required changes from review:\n${decision.requiredChanges.map((change) => `- ${change}`).join("\n")}`)
+    }
+    if (decision.findings.length > 0) {
+      const findings = decision.findings.map((finding) => {
+        const location = finding.file ? ` (${finding.file}${finding.line ? `:${finding.line}` : ""})` : ""
+        const suggestion = finding.suggestion ? ` Suggestion: ${finding.suggestion}` : ""
+        return `- [${finding.severity}]${location} ${finding.issue}${suggestion}`
+      })
+      sections.push(`Review findings:\n${findings.join("\n")}`)
+    }
+  }
+
+  return `Your previous changes did not pass. This is fix iteration ${iteration}.
+
+${sections.join("\n\n")}
+
+Fix the underlying cause of the issues above. Make the minimal edits needed; do not restate or rewrite the whole solution, and do not re-explain unchanged work. After editing, produce the final user-facing result.`
+}
+
 export function formatWorkerResults(workerResults: PromptWorkerResult[]): string {
   return workerResults
     .map((result) => {
