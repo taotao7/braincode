@@ -4,6 +4,28 @@ export type ToolRisk = "low" | "medium" | "high"
 
 export type ToolApprovalPolicy = "allow" | "confirm-dangerous"
 
+export type CheckPatchKind =
+  | "docs-only"
+  | "frontend"
+  | "backend"
+  | "test-only"
+  | "package-change"
+  | "auth-risk"
+  | "db-risk"
+  | "ci-risk"
+  | "unknown-code"
+
+export type CheckSelectionStrategy = "smart" | "all"
+
+export type CheckPolicyConfiguration = {
+  enabled?: boolean
+  scripts?: string[]
+  review?: "required" | "optional"
+  reason?: string
+}
+
+export type CheckPolicyConfigurationMap = Partial<Record<CheckPatchKind, CheckPolicyConfiguration>>
+
 export type ToolDefinition = {
   name: string
   description: string
@@ -20,8 +42,19 @@ export type ToolConfiguration = ToolDefinition & {
 export type CheckRunnerConfiguration = {
   enabled: boolean
   scripts: string[]
+  strategy: CheckSelectionStrategy
+  policies: CheckPolicyConfigurationMap
   timeoutMs: number
   maxOutputBytes: number
+}
+
+export type PartialCheckRunnerConfiguration = {
+  enabled?: boolean
+  scripts?: string[]
+  strategy?: CheckSelectionStrategy
+  policies?: CheckPolicyConfigurationMap
+  timeoutMs?: number
+  maxOutputBytes?: number
 }
 
 export {
@@ -55,10 +88,23 @@ export type ToolConfigDocument = {
 
 const DEFAULT_CHECK_TIMEOUT_MS = 180_000
 const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
+const CHECK_PATCH_KINDS: CheckPatchKind[] = [
+  "docs-only",
+  "frontend",
+  "backend",
+  "test-only",
+  "package-change",
+  "auth-risk",
+  "db-risk",
+  "ci-risk",
+  "unknown-code",
+]
 
 export const defaultCheckRunnerConfiguration: CheckRunnerConfiguration = {
   enabled: true,
   scripts: [],
+  strategy: "smart",
+  policies: {},
   timeoutMs: DEFAULT_CHECK_TIMEOUT_MS,
   maxOutputBytes: DEFAULT_CHECK_OUTPUT_BYTES,
 }
@@ -161,7 +207,7 @@ export function createDefaultToolConfiguration(): ToolConfigDocument {
       permissions: [...tool.permissions],
       enabled: tool.defaultEnabled,
     })),
-    checks: { ...defaultCheckRunnerConfiguration, scripts: [] },
+    checks: { ...defaultCheckRunnerConfiguration, scripts: [], policies: {} },
     permissions: createDefaultPermissionPolicy(),
   }
 }
@@ -195,15 +241,48 @@ export function normalizeToolConfiguration(document: ToolConfigDocument): ToolCo
 }
 
 export function normalizeCheckRunnerConfiguration(value: unknown): CheckRunnerConfiguration {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ...defaultCheckRunnerConfiguration, scripts: [] }
-  }
-  const record = value as Record<string, unknown>
+  const partial = normalizePartialCheckRunnerConfiguration(value)
   return {
-    enabled: typeof record.enabled === "boolean" ? record.enabled : defaultCheckRunnerConfiguration.enabled,
-    scripts: normalizeStringArray(record.scripts),
-    timeoutMs: normalizeInteger(record.timeoutMs, 1_000, 900_000, defaultCheckRunnerConfiguration.timeoutMs),
-    maxOutputBytes: normalizeInteger(record.maxOutputBytes, 1_000, 512_000, defaultCheckRunnerConfiguration.maxOutputBytes),
+    enabled: partial.enabled ?? defaultCheckRunnerConfiguration.enabled,
+    scripts: partial.scripts ?? [],
+    strategy: partial.strategy ?? defaultCheckRunnerConfiguration.strategy,
+    policies: partial.policies ?? {},
+    timeoutMs: partial.timeoutMs ?? defaultCheckRunnerConfiguration.timeoutMs,
+    maxOutputBytes: partial.maxOutputBytes ?? defaultCheckRunnerConfiguration.maxOutputBytes,
+  }
+}
+
+export function normalizePartialCheckRunnerConfiguration(value: unknown): PartialCheckRunnerConfiguration {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const record = value as Record<string, unknown>
+  const output: PartialCheckRunnerConfiguration = {}
+  if (typeof record.enabled === "boolean") output.enabled = record.enabled
+  if (Array.isArray(record.scripts)) output.scripts = normalizeStringArray(record.scripts)
+  const strategy = normalizeCheckSelectionStrategy(record.strategy)
+  if (strategy) output.strategy = strategy
+  const policies = normalizeCheckPolicyConfigurationMap(record.policies)
+  if (Object.keys(policies).length > 0) output.policies = policies
+  const timeoutMs = normalizeOptionalInteger(record.timeoutMs, 1_000, 900_000)
+  if (timeoutMs !== undefined) output.timeoutMs = timeoutMs
+  const maxOutputBytes = normalizeOptionalInteger(record.maxOutputBytes, 1_000, 512_000)
+  if (maxOutputBytes !== undefined) output.maxOutputBytes = maxOutputBytes
+  return output
+}
+
+export function mergeCheckRunnerConfiguration(
+  base: CheckRunnerConfiguration,
+  override?: PartialCheckRunnerConfiguration,
+): CheckRunnerConfiguration {
+  const normalizedBase = normalizeCheckRunnerConfiguration(base)
+  if (!override) return normalizedBase
+  const normalizedOverride = normalizePartialCheckRunnerConfiguration(override)
+  return {
+    enabled: normalizedOverride.enabled ?? normalizedBase.enabled,
+    scripts: normalizedOverride.scripts ?? normalizedBase.scripts,
+    strategy: normalizedOverride.strategy ?? normalizedBase.strategy,
+    policies: mergeCheckPolicyConfigurationMaps(normalizedBase.policies, normalizedOverride.policies),
+    timeoutMs: normalizedOverride.timeoutMs ?? normalizedBase.timeoutMs,
+    maxOutputBytes: normalizedOverride.maxOutputBytes ?? normalizedBase.maxOutputBytes,
   }
 }
 
@@ -231,8 +310,54 @@ function normalizeStringArray(value: unknown): string[] {
   return output
 }
 
+function normalizeCheckSelectionStrategy(value: unknown): CheckSelectionStrategy | undefined {
+  return value === "smart" || value === "all" ? value : undefined
+}
+
+function normalizeCheckPolicyConfigurationMap(value: unknown): CheckPolicyConfigurationMap {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const record = value as Record<string, unknown>
+  const output: CheckPolicyConfigurationMap = {}
+  for (const kind of CHECK_PATCH_KINDS) {
+    const policy = normalizeCheckPolicyConfiguration(record[kind])
+    if (policy) output[kind] = policy
+  }
+  return output
+}
+
+function normalizeCheckPolicyConfiguration(value: unknown): CheckPolicyConfiguration | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const output: CheckPolicyConfiguration = {}
+  if (typeof record.enabled === "boolean") output.enabled = record.enabled
+  if (Array.isArray(record.scripts)) output.scripts = normalizeStringArray(record.scripts)
+  if (record.review === "required" || record.review === "optional") output.review = record.review
+  if (typeof record.reason === "string" && record.reason.trim()) output.reason = record.reason.trim()
+  return Object.keys(output).length > 0 ? output : undefined
+}
+
+function mergeCheckPolicyConfigurationMaps(
+  base: CheckPolicyConfigurationMap,
+  override: CheckPolicyConfigurationMap | undefined,
+): CheckPolicyConfigurationMap {
+  const output: CheckPolicyConfigurationMap = { ...base }
+  if (!override) return output
+  for (const kind of CHECK_PATCH_KINDS) {
+    const next = override[kind]
+    if (!next) continue
+    output[kind] = { ...(output[kind] ?? {}), ...next }
+  }
+  return output
+}
+
 function normalizeInteger(value: unknown, min: number, max: number, fallback: number): number {
   const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN
   if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(parsed)))
+}
+
+function normalizeOptionalInteger(value: unknown, min: number, max: number): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN
+  if (!Number.isFinite(parsed)) return undefined
   return Math.max(min, Math.min(max, Math.floor(parsed)))
 }

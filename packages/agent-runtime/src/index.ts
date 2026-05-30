@@ -14,18 +14,18 @@ import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
 import { getAgentRoleSystemPrompt, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
-import { createLocalCodingTools, defaultCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
+import { createLocalCodingTools, defaultCheckRunnerConfiguration, mergeCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
 export type { PermissionPolicyDocument, PermissionPolicyEvaluation, PermissionPolicyMatch } from "@braincode/tools"
 import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
 export { runConfiguredHooks } from "./hooks"
 export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
 import { runPatchChecksWithApproval, type PatchCheckSummary } from "./checks"
-export { runPatchChecks, runPatchChecksWithApproval } from "./checks"
-export type { PatchCheckOptions, PatchCheckResult, PatchCheckStatus, PatchCheckSummary } from "./checks"
+export { classifyPatchKind, patchKindRequiresReview, runPatchChecks, runPatchChecksWithApproval } from "./checks"
+export type { PatchCheckOptions, PatchCheckResult, PatchCheckStatus, PatchCheckSummary, PatchKind } from "./checks"
 import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews, hasPatchActivity, type PatchSummary } from "./patch"
 export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews } from "./patch"
 export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary, UntrackedFilePreview } from "./patch"
@@ -217,20 +217,21 @@ async function updateTodoStatus(
   }
 }
 
-async function ensurePermissionPolicyReviewWorker(
+async function ensureReviewWorker(
   plan: RuntimePlan,
   models: BraincodeModel[],
   home: string | undefined,
   sessionId: string,
   onTodoEvent: AgentRunRequest["onTodoEvent"],
+  options: { goal?: string; reason?: string } = {},
 ): Promise<RuntimeWorkerPlan> {
   const existing = plan.workers.find((worker) => worker.role === "review")
   if (existing) return existing
 
   const reviewWorkerInput: AgentWorkerPlan = {
     role: "review",
-    goal: "Review permission-policy sensitive changes for correctness, regressions, and safety risks.",
-    reason: "Permission policy requires independent review for this tool call.",
+    goal: options.goal ?? "Review sensitive changes for correctness, regressions, and safety risks.",
+    reason: options.reason ?? "Policy requires independent review for this run.",
   }
   const brainDocument = await readBrains(home)
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
@@ -252,7 +253,7 @@ async function ensurePermissionPolicyReviewWorker(
     type: "todo_plan",
     todos: plan.todos,
     dependencies: plan.dependencies,
-    reason: "permission policy requires review",
+    reason: options.reason ?? "policy requires review",
   }, home)
 
   if (onTodoEvent) {
@@ -345,7 +346,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     auth,
   })
   const toolConfig = await readTools(home)
-  const checkOptions: CheckRunnerConfiguration = toolConfig.checks ?? defaultCheckRunnerConfiguration
+  const projectChecks = await readProjectChecks(cwd)
+  const checkOptions: CheckRunnerConfiguration = mergeCheckRunnerConfiguration(toolConfig.checks ?? defaultCheckRunnerConfiguration, projectChecks?.config)
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
   const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
   const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
@@ -579,7 +581,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         })
         const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
         const checks = hasPatchActivity(patchAfterPrimary)
-          ? await runPatchChecksWithApproval(cwd, checkOptions, {
+          ? await runPatchChecksWithApproval(cwd, { ...checkOptions, patch: patchAfterPrimary }, {
               mode: plan.mode,
               sessionId,
               attempt: attempt + 1,
@@ -590,6 +592,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         if (checks) {
           await appendSessionRecord(sessionId, { type: "check_summary", ...checks, attempt: attempt + 1 }, home)
         }
+        if (checks?.reviewRequired) {
+          plan.agentPlan.requiresReview = true
+        }
         const reviewArtifacts: PatchReviewArtifacts | undefined = hasPatchActivity(patchAfterPrimary)
           ? {
               patch: patchAfterPrimary,
@@ -598,8 +603,16 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
               untrackedPreviews: await collectUntrackedFilePreviews(cwd, patchAfterPrimary),
             }
           : undefined
-        if (permissionPolicyReviewRequired && plan.role !== "review") {
-          reviewWorker = await ensurePermissionPolicyReviewWorker(plan, models, home, sessionId, request.onTodoEvent)
+        if ((permissionPolicyReviewRequired || checks?.reviewRequired) && plan.role !== "review") {
+          const reason = checks?.reviewRequired
+            ? checks.reason ?? "Smart check policy requires independent review."
+            : "Permission policy requires independent review for this tool call."
+          reviewWorker = await ensureReviewWorker(plan, models, home, sessionId, request.onTodoEvent, {
+            goal: checks?.reviewRequired
+              ? "Review smart-check sensitive changes for correctness, regressions, and safety risks."
+              : "Review permission-policy sensitive changes for correctness, regressions, and safety risks.",
+            reason,
+          })
         }
         const reviewResult =
           plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"

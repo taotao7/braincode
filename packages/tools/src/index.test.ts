@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, normalizeToolConfiguration } from "./index"
+import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, mergeCheckRunnerConfiguration, normalizeToolConfiguration } from "./index"
 
 function getTool(name: string, projectRoot: string) {
   const tool = createLocalCodingTools({ projectRoot }).find((candidate) => candidate.name === name)
@@ -34,6 +34,8 @@ test("default tool configuration enables the first-party local coding toolset", 
   expect(config.checks).toEqual({
     enabled: true,
     scripts: [],
+    strategy: "smart",
+    policies: {},
     timeoutMs: 180_000,
     maxOutputBytes: 24_000,
   })
@@ -57,6 +59,11 @@ test("normalizeToolConfiguration preserves and clamps check runner configuration
     checks: {
       enabled: false,
       scripts: ["test", " test ", "", "lint"],
+      strategy: "all",
+      policies: {
+        "docs-only": { enabled: true, scripts: ["docs:check", ""], reason: "docs build" },
+        invalid: { enabled: false },
+      },
       timeoutMs: "2500",
       maxOutputBytes: 999_999,
     },
@@ -65,11 +72,32 @@ test("normalizeToolConfiguration preserves and clamps check runner configuration
   expect(config.checks).toEqual({
     enabled: false,
     scripts: ["test", "lint"],
+    strategy: "all",
+    policies: {
+      "docs-only": { enabled: true, scripts: ["docs:check"], reason: "docs build" },
+    },
     timeoutMs: 2_500,
     maxOutputBytes: 512_000,
   })
   expect(config.tools.find((tool) => tool.name === "custom_tool")?.approvalPolicy).toBe("allow")
   expect(config.permissions?.paths).toContainEqual({ pattern: "package.json", edit: "ask", review: "required" })
+})
+
+test("mergeCheckRunnerConfiguration layers project check policy over user defaults", () => {
+  const base = createDefaultToolConfiguration().checks
+  if (!base) throw new Error("default checks config missing")
+  const merged = mergeCheckRunnerConfiguration(base, {
+    scripts: ["check"],
+    policies: {
+      "docs-only": { enabled: true, scripts: ["docs:check"] },
+      "auth-risk": { review: "required" },
+    },
+  })
+
+  expect(merged.scripts).toEqual(["check"])
+  expect(merged.strategy).toBe("smart")
+  expect(merged.policies["docs-only"]).toEqual({ enabled: true, scripts: ["docs:check"] })
+  expect(merged.policies["auth-risk"]).toEqual({ review: "required" })
 })
 
 test("permission policy evaluates path and command rules", () => {

@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, expect, test } from "bun:test"
 import { agentRoleSystemPrompts } from "@braincode/brain"
-import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, listSessions, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
+import { TAVILY_AUTH_PROVIDER, TAVILY_MCP_PACKAGE, TAVILY_MCP_SERVER_NAME, appendSessionRecord, appendTokenUsageRecord, configureTavilyMcpServer, createBraincodeAuthEnvRef, ensureBraincodeHome, extractMcpServerEntries, getBraincodePaths, getProjectSupportPaths, getProviderApiKey, getProviderOAuthCredentials, getUserSupportPaths, listSessions, normalizeHooks, normalizeTokenUsage, readAuthStatus, readBrains, readHookSources, readModels, readProjectChecks, readProjectSupport, readProviderApiKey, readSessionContext, readSettings, readTools, readUsageStats, readUserMcpConfig, readUserSupport, resolveMcpServerEnv, setHookHandlerEnabled, setMcpServerDisabled, setMcpServerTrusted, writeBrains, writeModels, writeProviderApiKey, writeProviderOAuthCredentials, writeSettings, writeTools } from "./index"
 
 const tempHomes: string[] = []
 
@@ -44,6 +44,7 @@ test("path helpers derive user and project support locations", async () => {
     expect(braincodePaths.tools).toBe(join(home, "tools.json"))
     expect(projectPaths.agents).toBe(join(root, "AGENTS.md"))
     expect(projectPaths.skills).toBe(join(root, ".agents", "skills"))
+    expect(projectPaths.checks).toBe(join(root, ".braincode", "checks.json"))
     expect(userPaths.mcp).toBe(join(home, "mcp.json"))
     expect(userPaths.skills).toBe(join(home, "skills"))
   } finally {
@@ -205,6 +206,29 @@ test("readProjectSupport discovers AGENTS, MCP config, and local skills", async 
   expect(support.skills[0]?.content).toContain("Docs skill")
 })
 
+test("readProjectChecks discovers optional project check policy", async () => {
+  const projectRoot = await makeTempHome()
+  await mkdir(join(projectRoot, ".braincode"), { recursive: true })
+  await Bun.write(join(projectRoot, ".braincode", "checks.json"), JSON.stringify({
+    strategy: "smart",
+    policies: {
+      "docs-only": { enabled: true, scripts: ["docs:check"], reason: "docs must build" },
+      "auth-risk": { review: "required" },
+    },
+  }))
+
+  const checks = await readProjectChecks(projectRoot)
+
+  expect(checks?.path).toBe(join(projectRoot, ".braincode", "checks.json"))
+  expect(checks?.config).toEqual({
+    strategy: "smart",
+    policies: {
+      "docs-only": { enabled: true, scripts: ["docs:check"], reason: "docs must build" },
+      "auth-risk": { review: "required" },
+    },
+  })
+})
+
 test("readHookSources discovers user and project hook config", async () => {
   const home = await makeTempHome()
   const projectRoot = await makeTempHome()
@@ -307,6 +331,8 @@ test("default tool configuration enables local coding tools with approval for wr
   expect(tools.checks).toEqual({
     enabled: true,
     scripts: [],
+    strategy: "smart",
+    policies: {},
     timeoutMs: 180_000,
     maxOutputBytes: 24_000,
   })

@@ -86,7 +86,7 @@ See [RELEASES.md](./RELEASES.md).
 - Isolated support workers, primary executor, and policy-triggered review worker using structured handoff/result packets.
 - Read-only project tools for `librarian`, `qa`, `security`, and `review` workers, so support agents can inspect files, search code, read diffs, and report evidence without edit/execute capability.
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
-- Project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skills`, and `.agents/hooks.json`.
+- Project support discovery for `AGENTS.md`, `.mcp.json`, `.braincode/checks.json`, `.agents/skills`, and `.agents/hooks.json`.
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
 - First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, long-running exec sessions with stdin polling, git diffs, changed-file inspection, and package scripts.
 - Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.
@@ -94,8 +94,8 @@ See [RELEASES.md](./RELEASES.md).
 - Tool approval UI for risky write/execute tool calls, with tool-level allow/confirm policy plus path-aware and command-aware permission rules from `tools.json`.
 - Permission Policy v2: sensitive paths such as `src/auth/**`, `db/**`, `package.json`, and `.github/workflows/**` ask and force review, while commands such as `git push`, package publish commands, and `rm -rf` are denied before execution.
 - Minimal patch ledger: successful runs collect changed files and git diff stats and append a `patch_summary` session record.
-- Automated patch checks: file-changing runs discover `check`, `typecheck`, `lint`, and `test` package scripts, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.
-- Check runner policy in `tools.json`: checks can be disabled, pinned to explicit package scripts, and bounded by timeout/output limits.
+- Automated patch checks: file-changing runs classify the patch kind, select `check`, `typecheck`, `lint`, and `test` package scripts according to smart policy, run them with the detected JS package manager (`bun`, `pnpm`, `yarn`, or `npm`), append `check_summary`, and pass patch/check artifacts to review workers.
+- Check runner policy in `tools.json` plus project `.braincode/checks.json`: checks can be disabled, pinned to explicit package scripts, customized per patch kind, and bounded by timeout/output limits.
 - Typed review decisions: review workers return `approved`, `changes_requested`, or `blocked` with severity-ranked findings, file/line evidence, required changes, blocking issues, and residual risks; the runtime appends `review_decision` and prevents failed checks from being reported as approved.
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 - Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.

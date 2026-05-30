@@ -6658,7 +6658,10 @@ function formatFinalReportChecksLabel(report: FinalReport): string {
   if (report.checks.results.length === 0) {
     return report.checks.reason ? `${report.checks.status} (${report.checks.reason})` : report.checks.status;
   }
-  return `${report.checks.status} (${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")})`;
+  return `${report.checks.status} (${[
+    report.checks.results.map((result) => `${result.name} ${result.status}`).join(", "),
+    report.checks.reason,
+  ].filter(Boolean).join("; ")})`;
 }
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {

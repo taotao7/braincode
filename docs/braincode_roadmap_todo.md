@@ -28,10 +28,10 @@ Braincode 当前已经具备以下基础能力：
 
 当前主要改进方向不再是“补基础能力”，而是：
 
-- [ ] 让 final report 更稳定、更结构化
-- [ ] 让本地工具在大项目里更快更安全
+- [x] 让 final report 更稳定、更结构化
+- [x] 让本地工具在大项目里更快更安全
 - [x] 让权限策略从 tool-level 升级到 path/command-level
-- [ ] 让 review artifacts 覆盖更多真实 patch 情况
+- [x] 让 review artifacts 覆盖更多真实 patch 情况
 - [ ] 让 benchmark 从“规划评估”升级到“真实执行评估”
 
 ---
@@ -502,7 +502,7 @@ global MCP startup budget: 5s / 10s
 
 ### TODO
 
-- [ ] 增加 patch classifier
+- [x] 增加 patch classifier
 
 ```ts
 type PatchKind =
@@ -517,8 +517,8 @@ type PatchKind =
   | "unknown-code"
 ```
 
-- [ ] 根据 changed files 判断 patch kind
-- [ ] 默认策略
+- [x] 根据 changed files 判断 patch kind
+- [x] 默认策略
 
 ```txt
 docs-only      -> skip or docs check
@@ -527,18 +527,18 @@ frontend       -> typecheck + lint + test if available
 backend        -> typecheck + test
 auth-risk      -> full checks + review
 db-risk        -> full checks + review
-package-change -> package manager check + full checks
+package-change -> detected package manager + full checks
 ci-risk        -> review + no auto shell unless approved
 ```
 
-- [ ] 允许用户配置 `.braincode/checks.json`
-- [ ] final report 显示为什么跑/跳过 checks
+- [x] 允许用户配置 `.braincode/checks.json`
+- [x] final report 显示为什么跑/跳过 checks
 
 ### 验收标准
 
-- [ ] README 改动不会默认跑超重测试
-- [ ] auth/db/package.json 改动强制更严格 checks
-- [ ] 用户可以覆盖默认策略
+- [x] README 改动不会默认跑超重测试
+- [x] auth/db/package.json 改动强制更严格 checks
+- [x] 用户可以覆盖默认策略
 
 ---
 
@@ -905,7 +905,7 @@ Acceptance:
 - [x] path-aware policy
 - [x] command-aware policy
 - [x] risky file force review
-- [ ] smart check selection
+- [x] smart check selection
 
 ## v0.6：Execution Benchmark & Demo
 

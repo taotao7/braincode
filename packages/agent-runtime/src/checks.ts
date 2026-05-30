@@ -1,10 +1,15 @@
 import { spawn } from "node:child_process"
-import { resolve as resolvePath } from "node:path"
+import { basename, extname, resolve as resolvePath } from "node:path"
 import type { BraincodeMode } from "@braincode/brain"
+import type { CheckPatchKind, CheckPolicyConfiguration, CheckPolicyConfigurationMap, CheckSelectionStrategy } from "@braincode/tools"
+import type { PatchFileChange, PatchSummary } from "./patch"
 
 const DEFAULT_CHECK_TIMEOUT_MS = 180_000
 const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
 const CHECK_SCRIPT_PRIORITY = ["check", "typecheck", "lint", "test"] as const
+const FULL_CHECK_SCRIPTS = [...CHECK_SCRIPT_PRIORITY]
+
+export type PatchKind = CheckPatchKind
 
 export type PatchCheckStatus = "passed" | "failed" | "skipped"
 
@@ -24,14 +29,21 @@ export type PatchCheckResult = {
 export type PatchCheckSummary = {
   status: PatchCheckStatus
   reason?: string
+  patchKind?: PatchKind
+  selectedScripts?: string[]
+  reviewRequired?: boolean
   results: PatchCheckResult[]
 }
 
 export type PatchCheckOptions = {
   enabled?: boolean
   scripts?: string[]
+  strategy?: CheckSelectionStrategy
+  policies?: CheckPolicyConfigurationMap
   timeoutMs?: number
   maxOutputBytes?: number
+  patch?: PatchSummary
+  changedFiles?: PatchFileChange[]
 }
 
 type PatchCheckApproval = {
@@ -55,28 +67,112 @@ type PackageManager = {
   runArgs: (script: string) => string[]
 }
 
+type PatchCheckPolicySelection = {
+  patchKind: PatchKind
+  scripts: string[]
+  configuredScripts: boolean
+  skip: boolean
+  reviewRequired: boolean
+  approvalRequired: boolean
+  reason: string
+}
+
+type PlannedPatchChecks = {
+  patchKind: PatchKind
+  packageScripts: Record<string, string>
+  packageManager: PackageManager
+  scripts: string[]
+  configuredScripts: boolean
+  reviewRequired: boolean
+  approvalRequired: boolean
+  reason: string
+}
+
 export async function runPatchChecks(projectRoot: string, options: PatchCheckOptions = {}): Promise<PatchCheckSummary> {
-  if (options.enabled === false) {
-    return { status: "skipped", reason: "checks disabled in tools configuration", results: [] }
-  }
-  const packageScripts = await readPackageScripts(projectRoot)
-  if (!packageScripts) {
-    return { status: "skipped", reason: "package.json not found or has no scripts", results: [] }
-  }
-  const packageManager = await detectPackageManager(projectRoot)
+  const planned = await planPatchChecks(projectRoot, options)
+  if ("status" in planned) return planned
+  return executePlannedPatchChecks(projectRoot, options, planned)
+}
 
-  const scripts = normalizeCheckScripts(options.scripts?.length ? options.scripts : selectDefaultCheckScripts(packageScripts))
-  if (scripts.length === 0) {
-    return { status: "skipped", reason: "no check, typecheck, lint, or test script found", results: [] }
+export async function runPatchChecksWithApproval(
+  projectRoot: string,
+  options: PatchCheckOptions = {},
+  approval: PatchCheckApproval,
+): Promise<PatchCheckSummary> {
+  const planned = await planPatchChecks(projectRoot, options)
+  if ("status" in planned) return planned
+  if (approval.mode !== "radical" || planned.approvalRequired) {
+    if (!approval.onToolApproval) {
+      return {
+        status: "skipped",
+        reason: "check scripts require command execution approval",
+        patchKind: planned.patchKind,
+        selectedScripts: planned.scripts,
+        ...(planned.reviewRequired ? { reviewRequired: true } : {}),
+        results: [],
+      }
+    }
+    const decision = await approval.onToolApproval({
+      toolCallId: `patch-checks:${approval.sessionId}:${approval.attempt}`,
+      toolName: "run_script",
+      args: {
+        scripts: planned.scripts,
+        patchKind: planned.patchKind,
+        reason: planned.reason,
+      },
+    }, approval.signal)
+    if (approval.signal?.aborted) throw createRunAbortedError()
+    if (decision?.approved === false) {
+      return {
+        status: "skipped",
+        reason: `check scripts blocked: ${decision.reason ?? "not approved"}`,
+        patchKind: planned.patchKind,
+        selectedScripts: planned.scripts,
+        ...(planned.reviewRequired ? { reviewRequired: true } : {}),
+        results: [],
+      }
+    }
   }
+  return executePlannedPatchChecks(projectRoot, options, planned)
+}
 
+export function classifyPatchKind(input?: PatchSummary | readonly PatchFileChange[]): PatchKind {
+  const changes: readonly PatchFileChange[] = input
+    ? isPatchSummaryInput(input) ? input.changedFiles : input
+    : []
+  const paths = (changes ?? []).map((change) => change.path).filter(Boolean)
+  if (paths.length === 0) return "unknown-code"
+  if (paths.some(isPackageChangePath)) return "package-change"
+  if (paths.some(isCiPath)) return "ci-risk"
+  if (paths.some(isDbPath)) return "db-risk"
+  if (paths.some(isAuthPath)) return "auth-risk"
+  if (paths.every(isDocsPath)) return "docs-only"
+  if (paths.every(isTestPath)) return "test-only"
+  if (paths.some(isFrontendPath)) return "frontend"
+  if (paths.some(isBackendPath)) return "backend"
+  return "unknown-code"
+}
+
+function isPatchSummaryInput(input: PatchSummary | readonly PatchFileChange[]): input is PatchSummary {
+  return !Array.isArray(input)
+}
+
+export function patchKindRequiresReview(kind: PatchKind): boolean {
+  return kind === "auth-risk" || kind === "db-risk" || kind === "ci-risk"
+}
+
+async function executePlannedPatchChecks(
+  projectRoot: string,
+  options: PatchCheckOptions,
+  planned: PlannedPatchChecks,
+): Promise<PatchCheckSummary> {
   const results: PatchCheckResult[] = []
-  for (const script of scripts) {
-    if (!Object.prototype.hasOwnProperty.call(packageScripts, script)) {
+  for (const script of planned.scripts) {
+    if (!Object.prototype.hasOwnProperty.call(planned.packageScripts, script)) {
       results.push({
         name: script,
-        command: packageManager.command,
-        args: packageManager.runArgs(script),
+        command: planned.packageManager.command,
+        args: planned.packageManager.runArgs(script),
         status: "failed",
         exitCode: null,
         signal: null,
@@ -87,7 +183,7 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
       })
       continue
     }
-    results.push(await runPackageScriptCheck(projectRoot, script, packageManager, {
+    results.push(await runPackageScriptCheck(projectRoot, script, planned.packageManager, {
       timeoutMs: options.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
       maxOutputBytes: options.maxOutputBytes ?? DEFAULT_CHECK_OUTPUT_BYTES,
     }))
@@ -95,34 +191,293 @@ export async function runPatchChecks(projectRoot: string, options: PatchCheckOpt
 
   return {
     status: results.every((result) => result.status === "passed") ? "passed" : "failed",
+    reason: planned.reason,
+    patchKind: planned.patchKind,
+    selectedScripts: planned.scripts,
+    ...(planned.reviewRequired ? { reviewRequired: true } : {}),
     results,
   }
 }
 
-export async function runPatchChecksWithApproval(
-  projectRoot: string,
-  options: PatchCheckOptions = {},
-  approval: PatchCheckApproval,
-): Promise<PatchCheckSummary> {
-  if (options.enabled === false) return runPatchChecks(projectRoot, options)
-  if (approval.mode !== "radical") {
-    if (!approval.onToolApproval) {
-      return { status: "skipped", reason: "check scripts require command execution approval", results: [] }
-    }
-    const decision = await approval.onToolApproval({
-      toolCallId: `patch-checks:${approval.sessionId}:${approval.attempt}`,
-      toolName: "run_script",
-      args: {
-        scripts: options.scripts?.length ? options.scripts : [...CHECK_SCRIPT_PRIORITY],
-        reason: "post-patch verification",
-      },
-    }, approval.signal)
-    if (approval.signal?.aborted) throw createRunAbortedError()
-    if (decision?.approved === false) {
-      return { status: "skipped", reason: `check scripts blocked: ${decision.reason ?? "not approved"}`, results: [] }
+async function planPatchChecks(projectRoot: string, options: PatchCheckOptions): Promise<PlannedPatchChecks | PatchCheckSummary> {
+  const patchKind = classifyPatchKind(options.patch ?? options.changedFiles)
+  if (options.enabled === false) {
+    return {
+      status: "skipped",
+      reason: "checks disabled in tools configuration",
+      patchKind,
+      results: [],
     }
   }
-  return runPatchChecks(projectRoot, options)
+
+  const selection = selectPatchCheckPolicy(options, patchKind)
+  if (selection.skip) {
+    return {
+      status: "skipped",
+      reason: selection.reason,
+      patchKind,
+      selectedScripts: selection.scripts,
+      ...(selection.reviewRequired ? { reviewRequired: true } : {}),
+      results: [],
+    }
+  }
+
+  const packageScripts = await readPackageScripts(projectRoot)
+  if (!packageScripts) {
+    return {
+      status: "skipped",
+      reason: "package.json not found or has no scripts",
+      patchKind,
+      selectedScripts: selection.scripts,
+      ...(selection.reviewRequired ? { reviewRequired: true } : {}),
+      results: [],
+    }
+  }
+  const scripts = selection.configuredScripts
+    ? selection.scripts
+    : selection.scripts.filter((script) => Object.prototype.hasOwnProperty.call(packageScripts, script))
+  if (scripts.length === 0) {
+    return {
+      status: "skipped",
+      reason: selection.configuredScripts
+        ? `${selection.reason}; no check scripts selected`
+        : `${selection.reason}; no ${selection.scripts.join(", ")} script found`,
+      patchKind,
+      selectedScripts: [],
+      ...(selection.reviewRequired ? { reviewRequired: true } : {}),
+      results: [],
+    }
+  }
+
+  return {
+    patchKind,
+    packageScripts,
+    packageManager: await detectPackageManager(projectRoot),
+    scripts,
+    configuredScripts: selection.configuredScripts,
+    reviewRequired: selection.reviewRequired,
+    approvalRequired: selection.approvalRequired,
+    reason: selection.reason,
+  }
+}
+
+function selectPatchCheckPolicy(options: PatchCheckOptions, patchKind: PatchKind): PatchCheckPolicySelection {
+  const policy = options.policies?.[patchKind]
+  const policyReviewRequired = policy?.review === "required"
+  const defaultPolicy = defaultPatchCheckPolicy(patchKind, options.strategy ?? "smart")
+  const reviewRequired = policyReviewRequired || defaultPolicy.reviewRequired
+  const explicitScripts = normalizeCheckScripts(options.scripts)
+  if (policy?.enabled === false) {
+    return {
+      patchKind,
+      scripts: [],
+      configuredScripts: true,
+      skip: true,
+      reviewRequired,
+      approvalRequired: defaultPolicy.approvalRequired,
+      reason: policy.reason ?? `${patchKind}: checks disabled by policy`,
+    }
+  }
+  if (policy?.scripts !== undefined) {
+    const policyScripts = normalizeCheckScripts(policy.scripts)
+    return {
+      patchKind,
+      scripts: policyScripts,
+      configuredScripts: true,
+      skip: policyScripts.length === 0,
+      reviewRequired,
+      approvalRequired: defaultPolicy.approvalRequired,
+      reason: policy.reason ?? `${patchKind}: running policy check scripts`,
+    }
+  }
+  if (explicitScripts.length > 0) {
+    return {
+      patchKind,
+      scripts: explicitScripts,
+      configuredScripts: true,
+      skip: false,
+      reviewRequired,
+      approvalRequired: defaultPolicy.approvalRequired,
+      reason: policy?.reason ?? `${patchKind}: running configured check scripts`,
+    }
+  }
+  return {
+    patchKind,
+    scripts: defaultPolicy.scripts,
+    configuredScripts: false,
+    skip: defaultPolicy.skip,
+    reviewRequired,
+    approvalRequired: defaultPolicy.approvalRequired,
+    reason: policy?.reason ?? defaultPolicy.reason,
+  }
+}
+
+function defaultPatchCheckPolicy(
+  patchKind: PatchKind,
+  strategy: CheckSelectionStrategy,
+): Omit<PatchCheckPolicySelection, "patchKind" | "configuredScripts"> {
+  if (strategy === "all") {
+    return {
+      scripts: FULL_CHECK_SCRIPTS,
+      skip: false,
+      reviewRequired: patchKindRequiresReview(patchKind),
+      approvalRequired: patchKind === "ci-risk",
+      reason: `${patchKind}: running full check set because check strategy is all`,
+    }
+  }
+
+  switch (patchKind) {
+    case "docs-only":
+      return {
+        scripts: [],
+        skip: true,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "docs-only: skipping package checks by default",
+      }
+    case "test-only":
+      return {
+        scripts: ["test"],
+        skip: false,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "test-only: running test script",
+      }
+    case "frontend":
+      return {
+        scripts: ["typecheck", "lint", "test"],
+        skip: false,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "frontend: running typecheck, lint, and test scripts when available",
+      }
+    case "backend":
+      return {
+        scripts: ["typecheck", "test"],
+        skip: false,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "backend: running typecheck and test scripts when available",
+      }
+    case "auth-risk":
+      return {
+        scripts: FULL_CHECK_SCRIPTS,
+        skip: false,
+        reviewRequired: true,
+        approvalRequired: false,
+        reason: "auth-risk: running full check set and requiring review",
+      }
+    case "db-risk":
+      return {
+        scripts: FULL_CHECK_SCRIPTS,
+        skip: false,
+        reviewRequired: true,
+        approvalRequired: false,
+        reason: "db-risk: running full check set and requiring review",
+      }
+    case "package-change":
+      return {
+        scripts: FULL_CHECK_SCRIPTS,
+        skip: false,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "package-change: running full check set because package metadata changed",
+      }
+    case "ci-risk":
+      return {
+        scripts: FULL_CHECK_SCRIPTS,
+        skip: false,
+        reviewRequired: true,
+        approvalRequired: true,
+        reason: "ci-risk: running full check set only after command approval and requiring review",
+      }
+    case "unknown-code":
+      return {
+        scripts: FULL_CHECK_SCRIPTS,
+        skip: false,
+        reviewRequired: false,
+        approvalRequired: false,
+        reason: "unknown-code: running full check set",
+      }
+  }
+}
+
+function isPackageChangePath(path: string): boolean {
+  const name = basename(path).toLowerCase()
+  return name === "package.json"
+    || name === "bun.lock"
+    || name === "bun.lockb"
+    || name === "package-lock.json"
+    || name === "pnpm-lock.yaml"
+    || name === "yarn.lock"
+    || name === "npm-shrinkwrap.json"
+    || name === "pnpm-workspace.yaml"
+}
+
+function isCiPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const name = basename(normalized)
+  return normalized.startsWith(".github/workflows/")
+    || normalized.startsWith(".circleci/")
+    || name === ".gitlab-ci.yml"
+    || name === ".gitlab-ci.yaml"
+    || name === "bitbucket-pipelines.yml"
+    || name === "bitbucket-pipelines.yaml"
+}
+
+function isDbPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const segments = normalized.split("/")
+  const name = basename(normalized)
+  return segments.some((segment) => ["db", "database", "databases", "migration", "migrations", "prisma", "drizzle"].includes(segment))
+    || name === "schema.prisma"
+    || name.endsWith(".sql")
+}
+
+function isAuthPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const segments = normalized.split("/")
+  const name = basename(normalized)
+  return segments.some((segment) => ["auth", "authentication", "oauth", "login", "session", "sessions"].includes(segment))
+    || /^(auth|oauth|login|session|sessions|credential|credentials|token|tokens)([.-]|$)/.test(name)
+}
+
+function isDocsPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const name = basename(normalized)
+  const extension = extname(name)
+  return normalized.startsWith("docs/")
+    || ["readme", "changelog", "contributing", "license", "notice"].includes(name.replace(/\.[^.]+$/, ""))
+    || [".md", ".mdx", ".txt", ".rst", ".adoc"].includes(extension)
+}
+
+function isTestPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const segments = normalized.split("/")
+  const name = basename(normalized)
+  return segments.some((segment) => ["test", "tests", "__tests__", "spec", "specs", "fixtures", "__fixtures__"].includes(segment))
+    || /\.(test|spec)\.[cm]?[jt]sx?$/.test(name)
+}
+
+function isFrontendPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const segments = normalized.split("/")
+  const extension = extname(normalized)
+  return [".tsx", ".jsx", ".css", ".scss", ".sass", ".less", ".html", ".vue", ".svelte"].includes(extension)
+    || segments.some((segment) => ["frontend", "client", "web", "ui", "components", "pages", "styles", "assets", "public"].includes(segment))
+    || basename(normalized) === "vite.config.ts"
+}
+
+function isBackendPath(path: string): boolean {
+  const normalized = normalizePathForClassification(path)
+  const segments = normalized.split("/")
+  const extension = extname(normalized)
+  return segments.some((segment) => ["api", "server", "backend", "routes", "controllers", "services", "workers", "runtime", "tools", "config"].includes(segment))
+    || [".ts", ".js", ".mts", ".cts", ".mjs", ".cjs", ".go", ".rs", ".py", ".java", ".kt", ".rb", ".php", ".cs", ".swift"].includes(extension)
+}
+
+function normalizePathForClassification(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\/+/, "").toLowerCase()
 }
 
 async function readPackageScripts(projectRoot: string): Promise<Record<string, string> | undefined> {

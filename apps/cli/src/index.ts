@@ -158,7 +158,10 @@ export function formatRunReport(report: FinalReport): string {
     : "no patch activity"
   const checks = report.checks
     ? report.checks.results.length > 0
-      ? `${report.checks.status} (${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")})`
+      ? `${report.checks.status} (${[
+          report.checks.results.map((result) => `${result.name} ${result.status}`).join(", "),
+          report.checks.reason,
+        ].filter(Boolean).join("; ")})`
       : report.checks.reason ? `${report.checks.status} (${report.checks.reason})` : report.checks.status
     : "not run"
   const review = report.review ? report.review.decision : "not run"

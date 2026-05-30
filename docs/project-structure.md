@@ -40,6 +40,8 @@ This document is the source of truth for workspace layout, package ownership, an
 braincode/
   AGENTS.md
   .mcp.json
+  .braincode/
+    checks.json
   .agents/
     hooks.json
     skills/
@@ -167,12 +169,13 @@ Responsibilities:
 - Write settings atomically where practical.
 - Keep secrets separate from normal settings.
 - Apply future config migrations.
-- Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skills`, and `.agents/hooks.json`.
+- Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skills`, `.agents/hooks.json`, and optional `.braincode/checks.json`.
 - Parse `.mcp.json` for project MCP server metadata without copying secrets into model context.
 - Treat user MCP config as user-installed/trusted, but require project `.mcp.json` server entries to opt in with `trusted: true` before Braincode starts their commands.
 - Load local skill Markdown from `.agents/skills/<skill-id>/SKILL.md` or top-level `.agents/skills/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
+- Load optional project check policy from `.braincode/checks.json` and normalize it as a non-secret project support file.
 - Aggregate token usage from session JSONL records by model, role, runtime phase, and recent call details for the local config UI.
 
 ### `packages/server`
@@ -235,6 +238,7 @@ Responsibilities:
 - Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and reset cached evidence plus duplicate counters after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
 - Apply path-aware and command-aware permission policy before local writes, patches, shell/exec commands, and package scripts; deny matches are not bypassable, ask matches can be approved by the active permission mode, and `review: required` matches add a review worker.
+- Classify patch changes into smart check kinds, select package-script checks according to user/project policy, record why checks ran or were skipped, and force review for smart-check risk kinds.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
 - Carry project support references in worker handoff packets.
 - Record provider token usage per routeBrain, support, primary, and review model call into session JSONL.
@@ -371,9 +375,9 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: read-only tool access for `librarian`, `qa`, `security`, and review workers.
 - Done: non-interactive run permission modes: read-only default, `--allow-edits` for local reads/file edits, and `--yes`.
 - Done: minimal patch ledger record with changed files and git diff stats.
-- Done: automated package-script checks for file-changing runs with package manager detection, `check_summary` session records, and review-worker patch/check artifacts.
+- Done: automated package-script checks for file-changing runs with package manager detection, smart patch-kind selection, `check_summary` session records, and review-worker patch/check artifacts.
 - Done: review-worker artifacts include capped text previews for newly created untracked files and binary markers for untracked binary files.
-- Done: configurable check-runner policy in `tools.json` for explicit scripts, timeout/output bounds, and disabling checks.
+- Done: configurable check-runner policy in `tools.json` plus project `.braincode/checks.json` overrides for explicit scripts, per-kind policies, timeout/output bounds, and disabling checks.
 - Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
 - Done: bounded run-level read-only evidence cache with duplicate tool-call reminders, LRU/TTL/byte-limit eviction, cache-size details, and write/execute invalidation.
 - Done: Permission Policy v2 in `tools.json`, with path-aware edit/patch checks, command-aware shell/exec/script checks, non-bypassable deny rules, policy details on tool results, and forced review for sensitive path matches.

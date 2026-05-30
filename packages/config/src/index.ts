@@ -11,7 +11,9 @@ import {
 } from "@braincode/shared";
 import {
   createDefaultToolConfiguration,
+  normalizePartialCheckRunnerConfiguration,
   normalizeToolConfiguration,
+  type PartialCheckRunnerConfiguration,
   type ToolConfigDocument,
 } from "@braincode/tools";
 
@@ -79,6 +81,7 @@ export type ProjectSupportPaths = {
   mcp: string;
   skills: string;
   hooks: string;
+  checks: string;
 };
 
 export type ProjectInstructionFile = {
@@ -115,6 +118,11 @@ export type ProjectSupport = {
   agents?: ProjectInstructionFile;
   mcp?: ProjectMcpConfig;
   skills: ProjectSkill[];
+};
+
+export type ProjectChecksConfig = {
+  path: string;
+  config: PartialCheckRunnerConfiguration;
 };
 
 export type UserSupportPaths = {
@@ -526,6 +534,7 @@ export function getProjectSupportPaths(
     mcp: join(projectRoot, ".mcp.json"),
     skills: join(projectRoot, ".agents", "skills"),
     hooks: join(projectRoot, ".agents", "hooks.json"),
+    checks: join(projectRoot, ".braincode", "checks.json"),
   };
 }
 
@@ -909,6 +918,19 @@ export async function readProjectSupport(
         }
       : undefined,
     skills: await readProjectSkills(paths.skills),
+  };
+}
+
+export async function readProjectChecks(
+  projectRoot = process.cwd(),
+): Promise<ProjectChecksConfig | undefined> {
+  const paths = getProjectSupportPaths(projectRoot);
+  const file = Bun.file(paths.checks);
+  if (!(await file.exists())) return undefined;
+
+  return {
+    path: paths.checks,
+    config: normalizePartialCheckRunnerConfiguration(JSON.parse(await file.text())),
   };
 }
 

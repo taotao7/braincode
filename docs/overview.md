@@ -138,6 +138,7 @@ Project-local support files live next to code:
 <repo>/
   AGENTS.md                 durable project instructions injected into prompts
   .mcp.json                 project MCP server declarations (metadata only in prompts)
+  .braincode/checks.json    optional project check policy overrides
   .agents/hooks.json        project lifecycle hooks
   .agents/skills/<id>/SKILL.md   project-local skills
 ```
