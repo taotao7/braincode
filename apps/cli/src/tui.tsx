@@ -2998,7 +2998,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
           kind: "report",
           text: formatTuiFinalReportCompact(result.finalReport),
           finalReport: result.finalReport,
-          collapsed: true,
+          collapsed: false,
         });
         const trimmedSummary = normalizeAssistantText(
           (result.summary ?? "").trim(),
@@ -5334,7 +5334,7 @@ function samePetSnapshot(
 function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
-  if (item.kind === "report") return true;
+  if (item.kind === "report") return false;
   return isTranscriptItemAutoCollapsed({
     ...item,
     text:
@@ -5345,7 +5345,7 @@ function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
 function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
-  if (item.kind === "report") return true;
+  if (item.kind === "report") return false;
   if (!["assistant", "panel", "help", "error"].includes(item.kind))
     return false;
   const lines = item.text.split(/\r?\n/);
