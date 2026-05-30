@@ -200,7 +200,10 @@ async function resolveBrain(home: string | undefined, brainId: string): Promise<
   return selectBrain(brains, brainId)
 }
 
-function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: ProjectSupport): string {
+// Exported for direct unit testing: the prompt builders only run deep inside a
+// successful worker execution, so they are verified in isolation rather than
+// through a full dispatched run.
+export function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: ProjectSupport): string {
   const support = formatDispatchProjectSupport(projectSupport)
   return `Run this isolated Braincode specialist consultation requested mid-run by the primary agent.
 
@@ -216,7 +219,7 @@ Return only JSON in this shape:
 {"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"concise actionable findings","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
 }
 
-function formatDispatchProjectSupport(projectSupport: ProjectSupport): string {
+export function formatDispatchProjectSupport(projectSupport: ProjectSupport): string {
   if (!projectSupport.agents) return ""
   return `Project instructions (${projectSupport.agents.path}):\n${projectSupport.agents.content}\n\n`
 }

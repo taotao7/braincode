@@ -908,7 +908,10 @@ function createFallbackWorkers(normalizedPrompt: string, primaryRole: RoutedAgen
   if (dbaWorkPattern.test(normalizedPrompt) && primaryRole !== "dba") add("dba")
   if (securityWorkPattern.test(normalizedPrompt) && primaryRole !== "security") add("security")
   if (qaWorkPattern.test(normalizedPrompt) && primaryRole !== "qa") add("qa")
-  if (reviewWorkPattern.test(normalizedPrompt) && primaryRole !== "review") add("review")
+  // A review worker vets file edits, so only attach one when the prompt carries
+  // file-edit intent. A read-only inspection ("review only … do not alter files")
+  // names "review" without editing anything and must not spawn a review worker.
+  if (reviewWorkPattern.test(normalizedPrompt) && fileEditRiskPattern.test(normalizedPrompt) && primaryRole !== "review") add("review")
 
   return roles.map((role) => ({
     role,

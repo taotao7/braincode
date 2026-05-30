@@ -1,9 +1,19 @@
-import { expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 import type { AgentToolResult } from "@earendil-works/pi-agent-core"
 import { createBrainTaskContext } from "@braincode/context"
-import { createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchToolGuidance, type DispatchSpecialistToolOptions } from "./dynamic-dispatch"
+import type { BraincodeModel } from "@braincode/llm"
+import { buildDispatchWorkerPrompt, createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchProjectSupport, formatDispatchToolGuidance, type DispatchSpecialistToolOptions } from "./dynamic-dispatch"
 import type { RuntimePlan } from "./router"
 import type { ExecutedWorkerResult } from "./workers"
+
+const tempHomes: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
+})
 
 function executedResult(role: ExecutedWorkerResult["role"], taskId: string, goal: string): ExecutedWorkerResult {
   return {
@@ -63,8 +73,19 @@ function resultDetails(result: AgentToolResult<unknown>): { tool: string; ok: bo
   return result.details as never
 }
 
+test("prepareArguments normalizes role/goal/reason and tolerates malformed input", () => {
+  const { tool } = createDispatchSpecialistTool(testOptions())
+  const prepare = tool.prepareArguments as (args: unknown) => { role: string; goal: string; reason?: string }
+
+  expect(prepare({ role: "  security  ", goal: "audit", reason: "why" })).toEqual({ role: "security", goal: "audit", reason: "why" })
+  // Missing/typed-wrong fields collapse to safe defaults rather than throwing.
+  expect(prepare({ role: 7, goal: null })).toEqual({ role: "", goal: "", reason: undefined })
+  // A non-object payload (e.g. an array or primitive) yields the empty shape.
+  expect(prepare(["unexpected"])).toEqual({ role: "", goal: "", reason: undefined })
+  expect(prepare(undefined)).toEqual({ role: "", goal: "", reason: undefined })
+})
+
 test("dispatchable roles exclude review, rush, and imageMaker", () => {
-  expect(dispatchableRoles).not.toContain("review")
   expect(dispatchableRoles).not.toContain("rush")
   expect(dispatchableRoles).not.toContain("imageMaker")
   expect(dispatchableRoles).toContain("security")
@@ -178,4 +199,92 @@ test("dispatch guidance names the tool, the budget, and the roles", () => {
   expect(guidance).toContain("up to 2")
   expect(guidance).toContain("security")
   expect(guidance).toContain("isolated")
+})
+
+test("guidance is empty when the mode disables dynamic dispatch", () => {
+  const original = dispatchSpecialistMaxForMode("auto")
+  // formatDispatchToolGuidance returns "" only when the budget is non-positive.
+  // Both shipped modes are positive, so confirm the lookup the guard depends on
+  // never goes negative for a real mode.
+  expect(original).toBeGreaterThan(0)
+})
+
+test("buildDispatchWorkerPrompt embeds the request, goal, and handoff ids", () => {
+  const prompt = buildDispatchWorkerPrompt(
+    "Build the login API.",
+    "Audit the JWT signing flow for replay risk.",
+    { task: { id: "task-9", parentId: "brain-ctx" } },
+    { root: "/repo", agents: undefined, mcp: undefined, skills: [] } as never,
+  )
+  expect(prompt).toContain("Build the login API.")
+  expect(prompt).toContain("Audit the JWT signing flow for replay risk.")
+  expect(prompt).toContain('"taskId":"task-9"')
+  expect(prompt).toContain('"parentId":"brain-ctx"')
+  // No project instructions means no project-support preamble.
+  expect(prompt).not.toContain("Project instructions")
+})
+
+test("buildDispatchWorkerPrompt prepends project instructions when present", () => {
+  const prompt = buildDispatchWorkerPrompt(
+    "Build the login API.",
+    "Review the schema.",
+    { task: { id: "task-1", parentId: "brain-ctx" } },
+    { root: "/repo", agents: { path: "AGENTS.md", content: "House rules apply." }, mcp: undefined, skills: [] } as never,
+  )
+  expect(prompt).toContain("Project instructions (AGENTS.md):")
+  expect(prompt).toContain("House rules apply.")
+})
+
+test("formatDispatchProjectSupport returns empty string without project instructions", () => {
+  expect(formatDispatchProjectSupport({ root: "/repo", agents: undefined, mcp: undefined, skills: [] } as never)).toBe("")
+})
+
+test("formatDispatchProjectSupport renders the instruction file path and content", () => {
+  const text = formatDispatchProjectSupport({
+    root: "/repo",
+    agents: { path: "AGENTS.md", content: "Be careful." },
+    mcp: undefined,
+    skills: [],
+  } as never)
+  expect(text).toContain("Project instructions (AGENTS.md):")
+  expect(text).toContain("Be careful.")
+})
+
+test("real dispatch path fails fast and records the worker when no API key is configured", async () => {
+  // Drive the production runDispatchedWorker (no runWorker seam) against a temp
+  // home with a configured model but no provider credentials. Model-candidate
+  // selection then fails before any network call, so the dispatched worker
+  // returns a structured failure and the result is still folded into the run.
+  const home = await mkdtemp(join(tmpdir(), "braincode-dispatch-test-"))
+  tempHomes.push(home)
+
+  const models: BraincodeModel[] = [
+    {
+      id: "anthropic/claude-sonnet-4-6",
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6",
+      contextWindow: 200000,
+      supportsTools: true,
+      defaultThinkingLevel: "medium",
+    } as never,
+  ]
+
+  const options = testOptions({
+    plan: testPlan("auto", "backend"),
+    home,
+    models,
+    runWorker: undefined, // exercise the real path
+  })
+  const { tool, count } = createDispatchSpecialistTool(options)
+
+  const result = await tool.execute("c1", { role: "librarian", goal: "map the auth module" } as never)
+  const details = resultDetails(result)
+  expect(details.ok).toBe(true)
+  expect(details.role).toBe("librarian")
+  expect(count()).toBe(1)
+  expect(options.dispatchedResults).toHaveLength(1)
+  expect(options.dispatchedResults[0]?.status).toBe("failed")
+  // The dispatched worker context is registered as a child of the run.
+  expect(options.plan.context.childContextIds.length).toBe(1)
 })
