@@ -135,6 +135,12 @@ function toBraincodeOAuthCredentials(credentials: { refresh: string; access: str
   }
 }
 
+function isGitHubCopilotEnterprisePrompt(oauthProviderId: string, prompt: { message?: string; allowEmpty?: boolean }): boolean {
+  if (oauthProviderId !== "github-copilot") return false
+  if (prompt.allowEmpty === true) return true
+  return /github enterprise|github\.com|url\/domain|enterprise.*domain|domain/i.test(prompt.message ?? "")
+}
+
 async function startOAuthLoginSession(input: { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }): Promise<OAuthLoginSession> {
   const oauthProviderId = input.oauthProviderId?.trim() ?? ""
   if (!oauthProviderId) throw new Error("oauthProviderId is required")
@@ -167,8 +173,12 @@ async function startOAuthLoginSession(input: { provider?: string; oauthProviderI
           markOAuthLoginSession(session, "pending")
         },
         onPrompt: async (prompt) => {
+          if (isGitHubCopilotEnterprisePrompt(oauthProviderId, prompt)) {
+            const enterpriseDomain = input.enterpriseDomain?.trim() ?? ""
+            addOAuthProgress(session, enterpriseDomain ? `Using GitHub Enterprise domain: ${enterpriseDomain}` : "Using github.com for GitHub Copilot OAuth.")
+            return enterpriseDomain
+          }
           addOAuthProgress(session, prompt.message)
-          if (oauthProviderId === "github-copilot" && prompt.allowEmpty) return input.enterpriseDomain?.trim() ?? ""
           return waitForManualOAuthInput(session)
         },
         onProgress: (message) => addOAuthProgress(session, message),
@@ -395,7 +405,7 @@ async function handleRequest(request: Request): Promise<Response> {
       const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string; api?: string }
       const provider = body.provider?.trim() ?? ""
       const apiKey = body.apiKey?.trim() || (provider ? await readProviderRuntimeApiKey(provider) : undefined)
-      const api = body.api === "anthropic" || body.api === "anthropic-messages" ? "anthropic" : "openai"
+      const api = body.api === "anthropic" || body.api === "anthropic-messages" ? "anthropic" : body.api === "openai-images" ? "openai-images" : "openai"
       debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, api, hasApiKey: Boolean(apiKey) })
       const models = await listProviderModels({ provider, baseUrl: body.baseUrl ?? "", apiKey, api })
       const savedModels = await readModels()

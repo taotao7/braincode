@@ -348,13 +348,6 @@ export const defaultBrains: BraincodeBrains = {
         imageMaker: {
           modelId: "openai/gpt-image-2",
           thinkingLevel: "off",
-          imageModel: {
-            provider: "openai",
-            modelId: "gpt-image-2",
-            name: "GPT Image 2",
-            baseUrl: "https://api.openai.com/v1",
-            api: "openai-images",
-          },
           systemPrompt: agentRoleSystemPrompts.imageMaker,
         },
         dba: {
@@ -496,6 +489,19 @@ export const defaultModels: BraincodeModels = {
       contextWindow: 1000000,
       supportsTools: true,
       defaultThinkingLevel: "low",
+    },
+    {
+      id: "openai/gpt-image-2",
+      provider: "openai",
+      modelId: "gpt-image-2",
+      name: "GPT Image 2",
+      api: "openai-images",
+      baseUrl: "https://api.openai.com/v1",
+      contextWindow: 32000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsImageGeneration: true,
+      defaultThinkingLevel: "off",
     },
   ],
 };
@@ -2139,32 +2145,9 @@ function migrateBrains(document: BraincodeBrains): boolean {
         roles.imageMaker = {
           modelId: "openai/gpt-image-2",
           thinkingLevel: "off",
-          imageModel: {
-            provider: "openai",
-            modelId: "gpt-image-2",
-            name: "GPT Image 2",
-            baseUrl: "https://api.openai.com/v1",
-            api: "openai-images",
-          },
           systemPrompt: agentRoleSystemPrompts.imageMaker,
         };
         changed = true;
-      } else {
-        const imageMaker = asRecord(roles.imageMaker);
-        if (
-          imageMaker &&
-          imageMaker.modelId === "openai/gpt-image-2" &&
-          !asRecord(imageMaker.imageModel)
-        ) {
-          imageMaker.imageModel = {
-            provider: "openai",
-            modelId: "gpt-image-2",
-            name: "GPT Image 2",
-            baseUrl: "https://api.openai.com/v1",
-            api: "openai-images",
-          };
-          changed = true;
-        }
       }
       // v0.2.0: drop the obsolete `coding`, `fastReply`, and `research` roles.
       // `coding` is subsumed by frontend/backend specialists. `fastReply` folds
@@ -2212,20 +2195,53 @@ export async function writeModels(
 
 function migrateModels(document: BraincodeModels): boolean {
   let changed = false;
-  const withoutDefaultImageModel = document.models.filter((model) => (model as Record<string, unknown> | undefined)?.id !== "openai/gpt-image-2");
-  if (withoutDefaultImageModel.length !== document.models.length) {
-    document.models = withoutDefaultImageModel;
-    changed = true;
+  const modelIds = new Set(document.models.map((model) => (model as Record<string, unknown> | undefined)?.id).filter((id): id is string => typeof id === "string"));
+  const hasDefaultTextModels = [
+    "azure-openai-responses/gpt-5.5",
+    "anthropic/claude-sonnet-4-6",
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3-flash-preview",
+  ].every((id) => modelIds.has(id));
+  if (hasDefaultTextModels && !modelIds.has("openai/gpt-image-2")) {
+    const defaultImageModel = defaultModels.models.find((model) => (model as Record<string, unknown> | undefined)?.id === "openai/gpt-image-2");
+    if (defaultImageModel) {
+      document.models.push(structuredClone(defaultImageModel));
+      changed = true;
+    }
   }
   for (const model of document.models) {
     if (!model || typeof model !== "object") continue;
     const record = model as Record<string, unknown>;
-    if (typeof record.api !== "string") continue;
+    if (typeof record.api !== "string") {
+      continue;
+    }
 
     const normalizedApi = normalizeModelApi(record.api);
     if (normalizedApi !== record.api) {
       record.api = normalizedApi;
       changed = true;
+    }
+    if (record.api === "openai-images") {
+      if (record.supportsTools !== false) {
+        record.supportsTools = false;
+        changed = true;
+      }
+      if (record.supportsVision !== false) {
+        record.supportsVision = false;
+        changed = true;
+      }
+      if (record.supportsImageGeneration !== true) {
+        record.supportsImageGeneration = true;
+        changed = true;
+      }
+      if (record.defaultThinkingLevel !== "off") {
+        record.defaultThinkingLevel = "off";
+        changed = true;
+      }
+      if (typeof record.contextWindow !== "number") {
+        record.contextWindow = 32000;
+        changed = true;
+      }
     }
   }
   return changed;

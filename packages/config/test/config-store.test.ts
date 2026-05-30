@@ -33,6 +33,24 @@ test("ensureBraincodeHome creates config files and directories", async () => {
   expect((await stat(paths.cache)).isDirectory()).toBe(true)
 })
 
+test("default models include the Image Maker generation model", async () => {
+  const home = await makeTempHome()
+  const models = await readModels(home)
+  const imageModel = models.models.find((model) => (model as { id?: string }).id === "openai/gpt-image-2") as {
+    api?: string
+    supportsImageGeneration?: boolean
+    supportsTools?: boolean
+    supportsVision?: boolean
+  } | undefined
+
+  expect(imageModel).toMatchObject({
+    api: "openai-images",
+    supportsImageGeneration: true,
+    supportsTools: false,
+    supportsVision: false,
+  })
+})
+
 test("path helpers derive user and project support locations", async () => {
   const home = await makeTempHome()
   const root = await mkdtemp(join(tmpdir(), "braincode-config-paths-project-"))
@@ -466,6 +484,28 @@ test("readModels migrates legacy OpenAI chat completions API ids", async () => {
   expect(stored.models[0]?.api).toBe("openai-completions")
 })
 
+test("readModels migrates old default model catalogs to include Image Maker", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(
+    paths.models,
+    JSON.stringify({
+      models: [
+        { id: "azure-openai-responses/gpt-5.5" },
+        { id: "anthropic/claude-sonnet-4-6" },
+        { id: "google/gemini-3.1-pro-preview" },
+        { id: "google/gemini-3-flash-preview" },
+      ],
+    }),
+  )
+
+  const models = await readModels(home)
+  const imageModel = models.models.find((model) => (model as { id?: string }).id === "openai/gpt-image-2") as { api?: string; supportsImageGeneration?: boolean } | undefined
+
+  expect(imageModel).toMatchObject({ api: "openai-images", supportsImageGeneration: true })
+})
+
 test("readBrains migrates obsolete roles and stale default system prompts", async () => {
   const home = await makeTempHome()
   const paths = await ensureBraincodeHome(home)
@@ -508,7 +548,7 @@ test("readBrains migrates obsolete roles and stale default system prompts", asyn
   )
 
   const brains = await readBrains(home)
-  const brain = brains.brains[0] as { planner?: { systemPrompt?: string }; roles?: Record<string, { systemPrompt?: string; imageModel?: { provider?: string; modelId?: string } }> }
+  const brain = brains.brains[0] as { planner?: { systemPrompt?: string }; roles?: Record<string, { modelId?: string; systemPrompt?: string; imageModel?: { provider?: string; modelId?: string } }> }
 
   expect(brain.roles?.coding).toBeUndefined()
   expect(brain.roles?.fastReply).toBeUndefined()
@@ -519,7 +559,8 @@ test("readBrains migrates obsolete roles and stale default system prompts", asyn
   expect(brain.roles?.rush?.systemPrompt).toBe(agentRoleSystemPrompts.rush)
   expect(brain.roles?.pet?.systemPrompt).toBe(agentRoleSystemPrompts.pet)
   expect(brain.roles?.imageMaker?.systemPrompt).toBe(agentRoleSystemPrompts.imageMaker)
-  expect(brain.roles?.imageMaker?.imageModel).toMatchObject({ provider: "openai", modelId: "gpt-image-2" })
+  expect(brain.roles?.imageMaker?.modelId).toBe("openai/gpt-image-2")
+  expect(brain.roles?.imageMaker?.imageModel).toBeUndefined()
 })
 
 test("auth status lists configured provider names without returning secrets", async () => {

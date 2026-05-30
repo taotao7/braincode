@@ -122,14 +122,16 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
   settings.json      执行模式、默认 brain id、feature flag
   auth.json          provider key（不会进模型 prompt）
   brains.json        Brain Model 列表
-  models.json        BraincodeModel 目录（provider、baseUrl、id）
+  models.json        BraincodeModel 目录（文本、视觉和图片生成模型）
   tools.json         工具开关
   hooks.json         用户级生命周期 hook
   sessions/          每个 session 一份 JSONL，记录编排事件
   logs/、cache/      运行时副产物
 ```
 
-`braincode config` 在 localhost 上提供多 tab Web UI。模型管理放在第一个 tab；数据统计有独立 tab，用 Recharts 展示按模型、角色、运行阶段聚合的 token 用量，并支持点击查看明细。通过 OAuth 认证过的订阅 provider，比如 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot，会出现在模型目录里，添加模型时不需要重复填 API key。
+`braincode config` 在 localhost 上提供多 tab Web UI。模型管理放在第一个 tab；数据统计有独立 tab，用 Recharts 展示按模型、角色、运行阶段聚合的 token 用量，并支持点击查看明细。通过 OAuth 认证过的订阅 provider，比如 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot，会出现在模型目录里，添加模型时不需要重复填 API key。GitHub Copilot OAuth 默认走公共 `github.com`；只有显式启用 GitHub Enterprise 时才显示域名输入。
+
+模型页是文本、视觉和图片生成模型的统一目录。添加模型时先选择来源：Pi provider 目录、用户 provider 的 `/models` 端点，或手动填写兼容 API 元数据。目录项不携带凭证；运行时按 provider id 从 `~/.braincode/auth.json` 读取 API key 或 OAuth 订阅 token。`imageMaker` 只用于图片生成或编辑，但现在也像其他角色一样从 `models.json` 选择 `openai-images` 模型。能读图的文本模型仍是普通视觉输入模型，不等于图片生成模型。
 
 项目级的支持文件就放在代码旁边：
 

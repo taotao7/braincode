@@ -122,12 +122,14 @@ Tout ce qui est spécifique à l'utilisateur vit sous `~/.braincode/` :
   settings.json      mode d'exécution, id du brain par défaut, feature flags
   auth.json          clés provider (gardées hors des prompts de modèle)
   brains.json        Brain Models
-  models.json        catalogue BraincodeModel (provider, baseUrl, id)
+  models.json        catalogue BraincodeModel pour modèles texte, vision et génération d'images
   tools.json         interrupteurs d'outils
   hooks.json         hooks de cycle de vie utilisateur
   sessions/          JSONL par session des événements d'orchestration
   logs/, cache/      sous-produits runtime
 ```
+
+`braincode config` expose l'onglet Models comme registre unique pour les modèles texte, vision et génération d'images. Le flux d'ajout distingue trois sources : catalogue provider Pi, endpoint `/models` d'un provider utilisateur, ou métadonnées compatibles saisies manuellement. Les entrées de catalogue n'embarquent jamais de secrets ; les credentials runtime sont résolus par id de provider depuis `~/.braincode/auth.json`, y compris les tokens d'abonnement OAuth. GitHub Copilot OAuth utilise `github.com` par défaut ; le champ de domaine GitHub Enterprise n'est affiché que s'il est activé explicitement. `imageMaker` reste réservé à la génération ou édition raster, mais choisit maintenant un modèle `openai-images` depuis `models.json`.
 
 Les fichiers de support spécifiques au projet vivent à côté du code :
 

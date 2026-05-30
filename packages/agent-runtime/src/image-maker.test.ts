@@ -35,6 +35,38 @@ test("selectImageMakerModelCandidates requires image generation capable models",
   }
 })
 
+test("selectImageMakerModelCandidates accepts image models from models.json", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-image-maker-models-home-test-"))
+  try {
+    await writeProviderApiKey("openai", "test-key", home)
+
+    const candidates = await selectImageMakerModelCandidates(
+      { modelId: "openai/gpt-image-2", thinkingLevel: "off" },
+      [
+        {
+          id: "openai/gpt-image-2",
+          provider: "openai",
+          modelId: "gpt-image-2",
+          name: "GPT Image 2",
+          api: "openai-images",
+          baseUrl: "https://api.openai.com/v1",
+          contextWindow: 32000,
+          supportsTools: false,
+          supportsVision: false,
+          supportsImageGeneration: true,
+          defaultThinkingLevel: "off",
+        },
+      ],
+      home,
+    )
+
+    expect(candidates[0]?.apiKey).toBe("test-key")
+    expect(candidates[0]?.selection.configured.id).toBe("openai/gpt-image-2")
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test("saveGeneratedImageArtifact stores decoded images under the session directory", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-image-maker-home-test-"))
   try {

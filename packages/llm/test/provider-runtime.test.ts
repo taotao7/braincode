@@ -376,6 +376,42 @@ test("listOpenAICompatibleModels normalizes base URL and maps valid model entrie
   expect(models.map((model) => model.api)).toEqual(["openai-completions", "openai-completions"])
 })
 
+test("listProviderModels can register OpenAI-compatible Images API models", async () => {
+  const requests: Array<{ url: string; headers: Headers }> = []
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ url: String(input), headers: new Headers(init?.headers) })
+    return new Response(JSON.stringify({ data: [{ id: "gpt-image-2", name: "GPT Image 2" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }) as unknown as typeof fetch
+
+  const models = await listProviderModels({
+    provider: "openai",
+    api: "openai-images",
+    baseUrl: "https://api.openai.com",
+    apiKey: "key",
+  })
+
+  expect(requests[0]?.url).toBe("https://api.openai.com/v1/models")
+  expect(requests[0]?.headers.get("authorization")).toBe("Bearer key")
+  expect(models).toEqual([
+    {
+      id: "openai/gpt-image-2",
+      provider: "openai",
+      modelId: "gpt-image-2",
+      name: "GPT Image 2",
+      api: "openai-images",
+      baseUrl: "https://api.openai.com/v1",
+      contextWindow: 32000,
+      supportsTools: false,
+      supportsVision: false,
+      supportsImageGeneration: true,
+      defaultThinkingLevel: "off",
+    },
+  ])
+})
+
 test("listProviderModels supports Anthropic-compatible model listing", async () => {
   const requests: Array<{ url: string; headers: Headers }> = []
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {

@@ -25,7 +25,7 @@ export type OpenAICompatibleModelListRequest = {
   apiKey?: string
 }
 
-export type ProviderModelApi = "openai" | "anthropic"
+export type ProviderModelApi = "openai" | "anthropic" | "openai-images"
 
 export type ProviderModelListRequest = OpenAICompatibleModelListRequest & {
   api?: ProviderModelApi | "openai-completions" | "anthropic-messages" | "anthropic"
@@ -210,18 +210,19 @@ export function toOpenAICompatibleBraincodeModel(input: { provider: string; base
 
 export function toProviderBraincodeModel(input: { provider: string; baseUrl: string; api?: ProviderModelApi; modelId: string; name?: string }): BraincodeModel {
   const api = normalizeProviderModelApi(input.api)
-  const contextWindow = api === "anthropic" ? 200000 : 128000
+  const contextWindow = api === "anthropic" ? 200000 : api === "openai-images" ? 32000 : 128000
   return {
     id: `${input.provider}/${input.modelId}`,
     provider: input.provider,
     modelId: input.modelId,
     name: input.name || input.modelId,
-    api: api === "anthropic" ? "anthropic-messages" : "openai-completions",
+    api: api === "anthropic" ? "anthropic-messages" : api === "openai-images" ? "openai-images" : "openai-completions",
     baseUrl: normalizeProviderModelBaseUrlForStorage(input.baseUrl, api),
     contextWindow,
-    supportsTools: true,
+    supportsTools: api !== "openai-images",
     supportsVision: false,
-    defaultThinkingLevel: "medium",
+    ...(api === "openai-images" ? { supportsImageGeneration: true } : {}),
+    defaultThinkingLevel: api === "openai-images" ? "off" : "medium",
   }
 }
 
@@ -449,6 +450,7 @@ function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
 
 function normalizeProviderModelApi(api: ProviderModelListRequest["api"] | undefined): ProviderModelApi {
   const normalized = String(api || "openai").trim()
+  if (normalized === "openai-images") return "openai-images"
   return normalized === "anthropic" || normalized === "anthropic-messages" ? "anthropic" : "openai"
 }
 

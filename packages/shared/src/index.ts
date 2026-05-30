@@ -5,6 +5,7 @@ export const BRAINCODE_HOME_DIR_NAME = ".braincode"
 export const DEFAULT_CONFIG_HOST = "127.0.0.1"
 export const DEFAULT_CONFIG_PORT = 14580
 export const OPENAI_COMPLETIONS_API = "openai-completions"
+export const OPENAI_IMAGES_API = "openai-images"
 export const LEGACY_OPENAI_CHAT_COMPLETIONS_API = "openai-chat-completions"
 export const ANTHROPIC_MESSAGES_API = "anthropic-messages"
 export const GOOGLE_GENERATIVE_AI_API = "google-generative-ai"

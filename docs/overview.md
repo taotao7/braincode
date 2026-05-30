@@ -121,16 +121,16 @@ Everything user-specific lives under `~/.braincode/`:
   settings.json      execution mode, default brain id, feature flags
   auth.json          provider keys (kept out of model prompts)
   brains.json        Brain Models
-  models.json        BraincodeModel catalog for normal agent models (provider, baseUrl, id)
+  models.json        BraincodeModel catalog for text, vision, and image-generation models
   tools.json         tool toggles
   hooks.json         user-level lifecycle hooks
   sessions/          per-session JSONL transcripts of orchestration events
   logs/, cache/      runtime byproducts
 ```
 
-`braincode config` serves a tabbed Web UI on localhost. Models are the first tab; usage statistics have a dedicated tab with Recharts summaries and click-through details by model, role, and runtime phase. OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot appear as model-catalog providers once authenticated, so models can be added without duplicating API keys.
+`braincode config` serves a tabbed Web UI on localhost. Models are the first tab; usage statistics have a dedicated tab with Recharts summaries and click-through details by model, role, and runtime phase. OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot appear as model-catalog providers once authenticated, so models can be added without duplicating API keys. GitHub Copilot OAuth defaults to public `github.com`; GitHub Enterprise domain input is only shown when explicitly enabled.
 
-The Models tab is only for normal agent models. User-added providers declare an OpenAI-compatible or Anthropic-compatible API, can load available models from `/models` when the provider supports it, and can also accept manual model ids. The `imageMaker` role is different: it is a dedicated raster image generator configured directly in Brain routing with an OpenAI-compatible Images API endpoint such as OpenAI or Minimax. Vision-capable text models remain ordinary models with image input support; they are not image generation models.
+The Models tab is the single model registry for text, vision, and image-generation models. Its add-model flow has three explicit sources: the Pi provider catalog, a user provider `/models` endpoint, or manual compatible API metadata. Catalog entries never bundle credentials; runtime credentials are resolved by provider id from `~/.braincode/auth.json`, including OAuth-backed subscription tokens. User-added providers declare an OpenAI-compatible, Anthropic-compatible, or OpenAI-compatible Images API, can load available models from `/models` when the provider supports it, and can also accept manual model ids. The `imageMaker` role is still only for raster image generation or editing, but it now selects an `openai-images` model from `models.json` like other roles select their own configured model entries. Vision-capable text models remain ordinary models with image input support; they are not image generation models.
 
 Project-local support files live next to code:
 

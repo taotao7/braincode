@@ -96,6 +96,7 @@ type BrainModel = {
     frontend: ModelPolicy
     backend: ModelPolicy
     designer: ModelPolicy
+    imageMaker: ModelPolicy
     dba: ModelPolicy
     devops: ModelPolicy
     security: ModelPolicy
@@ -139,7 +140,7 @@ Both paths normalize into an `AgentRoutingPlan` with one primary routed role, ze
 
 Brain presets can inherit from another Brain Model with `extends`. The selected brain is resolved before routing, merging planner, role, routing, and context fields over the parent. This lets users maintain narrow presets such as a stricter review brain without duplicating the full built-in role matrix.
 
-Normal role policies point at entries in `models.json`; those entries are text-agent models backed either by Pi's built-in provider catalog or by user-added OpenAI/Anthropic-compatible providers. The `imageMaker` policy may instead carry its own `imageModel` block with provider, model id, name, and base URL for an OpenAI-compatible Images API. This keeps raster image generation separate from vision-capable text models: a model that accepts image input can serve frontend/design/review work, but it is not the Image Maker engine. When a prompt carries image input, routeBrain itself must run on a vision-capable configured model; if that cannot happen, Braincode reports the router failure instead of silently falling back to heuristic routing.
+Role policies point at entries in `models.json`; those entries include text-agent models backed by Pi's built-in provider catalog or user-added OpenAI/Anthropic-compatible providers, plus image-generation models backed by an OpenAI-compatible Images API. The `imageMaker` policy selects an `openai-images` entry from that same catalog, while runtime requirements prevent those image-generation entries from running text agent turns. This keeps raster image generation separate from vision-capable text models: a model that accepts image input can serve frontend/design/review work, but it is not the Image Maker engine. When a prompt carries image input, routeBrain itself must run on a vision-capable configured model; if that cannot happen, Braincode reports the router failure instead of silently falling back to heuristic routing.
 
 Routing also produces a todo plan and dependency graph. Each todo has a stable id, title, assigned routed role, status, and optional summary. Dependency edges identify which todo must produce output before another todo can proceed. Worker plans carry the todo ids they own and runtime worker plans carry stable child context ids. During execution the runtime records `context_plan`, `todo_plan`, `todo_update`, and `agent_message` session JSONL events, emits live todo and worker updates to the TUI, and updates the runtime plan so the user can see tasks move from pending to running to completed, blocked, or failed. Independent support workers run concurrently up to the mode-adjusted routing limit (`brain.routing.maxParallelAgents` in auto, at least 4 in radical); dependent support workers wait until Brain has an upstream worker summary to pass along. The TUI can show the current decomposition graph with `Ctrl+O` or `/intent`. Review work added by policy is appended to the runtime todo list without changing the original Brain-planned worker list.
 

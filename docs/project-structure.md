@@ -159,7 +159,7 @@ Early TUI commands:
 Browser UI for configuration.
 
 It should talk to the local server API and should not write `~/.braincode/` directly.
-It uses tabbed navigation with model management first, so long configuration surfaces stay scannable. It shows model, role, and runtime-phase token usage through the server usage-statistics API, including charted summaries and clickable details. When auth status reports OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, or GitHub Copilot, the model catalog can add those provider models without requiring a duplicate API key.
+It uses tabbed navigation with model management first, so long configuration surfaces stay scannable. It shows model, role, and runtime-phase token usage through the server usage-statistics API, including charted summaries and clickable details. When auth status reports OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, or GitHub Copilot, the model catalog can add those provider models without requiring a duplicate API key. GitHub Copilot OAuth should default to public `github.com` and only ask for a GitHub Enterprise domain when the user enables that option.
 
 ### `packages/config`
 
@@ -237,7 +237,7 @@ Responsibilities:
 - Expose Pi built-in providers and user-added OpenAI/Anthropic-compatible providers.
 - List provider models through `/models` when the configured provider supports it.
 - Resolve API keys and provider headers from `packages/config`.
-- Keep dedicated image generation models on the `imageMaker` routing policy instead of the normal model catalog.
+- Register OpenAI-compatible Images API models in `models.json` and keep them isolated from text-agent model execution.
 - Hide provider-specific quirks from the rest of Braincode.
 
 ### `packages/agent-runtime`
