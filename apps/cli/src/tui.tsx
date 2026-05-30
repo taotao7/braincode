@@ -456,7 +456,12 @@ const STREAM_FLUSH_MIN_CHARS = 600;
 const STREAM_FLUSH_MAX_WAIT_MS = 2500;
 const PET_SNAPSHOT_FLUSH_MS = 1000;
 const TUI_ANIMATIONS_ENABLED = process.env.BRAINCODE_TUI_ANIMATIONS === "true";
-const TUI_MOUSE_ENABLED = isTruthyEnv(process.env.BRAINCODE_TUI_MOUSE);
+// Mouse-wheel scrolling is on by default; set BRAINCODE_TUI_MOUSE=false (or 0)
+// to opt out (e.g. if you prefer the terminal's native text selection without
+// holding Shift). An unset variable keeps mouse tracking enabled.
+const TUI_MOUSE_ENABLED = process.env.BRAINCODE_TUI_MOUSE
+  ? isTruthyEnv(process.env.BRAINCODE_TUI_MOUSE)
+  : true;
 
 type UiColor =
   | "blue"
@@ -6937,6 +6942,10 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
   lines.push(`Review: ${formatFinalReportReviewLabel(report)}`);
   if (report.metrics) {
     lines.push(`Usage: ${formatFinalReportUsageLabel(report)}`);
+    const breakdown = formatTokenBreakdown(report.metrics.tokens.total);
+    if (breakdown) {
+      lines.push(`Token breakdown: ${breakdown}`);
+    }
     if (report.metrics.tokens.byPhase.length) {
       lines.push(`Token phases: ${report.metrics.tokens.byPhase.map((phase) => `${phase.phase ?? "unknown"} ${formatCompactTokenCount(phase.total)}`).join(", ")}`);
     }
@@ -6982,6 +6991,22 @@ function formatFinalReportUsageLabel(report: FinalReport): string {
   const tokens = `${formatCompactTokenCount(metrics.tokens.total.total)} tokens`;
   const toolCalls = `${metrics.toolCalls.total} tool call${metrics.toolCalls.total === 1 ? "" : "s"}`;
   return `${tokens}; ${toolCalls}${metrics.toolCalls.failed > 0 ? `, ${metrics.toolCalls.failed} failed` : ""}`;
+}
+
+// Full token breakdown for the final report. Unlike the live status line (which
+// shows only the all-inclusive total), this reconciles the total into its
+// components so the numbers add up: input + output + cacheRead + cacheWrite.
+function formatTokenBreakdown(tokens: TokenUsageSnapshot): string {
+  const parts: string[] = [];
+  if (tokens.input > 0)
+    parts.push(`in ${formatCompactTokenCount(tokens.input)}`);
+  if (tokens.output > 0)
+    parts.push(`out ${formatCompactTokenCount(tokens.output)}`);
+  if (tokens.cacheRead > 0)
+    parts.push(`cache read ${formatCompactTokenCount(tokens.cacheRead)}`);
+  if (tokens.cacheWrite > 0)
+    parts.push(`cache write ${formatCompactTokenCount(tokens.cacheWrite)}`);
+  return parts.join(" · ");
 }
 
 function formatIntentGraphLines(plan: RuntimePlan, width: number): string[] {
@@ -7528,12 +7553,10 @@ function sumTokenUsage(usages: TokenUsageSnapshot[]): TokenUsageSnapshot {
 
 function formatRunStatusTokens(tokens: TokenUsageSnapshot): string {
   if (tokens.total <= 0) return "";
-  const parts = [`↓ ${formatCompactTokenCount(tokens.total)} tokens`];
-  if (tokens.input > 0)
-    parts.push(`in ${formatCompactTokenCount(tokens.input)}`);
-  if (tokens.output > 0)
-    parts.push(`out ${formatCompactTokenCount(tokens.output)}`);
-  return parts.join(" · ");
+  // The live status line shows only the all-inclusive total so it always reads
+  // cleanly at a glance. The full input/output/cache breakdown lives in the
+  // final report (see formatTokenBreakdown), where the numbers reconcile.
+  return `↓ ${formatCompactTokenCount(tokens.total)} tokens`;
 }
 
 function formatRunTokenSummary(tokens: TokenUsageSnapshot): string {
