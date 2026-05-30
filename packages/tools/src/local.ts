@@ -207,7 +207,7 @@ function createListFilesTool(context: LocalToolContext): AgentTool {
   return {
     name: "list_files",
     label: "List Files",
-    description: "List project files under the current workspace.",
+    description: "List project files under the current workspace. Use a glob to scope results in one call instead of listing directories one by one. This is read-only and safe to run in parallel with other read_file/search_files calls in the same turn.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
@@ -237,7 +237,7 @@ function createReadFileTool(context: LocalToolContext): AgentTool {
   return {
     name: "read_file",
     label: "Read File",
-    description: "Read a UTF-8 text file inside the current project workspace. Prefer search_files for locating symbols in large files; very small limits are automatically expanded for large files to avoid excessive paging.",
+    description: "Read a UTF-8 text file inside the current project workspace. Read the whole file in one call by omitting offset/limit; do not page through a file with many small windowed reads (very small limits are auto-expanded for large files). When you need several files, issue the read_file calls together in one turn so they run in parallel rather than one at a time. Use search_files first to locate symbols in large or unfamiliar files, and do not re-read a file you have already read this run unless it changed.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
@@ -290,7 +290,7 @@ function createSearchFilesTool(context: LocalToolContext): AgentTool {
   return {
     name: "search_files",
     label: "Search Files",
-    description: "Search project files by content, path substring, or glob-only file listing inside the current workspace.",
+    description: "Search project files by content, path substring, or glob-only file listing inside the current workspace. Prefer one broad search over many narrow ones, and raise maxResults instead of re-running the same query. This is read-only and can run in parallel with read_file/list_files in the same turn. Use it to locate the right files before reading them.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)

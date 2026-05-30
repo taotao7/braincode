@@ -521,7 +521,7 @@ function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket
     ? `\nBrain-supplied prior worker results for dependencies:\n${formatWorkerResults(priorResults)}\n`
     : ""
   const toolContext = readOnlyToolWorkerRoles.has(handoff.task.agentRole as RoutedAgentRole)
-    ? "\nTool access:\nRead-only project tools may be available. Use them to gather concrete evidence, but do not attempt edits, shell execution, package scripts, or other state-changing actions.\n"
+    ? "\nTool access:\nRead-only project tools may be available. Use them to gather concrete evidence, but do not attempt edits, shell execution, package scripts, or other state-changing actions. Batch independent read_file/search_files/list_files calls in one turn so they run in parallel, read whole files instead of small windows, search before reading, and avoid re-reading targets you already have.\n"
     : ""
   return `Run this isolated Braincode worker handoff.
 
@@ -551,6 +551,7 @@ function formatPrimaryToolContext(toolNames: string[]): string {
     "Runtime tool access:",
     `Available tools: ${names.join(", ")}`,
     executeGuidance,
+    "Tool-use discipline: gather context with the fewest calls. Issue independent read-only calls (read_file, search_files, list_files, git_diff) together in one turn so they run in parallel instead of one at a time. Read whole files rather than paging through small windows, search before reading to find the right files, and do not re-read or re-search the same target you already have this run. State-changing tools (edits, shell, scripts) still run one at a time.",
     "If a tool call is blocked or fails, report the concrete tool result or block reason.",
     "",
   ].join("\n")

@@ -433,7 +433,9 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
     model: selection.configured,
     policy,
     piModel: toPiModelSummary(selection),
-    toolExecution: settings.mode === "radical" ? "parallel" : "sequential",
+    // Read-only tools fan out within a turn; state-changing tools self-serialize
+    // via their executionMode. See createBraincodeAgentRuntime for the rationale.
+    toolExecution: "parallel",
   }
 }
 

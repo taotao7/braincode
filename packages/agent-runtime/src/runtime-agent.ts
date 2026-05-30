@@ -122,7 +122,13 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
         headers: summarizeProviderResponseHeaders(response.headers),
       })
     },
-    toolExecution: options.mode === "radical" ? "parallel" : "sequential",
+    // Always parallel: read-only tools fan out within a turn, while
+    // state-changing tools (edit_file, apply_patch, exec_command, shell,
+    // run_script, write_stdin) carry executionMode "sequential" and force the
+    // whole batch to serialize in pi-agent-core. Approval (beforeToolCall) is
+    // still collected per call during preparation, so the auto-mode UX is
+    // unchanged while independent reads/searches stop blocking each other.
+    toolExecution: "parallel",
     beforeToolCall: async (context, signal) => {
       const policyEvaluation = evaluateToolPermissionPolicy(context.toolCall.name, context.args, options.permissionPolicy)
       if (policyEvaluation.matches.length > 0) {
