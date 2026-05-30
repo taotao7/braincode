@@ -1,5 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, isTrivialHeuristicPlan, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { defaultBrains, defaultModels, readBrains, readModels, readSettings } from "@braincode/config"
 import { createBrainTaskContext, type BrainTaskContext } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
@@ -349,7 +349,11 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
   const modePolicy = getModePolicy(settings.mode)
   const routingLimits = getModeRoutingLimits(settings.mode, brain.routing?.maxParallelAgents)
   const heuristicPlan = planAgentRouting(prompt, brain)
-  const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
+  const fastPathEligible = settings.features?.fastPathSimpleTasks !== false
+    && (!forceRoles || forceRoles.length === 0)
+    && images.length === 0
+    && isTrivialHeuristicPlan(heuristicPlan, prompt)
+  const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0) && !fastPathEligible
     ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, modePolicy, routingLimits, heuristicPlan, images, home, usageSessionId)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
@@ -410,9 +414,12 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
     maxWorkerAgents: routingLimits.maxWorkerAgents,
     maxTodos: routingLimits.maxTodos,
   }
+  const heuristicReason = fastPathEligible
+    ? "fast path: trivial prompt routed deterministically, router brain skipped"
+    : useRouterBrain ? "router brain unavailable or failed" : "heuristic diagnostic; router brain not requested"
   const routing = routerDecision
     ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, ...routingBudget }
-    : { source: "heuristic" as const, reason: useRouterBrain ? "router brain unavailable or failed" : "heuristic diagnostic; router brain not requested", ...routingBudget }
+    : { source: "heuristic" as const, reason: heuristicReason, ...routingBudget }
   debugLog("runtime", "planned runtime", { mode: settings.mode, brainId: brain.id, role, routingSource: routing.source, modelId: selection.configured.id, provider: selection.piModel.provider })
 
   return {

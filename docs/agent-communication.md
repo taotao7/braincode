@@ -175,6 +175,8 @@ Two routers cooperate to produce an `AgentRoutingPlan`:
 - `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for heuristic diagnostics, provider failures, and the baseline the router brain refines.
 - `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `packages/agent-runtime/src/router.ts` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
 
+**Fast path for trivial prompts.** Before calling the router brain, `buildRuntimePlan` checks `isTrivialHeuristicPlan(heuristicPlan, prompt)`: when the heuristic lands on the catch-all `rush` role with a single worker, requires no review, and the prompt carries no file-edit verb, the LLM router call would not change the outcome, so it is skipped and the heuristic plan is used directly. The file-edit check is evaluated directly against the prompt rather than inferred from `requiresReview`, so edit-intent prompts like "fix the bug" stay on the router path even when a brain disables `requireReviewForFileEdits`. This saves a routeBrain token call and its latency on prompts like plain questions. The fast path is gated by `settings.features.fastPathSimpleTasks` (default `true`), is disabled when images are attached (vision routing needs the brain) and for `/team` forced-roles runs, and records `routing.source = "heuristic"` with a `"fast path: ..."` reason so the decision stays observable in `--dry-run` and the final report.
+
 The two paths normalize into the same shape:
 
 ```ts
