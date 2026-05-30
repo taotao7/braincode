@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "scripts": {
+    "typecheck": "bun --version",
+    "test": "bun test ./src/package-fixture.bench.ts"
+  }
+}

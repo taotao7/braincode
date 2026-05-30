@@ -1,0 +1,10 @@
+{
+  "id": "auth-risk-change",
+  "title": "Auth-risk change",
+  "task": "Change auth token validation to reject expired tokens before loading the user record.",
+  "expected": {
+    "changedFiles": ["src/auth/token.ts"],
+    "checksStatus": "passed",
+    "reviewDecision": "approved"
+  }
+}

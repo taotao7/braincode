@@ -6609,7 +6609,7 @@ export function formatTuiFinalReportCompact(report: FinalReport): string {
     `${report.routing.source} → ${report.routing.primaryRole}`,
     `patch ${formatFinalReportPatchLabel(report)}`,
     `checks ${formatFinalReportChecksLabel(report)}`,
-    `review ${report.review?.decision ?? "not run"}`,
+    `review ${formatFinalReportReviewLabel(report)}`,
     `session ${report.sessionId.slice(0, 8)}`,
   ].join(" · ");
 }
@@ -6633,7 +6633,7 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
   if (report.checks?.results.length) {
     lines.push(`Check details: ${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")}`);
   }
-  lines.push(`Review: ${report.review?.decision ?? "not run"}`);
+  lines.push(`Review: ${formatFinalReportReviewLabel(report)}`);
   if (report.review?.requiredChanges.length) {
     lines.push(`Required: ${report.review.requiredChanges.slice(0, 3).join("; ")}`);
   }
@@ -6645,6 +6645,11 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
     lines.push(...report.warnings.map((warning) => `- ${warning}`));
   }
   return lines;
+}
+
+function formatFinalReportReviewLabel(report: FinalReport): string {
+  if (!report.review) return "not run";
+  return `${report.review.decision}${report.review.confidence !== undefined ? ` (${Math.round(report.review.confidence * 100)}%)` : ""}`;
 }
 
 function formatFinalReportPatchLabel(report: FinalReport): string {

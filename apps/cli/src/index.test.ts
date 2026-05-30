@@ -54,6 +54,7 @@ test("formatRunReport renders runtime-owned final report facts", () => {
     },
     review: {
       decision: "changes_requested",
+      confidence: 0.76,
       rationale: "Tests are failing.",
       findings: [],
       requiredChanges: ["Fix failing test."],
@@ -71,7 +72,7 @@ test("formatRunReport renders runtime-owned final report facts", () => {
   expect(text).toContain("Routing: router-brain -> backend (91%)")
   expect(text).toContain("Patch: 1 file, +8 -2")
   expect(text).toContain("Checks: failed (test failed)")
-  expect(text).toContain("Review: changes_requested")
+  expect(text).toContain("Review: changes_requested (76%)")
   expect(text).toContain("Session: session-1")
   expect(text).toContain("Updated validation logic.")
 })

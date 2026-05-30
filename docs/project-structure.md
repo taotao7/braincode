@@ -378,9 +378,11 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: automated package-script checks for file-changing runs with package manager detection, smart patch-kind selection, `check_summary` session records, and review-worker patch/check artifacts.
 - Done: review-worker artifacts include capped text previews for newly created untracked files and binary markers for untracked binary files.
 - Done: configurable check-runner policy in `tools.json` plus project `.braincode/checks.json` overrides for explicit scripts, per-kind policies, timeout/output bounds, and disabling checks.
-- Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
+- Done: typed review-worker decisions with `approved`, `changes_requested`, and `blocked` plus confidence, severity-ranked findings, required changes, blocking issues, residual risks, and `review_decision` session records.
+- Done: Review Gate v2 runtime enforcement prevents failed checks from approving, records truncated diffs and skipped checks as residual risks, and downgrades or blocks missing review artifacts by policy.
 - Done: bounded run-level read-only evidence cache with duplicate tool-call reminders, LRU/TTL/byte-limit eviction, cache-size details, and write/execute invalidation.
 - Done: Permission Policy v2 in `tools.json`, with path-aware edit/patch checks, command-aware shell/exec/script checks, non-bypassable deny rules, policy details on tool results, and forced review for sensitive path matches.
 - Done: Brain preset inheritance through `extends`.
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
+- Done: execution benchmark fixtures under `benchmarks/fixtures` plus `braincode benchmark --execute`, with offline mock execution by default, `--real` for configured provider runs, isolated temp git worktrees, and JSON metrics for changed files, diff stats, checks, review, duration, tool calls, token usage, approvals, and fallbacks.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

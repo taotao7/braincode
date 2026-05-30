@@ -187,7 +187,7 @@ Trois constructeurs façonnent chaque prompt worker :
 
 - `buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport)` — utilisé pour les workers de support parallèles. Contenu : section support projet, requête utilisateur originale, `HandoffPacket` complet en JSON, et la forme JSON de réponse attendue (avec `taskId` / `parentId` pré-remplis pour forcer l'écho).
 - `buildPrimaryPrompt(originalPrompt, workerResults, primaryRole, projectSupport)` — utilisé pour l'agent primaire. Contenu : section support projet, requête utilisateur originale, résumés workers formatés, et une directive : « traitez les résultats workers comme contexte consultatif, résolvez les conflits explicitement ».
-- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — utilisé pour le worker review. Contenu : section support projet, requête utilisateur originale, résumé primaire, résumés workers, handoff packet review, forme JSON de réponse attendue.
+- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — utilisé pour le worker review. Contenu : section support projet, consignes d'outils en lecture seule, requête utilisateur originale, résumé primaire, résumés workers, artifacts patch/check/diff, handoff packet review, et forme JSON attendue avec `decision`, `confidence`, `findings` classés, `requiredChanges`, `blockingIssues` et `residualRisks`. Le runtime review gate applique ensuite les rétrogradations sur checks échoués, les residual risks pour diff tronqué ou checks ignorés, et les artifacts review manquants en blocked ou changes_requested selon la politique.
 
 `formatWorkerResults` est le formateur partagé pour le bloc de résumés workers. Chaque entrée est :
 

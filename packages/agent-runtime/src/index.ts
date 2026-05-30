@@ -5,6 +5,8 @@ export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpLoadingStrategy, McpToolServerInput } from "./mcp"
 export { demoBenchmarkTasks, evaluateDemoBenchmarkPlan, resolveDemoBenchmarkTasks, runDemoBenchmarkSuite } from "./benchmark"
 export type { DemoBenchmarkCheck, DemoBenchmarkCheckStatus, DemoBenchmarkExpectation, DemoBenchmarkPlanRunner, DemoBenchmarkRunOptions, DemoBenchmarkSuiteResult, DemoBenchmarkSuiteSummary, DemoBenchmarkTask, DemoBenchmarkTaskCategory, DemoBenchmarkTaskResult } from "./benchmark"
+export { ensureExecutionBenchmarkReportsDir, loadExecutionBenchmarkTasks, resolveExecutionBenchmarkTasks, runExecutionBenchmarkSuite } from "./execution-benchmark"
+export type { ExecutionBenchmarkCheck, ExecutionBenchmarkCheckStatus, ExecutionBenchmarkExecutor, ExecutionBenchmarkExpectedChecksStatus, ExecutionBenchmarkExpectedReviewDecision, ExecutionBenchmarkMode, ExecutionBenchmarkRunOptions, ExecutionBenchmarkSuiteResult, ExecutionBenchmarkSuiteSummary, ExecutionBenchmarkTask, ExecutionBenchmarkTaskMetrics, ExecutionBenchmarkTaskResult } from "./execution-benchmark"
 import { ContextHandoffRequiredError, estimateProviderContextBytes, formatBytes, isHandoffRequiredError, isProviderMessageSizeLimitError } from "./context-budget"
 export { ContextHandoffRequiredError, enforceHandoffContextBudget, estimateProviderContextBytes, isHandoffRequiredError, isProviderMessageSizeLimitError } from "./context-budget"
 import { createToolEvidenceCache, type ToolEvidenceCacheOptions } from "./evidence-cache"
@@ -30,8 +32,8 @@ import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, co
 export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews } from "./patch"
 export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary, UntrackedFilePreview } from "./patch"
 import { applyCheckGateToReviewDecision, buildReviewPrompt, mergeReviewResult, normalizeReviewDecisionText, type PatchReviewArtifacts, type ReviewDecision } from "./review"
-export { applyCheckGateToReviewDecision, buildReviewPrompt, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText } from "./review"
-export type { PatchReviewArtifacts, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity } from "./review"
+export { applyCheckGateToReviewDecision, applyReviewGatesToReviewDecision, buildReviewPrompt, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText } from "./review"
+export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity, ReviewGateOptions } from "./review"
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
 export type { ExpandedPromptResult, ExpandPromptReferencesOptions, PromptReference } from "./prompt-references"
 import { buildImageMakerPrompt, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
@@ -619,7 +621,12 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, request.onEvent, request.signal)
             : undefined
         const reviewDecision = reviewResult
-          ? applyCheckGateToReviewDecision(reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult, checks), checks)
+          ? applyCheckGateToReviewDecision(
+              reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult),
+              checks,
+              reviewArtifacts,
+              { missingArtifacts: "changes_requested" },
+            )
           : undefined
         if (reviewResult) {
           reviewResult.reviewDecision = reviewDecision

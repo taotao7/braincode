@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, planRuntimeFromConfig, runDemoBenchmarkSuite, type DemoBenchmarkSuiteResult, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
+import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, loadExecutionBenchmarkTasks, planRuntimeFromConfig, runDemoBenchmarkSuite, runExecutionBenchmarkSuite, type DemoBenchmarkSuiteResult, type ExecutionBenchmarkSuiteResult, type ExecutionBenchmarkTask, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 
@@ -28,6 +28,7 @@ Usage:
   braincode config [--port <port>] [--host <host>] [--no-open]
   braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] [--json|--summary-only] <prompt>
   braincode benchmark [--heuristic] [--task <id>] [--json]
+  braincode benchmark --execute [--real] [--task <id>] [--json]
   braincode help
 
 Commands:
@@ -50,8 +51,12 @@ Run flags:
 
 Benchmark flags:
   --heuristic   Skip routeBrain and benchmark the deterministic fallback plan.
+  --execute     Run isolated execution benchmark fixtures instead of planning-only benchmarks.
+  --real        With --execute, run the real configured agent instead of the offline mock executor.
   --task <id>   Run one task id; repeat or comma-separate for multiple tasks.
   --list        Print available benchmark tasks.
+  --keep-worktrees
+                Keep temporary execution benchmark worktrees for inspection.
   --json        Print machine-readable JSON.
 `)
 }
@@ -164,7 +169,9 @@ export function formatRunReport(report: FinalReport): string {
         ].filter(Boolean).join("; ")})`
       : report.checks.reason ? `${report.checks.status} (${report.checks.reason})` : report.checks.status
     : "not run"
-  const review = report.review ? report.review.decision : "not run"
+  const review = report.review
+    ? `${report.review.decision}${report.review.confidence !== undefined ? ` (${Math.round(report.review.confidence * 100)}%)` : ""}`
+    : "not run"
   const warnings = report.warnings.length > 0
     ? ["", "Warnings:", ...report.warnings.map((warning) => `- ${warning}`)]
     : []
@@ -220,6 +227,9 @@ function isExecuteToolName(toolName: string): boolean {
 async function runBenchmark(args: string[]) {
   const json = args.includes("--json")
   const list = args.includes("--list")
+  const execute = args.includes("--execute")
+  const real = args.includes("--real")
+  const keepWorktrees = args.includes("--keep-worktrees")
   const useRouterBrain = !(args.includes("--heuristic") || args.includes("--no-router"))
   const home = readFlag(args, "--home")
   const taskIds = readRepeatedFlag(args, "--task")
@@ -229,10 +239,46 @@ async function runBenchmark(args: string[]) {
 
   if (list) {
     if (json) {
-      console.log(JSON.stringify({ tasks: demoBenchmarkTasks }, null, 2))
+      const executionTasks = execute ? await loadExecutionBenchmarkTasks() : undefined
+      console.log(JSON.stringify({
+        tasks: execute
+          ? executionTasks?.map(publicExecutionBenchmarkTask)
+          : demoBenchmarkTasks,
+      }, null, 2))
       return
     }
-    console.log(formatBenchmarkTaskList())
+    console.log(execute
+      ? formatExecutionBenchmarkTaskList(await loadExecutionBenchmarkTasks())
+      : formatBenchmarkTaskList())
+    return
+  }
+
+  if (execute) {
+    const result = await runExecutionBenchmarkSuite({
+      mode: real ? "real" : "mock",
+      taskIds,
+      keepWorktrees,
+      executor: real
+        ? ({ prompt, projectRoot }) => executePromptFromConfig({
+            prompt,
+            projectRoot,
+            localToolMode: "all",
+            onToolApproval: () => ({ approved: true, reason: "auto-approved by execution benchmark" }),
+            mcpLoadingStrategy: "eager",
+            mcpStartupBudgetMs: 10_000,
+          }, home)
+        : undefined,
+    })
+
+    if (json) {
+      console.log(JSON.stringify(result, null, 2))
+    } else {
+      console.log(formatExecutionBenchmarkReport(result))
+    }
+
+    if (result.summary.failedTasks > 0) {
+      process.exitCode = 1
+    }
     return
   }
 
@@ -260,6 +306,22 @@ function formatBenchmarkTaskList(): string {
   ].join("\n")
 }
 
+function formatExecutionBenchmarkTaskList(tasks: ExecutionBenchmarkTask[]): string {
+  return [
+    "Braincode execution benchmark tasks:",
+    ...tasks.map((task) => `  ${task.id.padEnd(22)} ${task.title}`),
+  ].join("\n")
+}
+
+function publicExecutionBenchmarkTask(task: ExecutionBenchmarkTask) {
+  return {
+    id: task.id,
+    title: task.title,
+    task: task.task,
+    expected: task.expected,
+  }
+}
+
 function formatBenchmarkReport(result: DemoBenchmarkSuiteResult): string {
   const lines = [
     "Braincode demo benchmark",
@@ -285,6 +347,38 @@ function formatBenchmarkReport(result: DemoBenchmarkSuiteResult): string {
   lines.push(
     "",
     `Summary: ${result.summary.passedTasks}/${result.summary.totalTasks} tasks passed; ${result.summary.failedTasks} failed; ${result.summary.skippedChecks} checks skipped; ${result.summary.durationMs}ms total.`,
+  )
+
+  return lines.join("\n")
+}
+
+function formatExecutionBenchmarkReport(result: ExecutionBenchmarkSuiteResult): string {
+  const lines = [
+    "Braincode execution benchmark",
+    `Mode: ${result.mode === "real" ? "real configured agent" : "offline mock executor"}`,
+    `Started: ${result.startedAt}`,
+    "",
+  ]
+
+  for (const taskResult of result.results) {
+    const metrics = taskResult.metrics
+    const changed = metrics.changedFiles.length > 0 ? metrics.changedFiles.join(",") : "-"
+    const diff = metrics.diffStats
+      ? ` +${metrics.diffStats.insertions} -${metrics.diffStats.deletions}`
+      : ""
+    lines.push(`${taskResult.task.id.padEnd(22)} ${taskResult.status.toUpperCase().padEnd(6)} changed=${changed}${diff} checks=${metrics.checksStatus} review=${metrics.reviewDecision} (${metrics.durationMs}ms)`)
+
+    for (const check of taskResult.checks.filter((item) => item.status !== "passed")) {
+      lines.push(`  ${check.status.toUpperCase().padEnd(7)} ${check.name}: expected ${check.expected}, got ${check.actual}`)
+    }
+    if (taskResult.worktree) {
+      lines.push(`  worktree: ${taskResult.worktree}`)
+    }
+  }
+
+  lines.push(
+    "",
+    `Summary: ${result.summary.passedTasks}/${result.summary.totalTasks} tasks passed; ${result.summary.failedTasks} failed; ${result.summary.durationMs}ms total.`,
   )
 
   return lines.join("\n")

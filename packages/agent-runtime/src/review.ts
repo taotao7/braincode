@@ -9,6 +9,12 @@ export type PatchReviewArtifacts = {
   untrackedPreviews?: UntrackedFilePreview[]
 }
 
+export type MissingReviewArtifactsPolicy = "changes_requested" | "blocked"
+
+export type ReviewGateOptions = {
+  missingArtifacts?: MissingReviewArtifactsPolicy
+}
+
 export type ReviewDecisionStatus = "approved" | "changes_requested" | "blocked"
 
 export type ReviewFindingSeverity = "low" | "medium" | "high"
@@ -24,6 +30,7 @@ export type ReviewFinding = {
 
 export type ReviewDecision = {
   decision: ReviewDecisionStatus
+  confidence?: number
   rationale: string
   findings: ReviewFinding[]
   requiredChanges: string[]
@@ -82,8 +89,17 @@ ${patchArtifacts}
 Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
+Review output rules:
+- Put concrete findings first; do not lead with a generic summary.
+- If no concrete defect is found, return an empty findings array and a precise approval rationale.
+- If the git diff is marked truncated, include that as a residual risk.
+- If checks are skipped, include that as a residual risk.
+- If checks failed, request changes and name the failing checks.
+- If required patch/check/diff artifacts are missing, block or request changes instead of approving.
+- Set confidence as a number from 0 to 1 based on the evidence quality available to you.
+
 Return only JSON in this shape:
-{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","rationale":"brief reason for the decision","findings":[{"severity":"low|medium|high","file":"optional project-relative path","line":1,"evidence":"short evidence","issue":"specific issue","suggestion":"specific fix"}],"requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"residualRisks":["risk that remains after review"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","confidence":0.0,"rationale":"brief reason for the decision","findings":[{"severity":"low|medium|high","file":"optional project-relative path","line":1,"evidence":"short evidence","issue":"specific issue","suggestion":"specific fix"}],"requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"residualRisks":["risk that remains after review"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
 }
 
 export function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
@@ -137,7 +153,13 @@ export function formatWorkerResults(workerResults: PromptWorkerResult[]): string
     .join("\n\n")
 }
 
-export function normalizeReviewDecisionText(text: string, review: WorkerResult, checks?: PatchCheckSummary): ReviewDecision {
+export function normalizeReviewDecisionText(
+  text: string,
+  review: WorkerResult,
+  checks?: PatchCheckSummary,
+  artifacts?: PatchReviewArtifacts,
+  gateOptions?: ReviewGateOptions,
+): ReviewDecision {
   let parsedRecord: Record<string, unknown> | undefined
   try {
     const parsed = extractJsonObject(text)
@@ -147,6 +169,7 @@ export function normalizeReviewDecisionText(text: string, review: WorkerResult, 
   }
 
   const explicitDecision = normalizeReviewDecisionStatus(parsedRecord?.decision)
+  const confidence = normalizeConfidence(parsedRecord?.confidence)
   const rationale = stringValue(parsedRecord?.rationale) ?? review.summary
   const findings = normalizeReviewFindings(parsedRecord?.findings)
   const requiredChanges = normalizeStringArray(parsedRecord?.requiredChanges)
@@ -158,28 +181,43 @@ export function normalizeReviewDecisionText(text: string, review: WorkerResult, 
   const fallbackDecision = missingDecisionChange
     ? fallbackReviewDecisionWithoutExplicitDecision(review)
     : fallbackReviewDecision(review, checks)
-  return applyCheckGateToReviewDecision({
+  return applyReviewGatesToReviewDecision({
     decision: explicitDecision ?? fallbackDecision,
+    ...(confidence !== undefined ? { confidence } : {}),
     rationale,
     findings,
     requiredChanges: missingDecisionChange ? uniqueStrings([...requiredChanges, missingDecisionChange]) : requiredChanges,
     blockingIssues,
     residualRisks,
-  }, checks)
+  }, checks, artifacts, gateOptions)
 }
 
-export function applyCheckGateToReviewDecision(decision: ReviewDecision, checks?: PatchCheckSummary): ReviewDecision {
-  if (checks?.status !== "failed" || decision.decision !== "approved") return decision
-  const failedChecks = checks.results.filter((result) => result.status === "failed").map((result) => result.name)
-  const checkChange = failedChecks.length > 0
-    ? `Fix failing checks before approval: ${failedChecks.join(", ")}.`
-    : "Fix failing checks before approval."
-  return {
-    ...decision,
-    decision: "changes_requested",
-    findings: [
-      ...decision.findings,
-      {
+export function applyCheckGateToReviewDecision(
+  decision: ReviewDecision,
+  checks?: PatchCheckSummary,
+  artifacts?: PatchReviewArtifacts,
+  gateOptions?: ReviewGateOptions,
+): ReviewDecision {
+  return applyReviewGatesToReviewDecision(decision, checks, artifacts, gateOptions)
+}
+
+export function applyReviewGatesToReviewDecision(
+  decision: ReviewDecision,
+  checks?: PatchCheckSummary,
+  artifacts?: PatchReviewArtifacts,
+  gateOptions: ReviewGateOptions = {},
+): ReviewDecision {
+  let gated = decision
+
+  if (checks?.status === "failed" && gated.decision !== "blocked") {
+    const failedChecks = checks.results.filter((result) => result.status === "failed").map((result) => result.name)
+    const checkChange = failedChecks.length > 0
+      ? `Fix failing checks before approval: ${failedChecks.join(", ")}.`
+      : "Fix failing checks before approval."
+    gated = {
+      ...gated,
+      decision: "changes_requested",
+      findings: appendUniqueFinding(gated.findings, {
         severity: "high",
         issue: checkChange,
         evidence: checks.results
@@ -187,10 +225,62 @@ export function applyCheckGateToReviewDecision(decision: ReviewDecision, checks?
           .map((result) => `${result.name}: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode ?? "n/a"}`}`)
           .join("\n"),
         suggestion: "Run and fix the failing checks before approval.",
-      },
-    ],
-    requiredChanges: uniqueStrings([...decision.requiredChanges, checkChange]),
+      }),
+      requiredChanges: uniqueStrings([...gated.requiredChanges, checkChange]),
+    }
   }
+
+  const residualRisks = [...gated.residualRisks]
+  if (checks?.status === "skipped") {
+    residualRisks.push(checks.reason ? `Checks were skipped: ${checks.reason}` : "Checks were skipped.")
+  }
+  if (artifacts?.diff?.truncated) {
+    residualRisks.push("Git diff was truncated; review may not cover omitted changes.")
+  }
+
+  const missingArtifactIssue = artifacts !== undefined || gateOptions.missingArtifacts !== undefined
+    ? reviewArtifactMissingIssue(artifacts)
+    : undefined
+  if (missingArtifactIssue) {
+    residualRisks.push(missingArtifactIssue)
+    const policy = gateOptions.missingArtifacts ?? "changes_requested"
+    if (policy === "blocked") {
+      gated = {
+        ...gated,
+        decision: "blocked",
+        blockingIssues: uniqueStrings([...gated.blockingIssues, missingArtifactIssue]),
+      }
+    } else if (gated.decision !== "blocked") {
+      gated = {
+        ...gated,
+        decision: "changes_requested",
+        requiredChanges: uniqueStrings([...gated.requiredChanges, missingArtifactIssue]),
+      }
+    }
+  }
+
+  return {
+    ...gated,
+    residualRisks: uniqueStrings(residualRisks),
+  }
+}
+
+function reviewArtifactMissingIssue(artifacts: PatchReviewArtifacts | undefined): string | undefined {
+  if (!artifacts) return "Review artifacts were not collected; reviewer could not verify patch, check, or diff evidence."
+  if (artifacts.patch?.changedFiles.length && !artifacts.diff) {
+    return "Review diff artifact was not collected for changed files; reviewer could not verify the full patch."
+  }
+  return undefined
+}
+
+function appendUniqueFinding(findings: ReviewFinding[], finding: ReviewFinding): ReviewFinding[] {
+  if (findings.some((candidate) => candidate.issue === finding.issue)) return findings
+  return [...findings, finding]
+}
+
+function normalizeConfidence(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  return Math.max(0, Math.min(1, value))
 }
 
 export function mergeReviewResult(summary: string, review: ReviewMergeResult | undefined, reviewDecision?: ReviewDecision): string {

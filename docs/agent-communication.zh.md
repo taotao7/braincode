@@ -191,7 +191,7 @@ router prompt 会嵌入来自 `agentRoleProfiles` 的完整角色目录，以及
 
 - `buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport)` —— 用于并发的 support worker。内容：项目支持段、原始用户请求、完整 `HandoffPacket`（JSON）、期望回复的 JSON 形状（`taskId` / `parentId` 已预填以强制回显）。
 - `buildPrimaryPrompt(originalPrompt, workerResults, primaryRole, projectSupport)` —— 用于主 agent。内容：项目支持段、原始用户请求、格式化后的 worker 摘要，以及一条指令：「把 worker 结果当作建议性上下文，显式解决冲突」。
-- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` —— 用于 review worker。内容：项目支持段、原始用户请求、主 agent 摘要、worker 摘要、review handoff packet、期望的 JSON 回复形状。
+- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` —— 用于 review worker。内容：项目支持段、只读工具指引、原始用户请求、主 agent 摘要、worker 摘要、patch/check/diff artifacts、review handoff packet，以及包含 `decision`、`confidence`、分级 `findings`、`requiredChanges`、`blockingIssues` 和 `residualRisks` 的 JSON 回复形状。runtime review gate 会继续强制 failed checks 降级、truncated diff / skipped checks residual risk，以及按策略对缺失 review artifacts blocked 或 changes_requested。
 
 `formatWorkerResults` 是 worker 摘要块的共享格式化器。每项是：
 

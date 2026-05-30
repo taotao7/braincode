@@ -1,0 +1,10 @@
+{
+  "id": "security-review-only",
+  "title": "Security review only",
+  "task": "Perform a security review only of the authentication module. Report findings; do not alter files.",
+  "expected": {
+    "changedFiles": [],
+    "checksStatus": "not-run",
+    "reviewDecision": "not-run"
+  }
+}

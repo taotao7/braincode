@@ -1,0 +1,10 @@
+{
+  "id": "package-change",
+  "title": "Package change",
+  "task": "Add a package script that runs typecheck and tests, then update development commands documentation.",
+  "expected": {
+    "changedFiles": ["README.md", "package.json"],
+    "checksStatus": "passed",
+    "reviewDecision": "approved"
+  }
+}

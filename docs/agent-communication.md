@@ -197,7 +197,7 @@ Three builders shape every worker prompt:
 
 - `buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport)` — used for parallel support workers. Contents: project support section, original user request, the full `HandoffPacket` as JSON, and the expected reply JSON shape (with `taskId` / `parentId` pre-filled to enforce echo).
 - `buildPrimaryPrompt(originalPrompt, workerResults, primaryRole, projectSupport)` — used for the primary agent. Contents: project support section, original user request, formatted worker summaries, and a directive to "treat worker results as advisory context, resolve conflicts explicitly".
-- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — used for the review worker. Contents: project support section, read-only tool guidance, original user request, primary summary, worker summaries, the review handoff packet, and the expected JSON reply shape with `decision`, severity-ranked `findings`, `requiredChanges`, `blockingIssues`, and `residualRisks`.
+- `buildReviewPrompt(originalPrompt, primarySummary, workerResults, handoff, projectSupport)` — used for the review worker. Contents: project support section, read-only tool guidance, original user request, primary summary, worker summaries, patch/check/diff artifacts, the review handoff packet, and the expected JSON reply shape with `decision`, `confidence`, severity-ranked `findings`, `requiredChanges`, `blockingIssues`, and `residualRisks`. Runtime review gates then enforce failed-check downgrades, truncated-diff and skipped-check residual risks, and missing-artifact blocking or change requests by policy.
 
 `formatWorkerResults` is the shared formatter for the worker-summary block. Each entry is:
 

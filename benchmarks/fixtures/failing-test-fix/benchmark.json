@@ -1,0 +1,10 @@
+{
+  "id": "failing-test-fix",
+  "title": "Failing test fix",
+  "task": "Fix the failing test by finding the arithmetic regression and running the focused test command.",
+  "expected": {
+    "changedFiles": ["src/math.ts"],
+    "checksStatus": "passed",
+    "reviewDecision": "approved"
+  }
+}

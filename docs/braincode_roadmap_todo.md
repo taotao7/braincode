@@ -32,7 +32,7 @@ Braincode 当前已经具备以下基础能力：
 - [x] 让本地工具在大项目里更快更安全
 - [x] 让权限策略从 tool-level 升级到 path/command-level
 - [x] 让 review artifacts 覆盖更多真实 patch 情况
-- [ ] 让 benchmark 从“规划评估”升级到“真实执行评估”
+- [x] 让 benchmark 从“规划评估”升级到“真实执行评估”
 
 ---
 
@@ -546,7 +546,7 @@ ci-risk        -> review + no auto shell unless approved
 
 ### TODO
 
-- [ ] review decision 增加 `confidence`
+- [x] review decision 增加 `confidence`
 
 ```ts
 type ReviewDecision = {
@@ -560,17 +560,17 @@ type ReviewDecision = {
 }
 ```
 
-- [ ] review prompt 明确：findings first，不要泛泛总结
-- [ ] 对 truncated diff 强制 residual risk
-- [ ] 对 skipped checks 强制 residual risk
-- [ ] 对 failed checks 自动 changes_requested
-- [ ] 对 missing review artifacts 自动 blocked 或 changes_requested，按策略配置
+- [x] review prompt 明确：findings first，不要泛泛总结
+- [x] 对 truncated diff 强制 residual risk
+- [x] 对 skipped checks 强制 residual risk
+- [x] 对 failed checks 自动 changes_requested
+- [x] 对 missing review artifacts 自动 blocked 或 changes_requested，按策略配置
 
 ### 验收标准
 
-- [ ] failed checks 不可能 approved
-- [ ] diff truncated 时 review 必须指出 residual risk
-- [ ] reviewer 输出无法 parse 时 fallback 为 blocked/changes_requested，而不是当作 approved
+- [x] failed checks 不可能 approved
+- [x] diff truncated 时 review 必须指出 residual risk
+- [x] reviewer 输出无法 parse 时 fallback 为 blocked/changes_requested，而不是当作 approved
 
 ---
 
@@ -584,7 +584,7 @@ type ReviewDecision = {
 
 ### TODO
 
-- [ ] 新建目录
+- [x] 新建目录
 
 ```txt
 benchmarks/
@@ -599,7 +599,7 @@ benchmarks/
   reports/
 ```
 
-- [ ] 每个 fixture 包含
+- [x] 每个 fixture 包含
 
 ```txt
 initial project
@@ -610,7 +610,7 @@ expected review behavior
 optional expected diff pattern
 ```
 
-- [ ] 新增命令
+- [x] 新增命令
 
 ```bash
 braincode benchmark --execute
@@ -618,7 +618,7 @@ braincode benchmark --execute --task login-validation
 braincode benchmark --execute --json
 ```
 
-- [ ] 指标
+- [x] 指标
 
 ```txt
 success
@@ -635,9 +635,9 @@ fallbackCount
 
 ### 验收标准
 
-- [ ] 无 provider 时可跑 fake/mock agent 测试基础链路
-- [ ] 有 provider 时可跑真实执行 benchmark
-- [ ] benchmark report 能用于 README 展示
+- [x] 无 provider 时可跑 fake/mock agent 测试基础链路
+- [x] 有 provider 时可跑真实执行 benchmark
+- [x] benchmark report 能用于 README 展示
 
 ---
 
@@ -765,11 +765,11 @@ braincode run --yes "fix failing test and run checks"
 
 - [x] P1-3 untracked file preview
 - [x] P2-1 permission policy v2
-- [ ] P2-3 review gate v2
+- [x] P2-3 review gate v2
 
 ## 第 4 周：评估和传播
 
-- [ ] P3-1 execution benchmark
+- [x] P3-1 execution benchmark
 - [ ] P3-2 login validation demo
 - [ ] P4-1 quickstart 文档
 
@@ -858,9 +858,9 @@ Goal:
 Benchmark real patch generation, checks, and review decisions.
 
 Acceptance:
-- braincode benchmark --execute works
-- fixtures are isolated temp repos
-- JSON report includes patch/check/review metrics
+- [x] braincode benchmark --execute works
+- [x] fixtures are isolated temp repos
+- [x] JSON report includes patch/check/review metrics
 ```
 
 ---
@@ -906,10 +906,11 @@ Acceptance:
 - [x] command-aware policy
 - [x] risky file force review
 - [x] smart check selection
+- [x] review gate v2
 
 ## v0.6：Execution Benchmark & Demo
 
-- [ ] fixture benchmark
+- [x] fixture benchmark
 - [ ] login validation demo
-- [ ] benchmark JSON report
+- [x] benchmark JSON report
 - [ ] README demo section

@@ -1,0 +1,10 @@
+{
+  "id": "readme-edit",
+  "title": "README edit",
+  "task": "Add a short Troubleshooting section to README.md explaining how to run `braincode run --dry-run`, and keep the change scoped to documentation.",
+  "expected": {
+    "changedFiles": ["README.md"],
+    "checksStatus": "skipped",
+    "reviewDecision": "approved"
+  }
+}

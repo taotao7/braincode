@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { buildReviewPrompt, mergeReviewResult, normalizeReviewDecisionText } from "./review"
+import { applyReviewGatesToReviewDecision, buildReviewPrompt, mergeReviewResult, normalizeReviewDecisionText } from "./review"
 
 test("buildReviewPrompt includes patch checks diff and untracked previews", () => {
   const prompt = buildReviewPrompt(
@@ -58,6 +58,8 @@ test("buildReviewPrompt includes patch checks diff and untracked previews", () =
   expect(prompt).toContain("Project support context")
   expect(prompt).toContain("Checks: failed")
   expect(prompt).toContain("Git diff (truncated)")
+  expect(prompt).toContain("Put concrete findings first")
+  expect(prompt).toContain('"confidence":0.0')
   expect(prompt).toContain("src/new-helper.ts")
   expect(prompt).toContain("export const value = 1")
   expect(prompt).toContain("assets/icon.png")
@@ -67,6 +69,7 @@ test("buildReviewPrompt includes patch checks diff and untracked previews", () =
 test("normalizeReviewDecisionText and mergeReviewResult keep failed checks from approving", () => {
   const decision = normalizeReviewDecisionText(JSON.stringify({
     decision: "approved",
+    confidence: 0.82,
     rationale: "Looks good.",
     findings: [],
     requiredChanges: [],
@@ -97,7 +100,53 @@ test("normalizeReviewDecisionText and mergeReviewResult keep failed checks from 
   const merged = mergeReviewResult("Primary summary", { summary: "Review summary", risks: [], reviewDecision: decision })
 
   expect(decision.decision).toBe("changes_requested")
+  expect(decision.confidence).toBe(0.82)
   expect(decision.requiredChanges[0]).toContain("test")
   expect(merged).toContain("Decision: changes_requested")
   expect(merged).toContain("Fix failing checks")
+})
+
+test("applyReviewGatesToReviewDecision records skipped checks and truncated diff residual risks", () => {
+  const decision = applyReviewGatesToReviewDecision({
+    decision: "approved",
+    rationale: "No concrete issue found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+  }, {
+    status: "skipped",
+    reason: "docs-only patch",
+    results: [],
+  }, {
+    checks: {
+      status: "skipped",
+      reason: "docs-only patch",
+      results: [],
+    },
+    diff: {
+      stat: "src/file.ts | 2 +",
+      diff: "diff --git a/src/file.ts b/src/file.ts",
+      truncated: true,
+    },
+  })
+
+  expect(decision.decision).toBe("approved")
+  expect(decision.residualRisks).toContain("Checks were skipped: docs-only patch")
+  expect(decision.residualRisks).toContain("Git diff was truncated; review may not cover omitted changes.")
+})
+
+test("applyReviewGatesToReviewDecision can block missing review artifacts by policy", () => {
+  const decision = applyReviewGatesToReviewDecision({
+    decision: "approved",
+    rationale: "No concrete issue found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+  }, undefined, undefined, { missingArtifacts: "blocked" })
+
+  expect(decision.decision).toBe("blocked")
+  expect(decision.blockingIssues[0]).toContain("Review artifacts were not collected")
+  expect(decision.residualRisks[0]).toContain("Review artifacts were not collected")
 })

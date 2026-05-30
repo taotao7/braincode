@@ -940,6 +940,7 @@ test("normalizeReviewDecisionText parses typed decisions and gates failed checks
   } as never
   const decision = normalizeReviewDecisionText(JSON.stringify({
     decision: "approved",
+    confidence: 0.73,
     rationale: "Patch is logically correct.",
     findings: [
       {
@@ -973,6 +974,7 @@ test("normalizeReviewDecisionText parses typed decisions and gates failed checks
   })
 
   expect(decision.decision).toBe("changes_requested")
+  expect(decision.confidence).toBe(0.73)
   expect(decision.rationale).toBe("Patch is logically correct.")
   expect(decision.findings[0]).toMatchObject({
     severity: "high",

@@ -1,0 +1,10 @@
+{
+  "id": "login-validation",
+  "title": "Login validation",
+  "task": "Add login validation so blank email and password values are rejected before authentication runs.",
+  "expected": {
+    "changedFiles": ["src/login.ts"],
+    "checksStatus": "passed",
+    "reviewDecision": "approved"
+  }
+}
