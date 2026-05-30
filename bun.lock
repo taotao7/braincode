@@ -12,7 +12,7 @@
     },
     "apps/cli": {
       "name": "@braincode/cli",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "bin": {
         "braincode": "./src/index.ts",
       },

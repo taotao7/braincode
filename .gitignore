@@ -6,4 +6,4 @@ dist/
 coverage/
 coverage-*/
 apps/cli/npm/bin/braincode-bin
-tmp*
+*.bun-build

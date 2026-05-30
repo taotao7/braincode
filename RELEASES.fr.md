@@ -1,5 +1,14 @@
 # Notes de version
 
+## v0.2.7
+
+- Les aperçus d'images dans le terminal prennent maintenant en charge le protocole graphique Kitty, avec un fallback half-block pour les terminaux sans images inline.
+- Config Web ajoute un onglet de health check, un aperçu des permissions, un panneau OAuth, un flux unifié d'ajout de modèle, les valeurs par défaut GitHub Copilot OAuth et des avertissements plus clairs pour les challenges d'abonnement ChatGPT.
+- Le runtime agent ajoute la permission policy v2 sensible aux chemins et commandes, la sélection intelligente des checks patch-kind, les aperçus de fichiers non suivis dans les reviews, ainsi que des améliorations de final report et de métriques.
+- Le support MCP/projet améliore les health checks HTTP, le trust gating des serveurs, les lectures de fichiers fenêtrées, le listing des sessions, et migre le chemin des skills projet vers `.agents/skills`.
+- Les benchmarks ajoutent des fixtures d'exécution, une démo login-validation, des métriques token-only et l'affichage de la confiance de review.
+- Le wrapper npm et les métadonnées de release sont en `0.2.7` pour correspondre aux assets GitHub de même version.
+
 ## v0.2.6
 
 - Image Maker utilise maintenant les modèles de génération d'images de `models.json` comme les autres rôles ; ajoutez-les avec le type d'API `openai-images`.

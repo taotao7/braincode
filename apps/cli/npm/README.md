@@ -12,7 +12,7 @@ A `postinstall` step downloads the platform-specific binary from the matching Gi
 
 ## Release
 
-`0.2.5` upgrades the TUI to Ink 7/React 19 and renders assistant/help Markdown in the terminal. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
+`0.2.7` adds terminal image previews, richer Config Web health/OAuth setup, permission policy improvements, execution benchmark fixtures, and MCP health/session loading improvements. The npm package version must match the GitHub release tag because `postinstall` downloads assets from `v<version>`.
 
 ## Usage
 

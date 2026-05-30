@@ -1,5 +1,14 @@
 # 发布记录
 
+## v0.2.7
+
+- 终端图片预览现在支持 Kitty graphics protocol，并在不支持内联图片的终端中使用 half-block fallback。
+- Config Web 新增健康检查页签、权限预览、OAuth 面板、统一添加模型流程、GitHub Copilot OAuth 默认值，以及更清晰的 ChatGPT 订阅 challenge 提示。
+- Agent runtime 新增 path-aware / command-aware permission policy v2、智能 patch-kind 检查选择、未跟踪文件 review 预览，以及 final report 输出和 metrics 改进。
+- MCP / 项目支持改进了 HTTP 健康检查、server trust gating、windowed file read、session listing，并迁移项目 skill 路径到 `.agents/skills`。
+- Benchmark 新增 execution fixtures、login-validation demo、token-only usage metrics 和 review confidence 展示。
+- npm wrapper 和发布元数据同步到 `0.2.7`，用于匹配同版本 GitHub release 资产。
+
 ## v0.2.6
 
 - 图片制造者现在和其他角色一样从 `models.json` 选择模型；添加图片生成模型时选择 `openai-images` API 类型。

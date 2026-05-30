@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.2.7
+
+- Terminal image previews now support Kitty graphics protocol with a half-block fallback for terminals without inline image support.
+- Config Web adds a health-check tab, permission preview, OAuth panel, unified add-model setup, GitHub Copilot OAuth defaults, and clearer ChatGPT subscription challenge warnings.
+- Agent runtime adds path-aware and command-aware permission policy v2, smart patch-kind check selection, untracked file review previews, and final report output/metrics improvements.
+- MCP/project support improves HTTP health checks, server trust gating, windowed file reads, session listing, and the project skill path migration to `.agents/skills`.
+- Benchmarks now include execution fixtures, login-validation demos, token-only usage metrics, and review confidence display.
+- The npm wrapper and release metadata are versioned as `0.2.7` for the matching GitHub release assets.
+
 ## v0.2.6
 
 - Image Maker now uses image-generation models from `models.json` like other role routes; add them with API type `openai-images`.
