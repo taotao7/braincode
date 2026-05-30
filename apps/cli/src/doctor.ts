@@ -1,7 +1,6 @@
 import {
   getBraincodeHome,
   getBraincodePaths,
-  getProjectSupportPaths,
   readAuth,
   readAuthStatus,
   readBrains,
@@ -11,6 +10,7 @@ import {
   readSettings,
   readTools,
   readUserMcpConfig,
+  resolveMcpServerEnv,
   type BraincodeAuth,
   type BraincodeBrains,
   type BraincodeModels,
@@ -20,6 +20,7 @@ import {
 } from "@braincode/config"
 import { extractMcpServerEntries, type McpServerEntry } from "@braincode/config"
 import { normalizePermissionPolicy } from "@braincode/tools"
+import { checkMcpHealth, type McpHealthInput } from "./mcp-health"
 
 type DoctorCheckStatus = "ok" | "warning" | "error" | "skipped"
 
@@ -46,6 +47,7 @@ export type DoctorOptions = {
   json?: boolean
   mcpOnly?: boolean
   checksOnly?: boolean
+  mcpHealthTimeoutMs?: number
 }
 
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorReport> {
@@ -242,12 +244,16 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     }
   }
 
-  const projectChecks = await readProjectChecks(projectRoot)
-  checkChecks.push(
-    projectChecks
-      ? ok("project-checks", `.braincode/checks.json found`)
-      : warning("project-checks", "No .braincode/checks.json found"),
-  )
+  try {
+    const projectChecks = await readProjectChecks(projectRoot)
+    checkChecks.push(
+      projectChecks
+        ? ok("project-checks", `.braincode/checks.json found`)
+        : warning("project-checks", "No .braincode/checks.json found"),
+    )
+  } catch (error) {
+    checkChecks.push(errorCheck("project-checks", ".braincode/checks.json unreadable", String(error)))
+  }
 
   if (toolsConfig?.checks) {
     checkChecks.push(
@@ -270,40 +276,118 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     mcpChecks.push(errorCheck("user-mcp", `Failed to read user MCP config`, String(error)))
   }
 
-  const projectSupport = await readProjectSupport(projectRoot)
-  if (projectSupport.mcp) {
-    const projectMcpServers = extractMcpServerEntries(projectSupport.mcp.config)
-    mcpChecks.push(
-      projectMcpServers.length > 0
-        ? ok("project-mcp", `${projectMcpServers.length} project MCP server(s)`)
-        : ok("project-mcp", "No project MCP servers configured"),
-    )
-
-    for (const { name, entry } of projectMcpServers) {
-      if (entry.trusted !== true) {
-        mcpChecks.push(
-          warning(
-            `project-mcp-${name}-trusted`,
-            `Project MCP server "${name}" is not trusted`,
-            "Mark it trusted in .mcp.json if you intend to use it.",
-          ),
-        )
-      }
+  if (userMcp) {
+    const userMcpServers = extractMcpServerEntries(userMcp.config)
+    for (const { name, entry } of userMcpServers) {
+      mcpChecks.push(await probeMcpServer({ name, entry, source: "user", auth, timeoutMs: options.mcpHealthTimeoutMs }))
     }
-  } else {
-    mcpChecks.push(ok("project-mcp", "No project .mcp.json found"))
   }
 
-  const overallStatus = computeOverallStatus([...configChecks, ...modelChecks, ...toolChecks, ...permissionChecks, ...checkChecks, ...mcpChecks])
+  let projectMcpServers: Array<{ name: string; entry: McpServerEntry }> = []
+  try {
+    const projectSupport = await readProjectSupport(projectRoot)
+    projectMcpServers = projectSupport.mcp ? extractMcpServerEntries(projectSupport.mcp.config) : []
+    if (projectSupport.mcp) {
+      mcpChecks.push(
+        projectMcpServers.length > 0
+          ? ok("project-mcp", `${projectMcpServers.length} project MCP server(s)`)
+          : ok("project-mcp", "No project MCP servers configured"),
+      )
+    } else {
+      mcpChecks.push(ok("project-mcp", "No project .mcp.json found"))
+    }
+  } catch (error) {
+    mcpChecks.push(errorCheck("project-mcp", "Failed to read project .mcp.json", String(error)))
+  }
 
-  return {
-    status: overallStatus,
+  for (const { name, entry } of projectMcpServers) {
+    if (entry.trusted !== true) {
+      mcpChecks.push(
+        warning(
+          `project-mcp-${name}-trusted`,
+          `Project MCP server "${name}" is not trusted`,
+          "Mark it trusted in .mcp.json if you intend to use it.",
+        ),
+      )
+      mcpChecks.push(skipped(`project-mcp-${name}-health`, `Project MCP server "${name}" health skipped because it is not trusted`))
+      continue
+    }
+
+    mcpChecks.push(await probeMcpServer({ name, entry, source: "project", auth, timeoutMs: options.mcpHealthTimeoutMs }))
+  }
+
+  const scoped = scopeDoctorChecks(options, {
     config: configChecks,
     models: modelChecks,
     tools: toolChecks,
     permissions: permissionChecks,
     checks: checkChecks,
     mcp: mcpChecks,
+  })
+  const overallStatus = computeOverallStatus([...scoped.config, ...scoped.models, ...scoped.tools, ...scoped.permissions, ...scoped.checks, ...scoped.mcp])
+
+  return {
+    status: overallStatus,
+    config: scoped.config,
+    models: scoped.models,
+    tools: scoped.tools,
+    permissions: scoped.permissions,
+    checks: scoped.checks,
+    mcp: scoped.mcp,
+  }
+}
+
+async function probeMcpServer(options: {
+  name: string
+  entry: McpServerEntry
+  source: "user" | "project"
+  auth?: BraincodeAuth
+  timeoutMs?: number
+}): Promise<DoctorCheck> {
+  const id = `${options.source}-mcp-${options.name}-health`
+  const label = `${options.source} MCP server "${options.name}"`
+  if (options.entry.disabled === true) return skipped(id, `${label} is disabled`)
+
+  let input: McpHealthInput
+  try {
+    input = {
+      type: options.entry.type,
+      command: options.entry.command,
+      args: options.entry.args,
+      env: resolveMcpServerEnv(options.entry.env, options.auth ?? { providers: {} }),
+      url: options.entry.url,
+      httpHeaders: options.entry.http_headers,
+    }
+  } catch (error) {
+    return warning(id, `${label} health not checked: ${String(error)}`, "Configure the referenced provider API key or remove the MCP env reference.")
+  }
+
+  const result = await checkMcpHealth(input, options.timeoutMs)
+  if (result.status === "ok") {
+    const details = [
+      result.latencyMs !== undefined ? `${result.latencyMs}ms` : undefined,
+      result.toolCount !== undefined ? `${result.toolCount} tool(s)` : undefined,
+      result.serverInfo?.name ? result.serverInfo.name : undefined,
+      result.error ? `warning: ${result.error}` : undefined,
+    ].filter(Boolean).join(", ")
+    return ok(id, `${label} healthy${details ? ` (${details})` : ""}`)
+  }
+  if (result.status === "skipped") return skipped(id, `${label} health skipped${result.error ? `: ${result.error}` : ""}`)
+  return warning(id, `${label} health failed: ${result.error ?? "unknown error"}`, "Check the MCP command, URL, credentials, network access, and server startup logs.")
+}
+
+function scopeDoctorChecks(options: DoctorOptions, report: Omit<DoctorReport, "status">): Omit<DoctorReport, "status"> {
+  const includeMcp = options.mcpOnly === true
+  const includeChecks = options.checksOnly === true
+  if (!includeMcp && !includeChecks) return report
+
+  return {
+    config: [],
+    models: [],
+    tools: [],
+    permissions: [],
+    checks: includeChecks ? report.checks : [],
+    mcp: includeMcp ? report.mcp : [],
   }
 }
 
