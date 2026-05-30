@@ -44,7 +44,7 @@ export type ModelConnectionTestResult = {
   }
 }
 
-export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "unsupported-client" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
+export type ModelConnectionFailureKind = "missing-api-key" | "unsupported-location" | "unsupported-client" | "subscription-blocked" | "auth" | "rate-limit" | "invalid-response" | "network" | "unknown"
 
 export type ModelResolutionResult = {
   braincodeModel: BraincodeModel
@@ -393,9 +393,10 @@ function inferImageMimeType(base64: string, url: string | undefined, outputForma
 
 function connectionFailure(model: BraincodeModel, error: unknown): ModelConnectionTestResult {
   const rawDetail = error instanceof Error ? error.message : String(error)
-  const detail = model.supportsVision === true && /image|vision|multimodal|content type/i.test(rawDetail)
-    ? `${rawDetail} (vision input rejected — uncheck Vision in the model form if this model is text-only)`
-    : rawDetail
+  const sanitizedDetail = sanitizeConnectionFailureDetail(model, rawDetail)
+  const detail = model.supportsVision === true && /image|vision|multimodal|content type/i.test(sanitizedDetail)
+    ? `${sanitizedDetail} (vision input rejected — uncheck Vision in the model form if this model is text-only)`
+    : sanitizedDetail
   const failureKind = classifyConnectionFailure(detail)
   return {
     modelId: model.id,
@@ -409,6 +410,7 @@ function connectionFailure(model: BraincodeModel, error: unknown): ModelConnecti
 
 function classifyConnectionFailure(message: string): ModelConnectionFailureKind {
   if (/missing api key/i.test(message)) return "missing-api-key"
+  if (isSubscriptionBrowserChallenge(message)) return "subscription-blocked"
   if (/user location is not supported|location.*not supported|unsupported.*region|region.*unsupported/i.test(message)) return "unsupported-location"
   if (/Kimi For Coding is currently only available for Coding Agents/i.test(message)) return "unsupported-client"
   if (/\b(401|403)\b|unauthorized|forbidden|invalid api key|incorrect api key|permission denied/i.test(message)) return "auth"
@@ -426,11 +428,29 @@ function explainConnectionFailure(kind: ModelConnectionFailureKind, detail: stri
   if (kind === "unsupported-client") {
     return "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks."
   }
+  if (kind === "subscription-blocked") {
+    return "The ChatGPT subscription endpoint rejected this local request with a browser or Cloudflare challenge. OAuth is saved, but ChatGPT subscription OAuth is not recommended for reliable local calls; try ClIProxy API, an OpenAI API key, or another compatible proxy/provider."
+  }
   if (kind === "auth") return "The provider rejected the request. Check the API key, provider account permissions, and model access."
   if (kind === "rate-limit") return "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model."
   if (kind === "invalid-response") return "The provider responded, but the test response was empty or malformed."
   if (kind === "network") return "The provider could not be reached. Check the base URL, network, and local proxy settings."
   return detail
+}
+
+function sanitizeConnectionFailureDetail(model: BraincodeModel, detail: string): string {
+  const collapsed = detail.replace(/\s+/g, " ").trim()
+  if (model.provider === "openai-codex" && isSubscriptionBrowserChallenge(collapsed)) {
+    return "HTTP 403 from chatgpt.com/backend-api: ChatGPT returned a browser or Cloudflare challenge instead of a model response. The OAuth token is present, but the subscription endpoint rejected this local server request."
+  }
+  if (/<html[\s>]/i.test(collapsed)) {
+    return collapsed.slice(0, 1000) + (collapsed.length > 1000 ? "..." : "")
+  }
+  return detail.length > 2000 ? detail.slice(0, 2000) + "..." : detail
+}
+
+function isSubscriptionBrowserChallenge(message: string): boolean {
+  return /(chatgpt\.com\/backend-api|cf_chl|challenge-platform|Enable JavaScript and cookies to continue|Cloudflare)/i.test(message)
 }
 
 const TEST_IMAGE_PNG_BASE64 =

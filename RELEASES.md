@@ -6,6 +6,7 @@
 - Image-input routing is stricter: attached images require routeBrain planning and vision-capable text role chains, while Image Maker is reserved for generation or editing requests.
 - Config Web combines catalog, saved-provider, provider `/models`, and manual model setup into one add-model flow, including Anthropic-compatible model listing.
 - GitHub Copilot OAuth now defaults to public `github.com`; GitHub Enterprise domain input is hidden behind an explicit option.
+- ChatGPT subscription model tests now detect browser or Cloudflare challenges from `chatgpt.com` and report a targeted OAuth-subscription warning instead of dumping the HTML challenge; the OAuth panel now marks ChatGPT subscription OAuth as not recommended for reliable calls and suggests ClIProxy API or another compatible proxy.
 - Provider context budgeting now omits inline image payload bytes from budget estimates while preserving metadata, reducing false context-overflow failures on image prompts.
 - The npm wrapper and release metadata are versioned as `0.2.6` for the matching GitHub release assets.
 

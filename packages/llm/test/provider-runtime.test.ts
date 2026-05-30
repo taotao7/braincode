@@ -515,6 +515,29 @@ test("testModelConnection reports OpenAI-compatible success and failed response 
   await expect(testModelConnection(model, "key")).resolves.toMatchObject({ reachable: false, failureKind: "unknown", detail: expect.stringContaining("HTTP 502") })
 })
 
+test("testModelConnection reports ChatGPT subscription browser challenges without dumping HTML", async () => {
+  const model: BraincodeModel = {
+    id: "openai-codex/gpt-5.1-codex",
+    provider: "openai-codex",
+    modelId: "gpt-5.1-codex",
+    name: "GPT 5.1 Codex",
+    api: "openai-codex-responses" as never,
+    baseUrl: "https://chatgpt.com/backend-api",
+    contextWindow: 128000,
+    supportsTools: true,
+  }
+  completeSimpleError = new Error('403 <html><body><span id="challenge-error-text">Enable JavaScript and cookies to continue</span><script>window._cf_chl_opt={cZone:"chatgpt.com",cUPMDTk:"/backend-api/v1/chat/completions"}</script></body></html>')
+
+  const result = await testModelConnection(model, "oauth-token")
+
+  expect(result.reachable).toBe(false)
+  expect(result.failureKind).toBe("subscription-blocked")
+  expect(result.message).toContain("ChatGPT subscription endpoint")
+  expect(result.message).toContain("ClIProxy API")
+  expect(result.detail).toContain("HTTP 403 from chatgpt.com/backend-api")
+  expect(String(result.detail)).not.toContain("<html>")
+})
+
 test("testModelConnection handles OpenAI-compatible vision and Kimi coding behavior", async () => {
   const visionModel: BraincodeModel = {
     id: "proxy/vision",

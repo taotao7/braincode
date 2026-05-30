@@ -129,7 +129,7 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
   logs/、cache/      运行时副产物
 ```
 
-`braincode config` 在 localhost 上提供多 tab Web UI。模型管理放在第一个 tab；数据统计有独立 tab，用 Recharts 展示按模型、角色、运行阶段聚合的 token 用量，并支持点击查看明细。通过 OAuth 认证过的订阅 provider，比如 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot，会出现在模型目录里，添加模型时不需要重复填 API key。GitHub Copilot OAuth 默认走公共 `github.com`；只有显式启用 GitHub Enterprise 时才显示域名输入。
+`braincode config` 在 localhost 上提供多 tab Web UI。模型管理放在第一个 tab；数据统计有独立 tab，用 Recharts 展示按模型、角色、运行阶段聚合的 token 用量，并支持点击查看明细。通过 OAuth 认证过的订阅 provider，比如 Claude Pro/Max、ChatGPT Plus/Pro Codex、GitHub Copilot，会出现在模型目录里，添加模型时不需要重复填 API key。GitHub Copilot OAuth 默认走公共 `github.com`；只有显式启用 GitHub Enterprise 时才显示域名输入。ChatGPT 订阅模型调用走 web-backed 端点，可能被浏览器或 Cloudflare 校验拒绝；Braincode 会把这类失败和普通 API key 鉴权失败分开提示，并标注不推荐用 ChatGPT 订阅 OAuth 做稳定调用。如果仍要使用订阅模型，建议尝试 ClIProxy API 或其他兼容代理。
 
 模型页是文本、视觉和图片生成模型的统一目录。添加模型时先选择来源：Pi provider 目录、用户 provider 的 `/models` 端点，或手动填写兼容 API 元数据。目录项不携带凭证；运行时按 provider id 从 `~/.braincode/auth.json` 读取 API key 或 OAuth 订阅 token。`imageMaker` 只用于图片生成或编辑，但现在也像其他角色一样从 `models.json` 选择 `openai-images` 模型。能读图的文本模型仍是普通视觉输入模型，不等于图片生成模型。
 

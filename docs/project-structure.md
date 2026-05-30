@@ -159,7 +159,7 @@ Early TUI commands:
 Browser UI for configuration.
 
 It should talk to the local server API and should not write `~/.braincode/` directly.
-It uses tabbed navigation with model management first, so long configuration surfaces stay scannable. It shows model, role, and runtime-phase token usage through the server usage-statistics API, including charted summaries and clickable details. When auth status reports OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, or GitHub Copilot, the model catalog can add those provider models without requiring a duplicate API key. GitHub Copilot OAuth should default to public `github.com` and only ask for a GitHub Enterprise domain when the user enables that option.
+It uses tabbed navigation with model management first, so long configuration surfaces stay scannable. It shows model, role, and runtime-phase token usage through the server usage-statistics API, including charted summaries and clickable details. When auth status reports OAuth-backed subscriptions such as Claude Pro/Max, ChatGPT Plus/Pro Codex, or GitHub Copilot, the model catalog can add those provider models without requiring a duplicate API key. GitHub Copilot OAuth should default to public `github.com` and only ask for a GitHub Enterprise domain when the user enables that option. ChatGPT subscription calls use a web-backed endpoint that can be rejected by browser or Cloudflare checks, so connection tests should surface that as a dedicated subscription limitation rather than a generic auth failure; the OAuth panel should mark ChatGPT subscription OAuth as not recommended for reliable calls and suggest ClIProxy API or another compatible proxy for users who still want subscription-backed ChatGPT models.
 
 ### `packages/config`
 

@@ -6,6 +6,7 @@
 - Le routage avec image en entrée est plus strict : les prompts avec image exigent une planification routeBrain et des chaînes de rôles texte compatibles vision, tandis qu'Image Maker reste réservé à la génération ou l'édition d'images.
 - Config Web fusionne catalogue, fournisseurs enregistrés, endpoint `/models` et saisie manuelle dans un seul flux d'ajout de modèle, avec prise en charge du listing Anthropic-compatible.
 - GitHub Copilot OAuth utilise désormais `github.com` par défaut ; le champ de domaine GitHub Enterprise est masqué derrière une option explicite.
+- Les tests de modèles via abonnement ChatGPT détectent maintenant les challenges navigateur ou Cloudflare de `chatgpt.com` et affichent un avertissement OAuth ciblé au lieu de toute la page HTML ; le panneau OAuth indique maintenant que ChatGPT subscription OAuth n'est pas recommandé pour des appels fiables et suggère ClIProxy API ou un autre proxy compatible.
 - L'estimation du budget contexte provider omet les octets des images inline tout en gardant les métadonnées, ce qui réduit les faux dépassements de contexte sur les prompts image.
 - Le wrapper npm et les métadonnées de release sont en `0.2.6` pour correspondre aux assets GitHub de même version.
 

@@ -6,6 +6,7 @@
 - 图像输入路由更严格：带图 prompt 必须由 routeBrain 规划，并选择具备视觉能力的文本角色模型链；Image Maker 只用于生成或编辑图片。
 - Config Web 把目录模型、已保存 provider、provider `/models` 和手动模型配置合并为一个添加模型入口，并支持 Anthropic-compatible 模型列表。
 - GitHub Copilot OAuth 现在默认走公共 `github.com`；GitHub Enterprise 域名输入只在显式启用后显示。
+- ChatGPT 订阅模型测试现在会识别 `chatgpt.com` 返回的浏览器 / Cloudflare 校验，并给出订阅 OAuth 专用提示，不再把整段 HTML challenge 展示给用户；OAuth 面板会标注不推荐用 ChatGPT 订阅 OAuth 做稳定调用，并建议尝试 ClIProxy API 或其他兼容代理。
 - Provider context 预算估算会跳过内联图片 payload 字节但保留元数据，减少图像 prompt 的误报 context overflow。
 - npm wrapper 和发布元数据同步到 `0.2.6`，用于匹配同版本 GitHub release 资产。
 
