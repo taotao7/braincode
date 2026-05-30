@@ -1,3 +1,4 @@
+# apps/site/src/pages/Home.tsx
 import { useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import { useI18n, type I18nKey } from "../i18n";

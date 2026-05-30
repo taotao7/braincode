@@ -55,6 +55,7 @@ test("buildFinalReport uses runtime facts for routing, todos, workers, and model
   })
 
   expect(report.status).toBe("approved")
+  expect(report.version).toBe(1)
   expect(report.task).toBe("fix failing auth test")
   expect(report.brain).toEqual({ id: "brain", name: "Brain", mode: "auto" })
   expect(report.routing.source).toBe("router-brain")

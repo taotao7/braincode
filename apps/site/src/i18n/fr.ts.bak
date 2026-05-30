@@ -1,3 +1,4 @@
+# apps/site/src/i18n/fr.ts
 export const fr = {
   nav_arch: "Pourquoi",
   nav_intent: "Intention",

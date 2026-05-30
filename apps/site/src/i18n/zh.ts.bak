@@ -1,3 +1,4 @@
+# apps/site/src/i18n/zh.ts
 export const zh = {
   nav_arch: "架构",
   nav_intent: "意图图",

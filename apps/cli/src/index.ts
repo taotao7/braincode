@@ -3,6 +3,7 @@
 import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError, loadExecutionBenchmarkTasks, planRuntimeFromConfig, runDemoBenchmarkSuite, runExecutionBenchmarkSuite, type DemoBenchmarkSuiteResult, type ExecutionBenchmarkSuiteResult, type ExecutionBenchmarkTask, type ExecutionBenchmarkTaskResult, type FinalReport, type ToolApprovalDecision, type ToolApprovalRequest } from "@braincode/agent-runtime"
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
+import { formatDoctorReport, runDoctor, type DoctorOptions } from "./doctor"
 
 function readFlag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name)
@@ -29,6 +30,7 @@ Usage:
   braincode run [--dry-run] [--heuristic] [--read-only|--allow-edits|--yes] [--json|--summary-only] <prompt>
   braincode benchmark [--heuristic] [--task <id>] [--json]
   braincode benchmark --execute [--real] [--task <id>] [--json]
+  braincode doctor [--json] [--project <path>] [--mcp] [--checks]
   braincode help
 
 Commands:
@@ -37,6 +39,7 @@ Commands:
   run      Plan or execute a task using the configured brain and model.
   benchmark
            Run representative coding-task plan benchmarks.
+  doctor   Diagnose configuration, models, tools, permissions, checks, and MCP.
   help     Show this help message.
 
 Run flags:
@@ -58,6 +61,12 @@ Benchmark flags:
   --keep-worktrees
                 Keep temporary execution benchmark worktrees for inspection.
   --json        Print machine-readable JSON.
+
+Doctor flags:
+  --json        Print machine-readable JSON.
+  --project     Diagnose a specific project root instead of the current directory.
+  --mcp         Focus on MCP diagnostics only.
+  --checks      Focus on check diagnostics only.
 `)
 }
 
@@ -240,6 +249,32 @@ const localWriteToolNames = new Set([
 
 function isExecuteToolName(toolName: string): boolean {
   return /(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script|write_stdin)/i.test(toolName)
+}
+
+async function runDoctorCommand(args: string[]) {
+  const json = args.includes("--json")
+  const projectRoot = readFlag(args, "--project")
+  const mcpOnly = args.includes("--mcp")
+  const checksOnly = args.includes("--checks")
+
+  const options: DoctorOptions = {
+    json,
+    projectRoot,
+    mcpOnly,
+    checksOnly,
+  }
+
+  const report = await runDoctor(options)
+
+  if (json) {
+    console.log(JSON.stringify(report, null, 2))
+  } else {
+    console.log(formatDoctorReport(report))
+  }
+
+  if (report.status === "error") {
+    process.exitCode = 1
+  }
 }
 
 async function runBenchmark(args: string[]) {
@@ -432,6 +467,9 @@ async function main() {
       break
     case "benchmark":
       await runBenchmark(args.slice(1))
+      break
+    case "doctor":
+      await runDoctorCommand(args.slice(1))
       break
     case "help":
     case "--help":

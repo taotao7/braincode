@@ -887,3 +887,21 @@ h1, h2, h3, h4 { text-wrap: balance; letter-spacing: -0.02em; }
 }
 .docs-back:hover { background: var(--accent); color: var(--bg); transform: translateY(-1px); box-shadow: 4px 4px 0px var(--shadow); }
 .docs-back:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0px var(--shadow); }
+
+/* Custom states for copy button */
+.btn-success {
+  background: #10b981;
+  border-color: #10b981;
+  color: #fff;
+}
+.btn-success:hover {
+  box-shadow: 4px 4px 0px rgba(16, 185, 129, 0.4);
+}
+.btn-error {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+}
+.btn-error:hover {
+  box-shadow: 4px 4px 0px rgba(239, 68, 68, 0.4);
+}

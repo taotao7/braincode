@@ -22,6 +22,7 @@
         "@braincode/config": "workspace:*",
         "@braincode/llm": "workspace:*",
         "@braincode/server": "workspace:*",
+        "@braincode/tools": "workspace:*",
         "ink": "^7.0.4",
         "markdansi": "^0.2.1",
         "react": "^19.2.6",

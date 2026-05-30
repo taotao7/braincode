@@ -7,6 +7,7 @@ import type { RuntimeMetricsSummary } from "./metrics"
 export type FinalReportStatus = ReviewDecisionStatus | "answered" | "read_only"
 
 export type FinalReport = {
+  version: 1
   status: FinalReportStatus
   task: string
   sessionId: string
@@ -87,6 +88,7 @@ export type BuildFinalReportInput = {
 export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
   const warnings = finalReportWarnings(input)
   return {
+    version: 1,
     status: resolveFinalReportStatus(input),
     task: input.task,
     sessionId: input.sessionId,
