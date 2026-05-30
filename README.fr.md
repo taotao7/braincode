@@ -12,6 +12,32 @@ Ce n'est pas un autre CLI IA qui demande à un seul modèle de planifier, coder 
 
 **Langues** : [English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## Démarrage rapide
+
+```sh
+npm i -g @taotao7/braincode
+braincode config
+braincode run --dry-run "review this repo"
+```
+
+`braincode config` ouvre l'interface locale de configuration et stocke les réglages sous `~/.braincode/`. Le dry run utilise le même routage routeBrain que l'exécution réelle, sans modifier de fichiers ni lancer d'outils.
+
+### Première édition réelle
+
+```sh
+braincode run --allow-edits "update README wording"
+```
+
+`--allow-edits` approuve automatiquement les lectures locales et éditions de fichiers de première partie. L'exécution de commandes, les outils MCP, les outils inconnus et les règles `deny` restent bloqués.
+
+### Exécution locale autonome
+
+```sh
+braincode run --yes "fix failing test and run checks"
+```
+
+`--yes` approuve automatiquement les appels d'outils locaux qui ne sont pas refusés par la politique. Utilisez-le pour laisser Braincode produire un patch, lancer les checks, appliquer la revue et rendre un rapport final structuré.
+
 ## Pourquoi Braincode ?
 
 La plupart des agents de code demandent au même modèle de planifier, coder et revoir son propre travail. Braincode sépare ces rôles.
@@ -22,18 +48,42 @@ La plupart des agents de code demandent au même modèle de planifier, coder et 
 - Exiger une revue indépendante pour les éditions de fichiers risquées
 - Produire des rapports finaux structurés
 
-## Exemple
+## Commandes courantes
 
 ```bash
 braincode run "add login validation"
+braincode run --allow-edits "add login validation"
+braincode run --yes "fix the failing test"
 braincode run --dry-run "add login validation"
 braincode run --dry-run --heuristic "add login validation"
 braincode benchmark
 ```
 
-`braincode run` utilise le Brain Model configuré. `--dry-run` prévisualise le même chemin de planification routeBrain que l'exécution réelle ; ajoutez `--heuristic` pour un diagnostic sans appel provider. Utilisez `braincode config` pour changer le Brain Model actif et les réglages provider/modèle.
+`braincode run` utilise le Brain Model configuré. Les exécutions non interactives sont en lecture seule par défaut car il n'y a pas d'interface d'approbation ; utilisez `--allow-edits` pour approuver les lectures et éditions locales, ou `--yes` pour approuver les appels d'outils qui ne sont pas refusés par politique. `--dry-run` prévisualise le même chemin de planification routeBrain que l'exécution réelle ; ajoutez `--heuristic` pour un diagnostic sans appel provider. Utilisez `braincode config` pour changer le Brain Model actif et les réglages provider/modèle.
 
 `braincode benchmark` lance une suite de prompts de codage représentatifs : édition de README, correction de test en échec, changement risqué côté auth, changement package/script, et revue de sécurité en lecture seule. Par défaut, il demande routeBrain quand les identifiants existent et signale le fallback heuristique ; `--heuristic` force un diagnostic sans provider.
+
+## Demo Safe Review Patch
+
+Le demo exécutable [examples/login-validation-demo](./examples/login-validation-demo) montre la boucle principale sur un petit fixture TS/Bun/React :
+
+```text
+routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
+```
+
+Test hors-ligne depuis la racine du dépôt :
+
+```sh
+bun run braincode -- benchmark --execute --task login-validation
+```
+
+Forme attendue du rapport :
+
+```text
+login-validation       PASSED changed=src/login.ts +5 -1 checks=passed review=approved
+```
+
+Le prompt demo, le patch attendu et le transcript asciinema sont dans [examples/login-validation-demo](./examples/login-validation-demo).
 
 ## Fonctionnement
 
@@ -59,6 +109,16 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 ```
 
 Cibles supportées : `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Après installation, lancez `braincode` pour la TUI ou `braincode config` pour ouvrir la page de configuration locale.
+
+## Erreurs courantes
+
+| Symptôme | Correction |
+| --- | --- |
+| Clé API manquante | Lancez `braincode config`, ou ajoutez la clé provider dans `~/.braincode/auth.json`. |
+| Une image exige un modèle vision | Choisissez un modèle routeBrain/primary compatible vision dans `braincode config`. |
+| Réponse assistant vide | Activez `BRAINCODE_DEBUG=true` et vérifiez le type d'API du modèle dans `~/.braincode/models.json`. |
+| Context handoff requis | Réduisez la tâche ou ajoutez des références `@file` précises pour réduire le contexte worker. |
+| Commande bloquée par les permissions | Utilisez la TUI pour approuver, ou `--yes` pour les commandes non refusées ; les règles `deny` ne sont pas contournables. |
 
 ## Notes de version
 

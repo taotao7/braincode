@@ -645,22 +645,22 @@ fallbackCount
 
 ### TODO
 
-- [ ] 新建 `examples/login-validation-demo`
-- [ ] 准备一个小型 TS/Bun/React fixture
-- [ ] 任务：增加 login validation
-- [ ] 展示流程
+- [x] 新建 `examples/login-validation-demo`
+- [x] 准备一个小型 TS/Bun/React fixture
+- [x] 任务：增加 login validation
+- [x] 展示流程
 
 ```txt
 routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
 ```
 
-- [ ] 录制 asciinema 或 gif
-- [ ] README 增加 demo section
+- [x] 录制 asciinema 或 gif
+- [x] README 增加 demo section
 
 ### 验收标准
 
-- [ ] 新用户能 2 分钟看懂 Braincode 和普通 CLI agent 的区别
-- [ ] demo 里必须展示 patch、checks、review decision
+- [x] 新用户能 2 分钟看懂 Braincode 和普通 CLI agent 的区别
+- [x] demo 里必须展示 patch、checks、review decision
 
 ---
 
@@ -688,7 +688,7 @@ routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
 
 ### TODO
 
-- [ ] README 增加 3 步 Quickstart
+- [x] README 增加 3 步 Quickstart
 
 ```bash
 npm i -g @taotao7/braincode
@@ -696,19 +696,19 @@ braincode config
 braincode run --dry-run "review this repo"
 ```
 
-- [ ] 增加 “First real edit”
+- [x] 增加 “First real edit”
 
 ```bash
 braincode run --allow-edits "update README wording"
 ```
 
-- [ ] 增加 “Full autonomous local run”
+- [x] 增加 “Full autonomous local run”
 
 ```bash
 braincode run --yes "fix failing test and run checks"
 ```
 
-- [ ] 增加常见错误说明
+- [x] 增加常见错误说明
   - missing API key
   - image input requires vision model
   - empty assistant response
@@ -717,8 +717,8 @@ braincode run --yes "fix failing test and run checks"
 
 ### 验收标准
 
-- [ ] 用户不读架构文档也能跑起来
-- [ ] 常见错误都有修复路径
+- [x] 用户不读架构文档也能跑起来
+- [x] 常见错误都有修复路径
 
 ---
 
@@ -770,8 +770,8 @@ braincode run --yes "fix failing test and run checks"
 ## 第 4 周：评估和传播
 
 - [x] P3-1 execution benchmark
-- [ ] P3-2 login validation demo
-- [ ] P4-1 quickstart 文档
+- [x] P3-2 login validation demo
+- [x] P4-1 quickstart 文档
 
 ---
 
@@ -911,6 +911,6 @@ Acceptance:
 ## v0.6：Execution Benchmark & Demo
 
 - [x] fixture benchmark
-- [ ] login validation demo
+- [x] login validation demo
 - [x] benchmark JSON report
-- [ ] README demo section
+- [x] README demo section

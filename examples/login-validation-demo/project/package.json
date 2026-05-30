@@ -1,0 +1,19 @@
+{
+  "name": "braincode-login-validation-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "bunx tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./src/login.bench.ts",
+    "verify": "bun run check && bun run test"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "latest"
+  }
+}

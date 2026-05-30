@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "strategy": "smart",
+  "policies": {
+    "auth-risk": {
+      "scripts": ["test"],
+      "review": "required",
+      "reason": "demo auth-risk change: run focused login regression tests and require review"
+    }
+  },
+  "timeoutMs": 60000,
+  "maxOutputBytes": 8000
+}

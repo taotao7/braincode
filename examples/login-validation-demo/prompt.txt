@@ -1,0 +1,1 @@
+Add login validation so blank email and password values are rejected before authentication runs. Keep the React form using the login helper, run the focused Bun tests, and include the review decision in the final report.

@@ -12,6 +12,32 @@ planner -> specialist workers -> primary executor -> reviewer -> final report
 
 **语言版本**：[English](./README.md) · [中文](./README.zh.md) · [Français](./README.fr.md)
 
+## 快速开始
+
+```sh
+npm i -g @taotao7/braincode
+braincode config
+braincode run --dry-run "review this repo"
+```
+
+`braincode config` 会打开本地配置页，用户配置保存在 `~/.braincode/`。`--dry-run` 走真实执行同一套 routeBrain 规划路径，但不会改文件或运行工具。
+
+### 第一次真实编辑
+
+```sh
+braincode run --allow-edits "update README wording"
+```
+
+`--allow-edits` 会自动批准内置本地读取和文件编辑；命令执行、MCP 工具、未知工具，以及权限策略 deny 命中的操作仍会被阻止。
+
+### 完整自治本地运行
+
+```sh
+braincode run --yes "fix failing test and run checks"
+```
+
+`--yes` 会自动批准未被策略 deny 的本地工具调用，适合让 Braincode 完成 patch、checks、review gate 和结构化 final report。
+
 ## 为什么 Braincode？
 
 大多数 coding agent 让同一个模型完成规划、编码和自我审查。Braincode 把这些职责拆开。
@@ -22,7 +48,7 @@ planner -> specialist workers -> primary executor -> reviewer -> final report
 - 高风险文件编辑需要独立 Review
 - 输出结构化最终报告
 
-## 示例
+## 常用命令
 
 ```bash
 braincode run "add login validation"
@@ -39,6 +65,28 @@ braincode benchmark
 `braincode benchmark` 运行一组代表性 coding prompt：README 编辑、失败测试修复、auth 风险改动、package/script 改动，以及只做安全审查的只读任务。默认会在有凭据时请求 routeBrain，并标注 heuristic fallback；`--heuristic` 可用于无 provider 的诊断运行。
 
 设置 `BRAINCODE_DEBUG=true` 后，runtime 会把脱敏调试信息写到 stderr：模型候选、provider payload/response 摘要、agent 事件摘要、fallback 尝试和空 assistant 响应。密钥等敏感字段会在输出前脱敏。
+
+## Safe Review Patch Demo
+
+[examples/login-validation-demo](./examples/login-validation-demo) 提供一个小型 TS/Bun/React fixture，展示完整链路：
+
+```text
+routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
+```
+
+无 provider 时可以先跑离线执行 benchmark：
+
+```sh
+bun run braincode -- benchmark --execute --task login-validation
+```
+
+预期输出会包含：
+
+```text
+login-validation       PASSED changed=src/login.ts +5 -1 checks=passed review=approved
+```
+
+完整 demo prompt、预期 patch 和 asciinema transcript 都在 [examples/login-validation-demo](./examples/login-validation-demo)。
 
 ## 工作方式
 
@@ -64,6 +112,16 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 ```
 
 支持的平台：`darwin-arm64`、`darwin-x64`、`linux-x64`、`linux-arm64`。安装完成后，运行 `braincode` 启动 TUI，或运行 `braincode config` 打开本地配置页面。
+
+## 常见错误
+
+| 现象 | 处理方式 |
+| --- | --- |
+| 缺少 API key | 运行 `braincode config`，或把 provider key 写入 `~/.braincode/auth.json`。 |
+| 图片输入要求 vision model | 在 `braincode config` 里给 routeBrain / primary 选择支持 vision 的模型。 |
+| assistant 返回空内容 | 设置 `BRAINCODE_DEBUG=true`，并检查 `~/.braincode/models.json` 里的模型 API 类型。 |
+| 需要 context handoff | 缩小任务范围，或用明确的 `@file` 引用减少 worker 上下文。 |
+| 命令被权限模式阻止 | 用 TUI 审批，非交互模式用 `--yes`；策略 deny 命中的命令不能绕过。 |
 
 ## 发布记录
 

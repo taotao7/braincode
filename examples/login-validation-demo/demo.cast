@@ -1,0 +1,9 @@
+{"version":2,"width":120,"height":32,"timestamp":1780103902,"env":{"SHELL":"/bin/zsh","TERM":"xterm-256color"}}
+[0.100000,"o","$ cd examples/login-validation-demo/project\r\n"]
+[0.700000,"o","$ bun test ./src/login.bench.ts\r\n"]
+[1.000000,"o","bun test v1.3.14\r\n\r\nsrc/login.bench.ts:\r\n(fail) login rejects blank email before authentication\r\n(fail) login rejects blank password before authentication\r\n(fail) login trims email before authentication\r\n\r\n 0 pass\r\n 3 fail\r\n"]
+[2.200000,"o","$ braincode run --yes \"$(cat ../prompt.txt)\"\r\n"]
+[2.600000,"o","Running with --yes: tool calls are auto-approved for this non-interactive run.\r\n"]
+[3.600000,"o","Braincode Run Report\r\nStatus: approved\r\nTask: Add login validation so blank email and password values are rejected before authentication runs. Keep the React form using the login helper, run the focused Bun tests, and include the review decision in the final report.\r\nBrain: brain / auto\r\nRouting: router-brain -> backend\r\nWorkers: frontend completed, qa completed, review approved\r\nPatch: 1 file, +5 -1\r\nChecks: passed (test passed; demo auth-risk change: run focused login regression tests and require review)\r\nReview: approved\r\nSession: demo-login-validation\r\n\r\nSummary:\r\nAdded trim-based email validation and password presence checks before authentication.\r\n"]
+[5.500000,"o","$ bun test ./src/login.bench.ts\r\n"]
+[5.900000,"o","bun test v1.3.14\r\n\r\nsrc/login.bench.ts:\r\n(pass) login rejects blank email before authentication\r\n(pass) login rejects blank password before authentication\r\n(pass) login trims email before authentication\r\n\r\n 3 pass\r\n 0 fail\r\n"]

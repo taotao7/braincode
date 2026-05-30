@@ -1,6 +1,6 @@
 # Project Structure and Plan
 
-This document is the source of truth for workspace layout, package ownership, and implementation status. The current implementation has passed the initial skeleton/runtime/TUI/MCP/coding-workflow phases; the only ongoing work is focused test coverage.
+This document is the source of truth for workspace layout, package ownership, and implementation status. The current implementation has passed the initial skeleton/runtime/TUI/MCP/coding-workflow phases; ongoing work is focused on product polish, usage/cost visibility, configuration health checks, and targeted test coverage.
 
 ## Goals
 
@@ -54,6 +54,13 @@ braincode/
     architecture.md
     project-structure.md
     references.md
+  examples/
+    login-validation-demo/
+      README.md
+      demo.cast
+      expected-final.patch
+      prompt.txt
+      project/
   apps/
     cli/
       src/
@@ -120,6 +127,7 @@ Expected commands:
 - `braincode run --yes <task>` — non-interactive execution with all local tools and auto-approved tool calls except permission-policy deny matches.
 - MCP startup is bounded: CLI runs use short-budget eager loading, while the TUI loads MCP servers in the background and keeps local tools available immediately.
 - `braincode benchmark [--heuristic] [--task <id>] [--json]` — run the representative coding-task plan benchmark suite.
+- `braincode benchmark --execute [--real] [--task <id>] [--json]` — run isolated patch/check/review execution benchmark fixtures.
 
 The CLI should stay thin. It should delegate implementation to packages.
 
@@ -385,4 +393,5 @@ MVP-2 starts by establishing the adapter boundary:
 - Done: Brain preset inheritance through `extends`.
 - Done: demo benchmark CLI for representative README edit, failing-test fix, auth-risk change, package change, and security-review-only planning runs.
 - Done: execution benchmark fixtures under `benchmarks/fixtures` plus `braincode benchmark --execute`, with offline mock execution by default, `--real` for configured provider runs, isolated temp git worktrees, and JSON metrics for changed files, diff stats, checks, review, duration, tool calls, token usage, approvals, and fallbacks.
+- Done: login validation safe-review demo under `examples/login-validation-demo`, including a TS/Bun/React fixture, focused `.braincode/checks.json`, expected patch, and asciinema transcript.
 - Ongoing: focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.

@@ -1,0 +1,17 @@
+diff --git a/src/login.ts b/src/login.ts
+index 4ede681..611a768 100644
+--- a/src/login.ts
++++ b/src/login.ts
+@@ -8,7 +8,11 @@ export type LoginResult =
+   | { ok: false; error: string }
+ 
+ export function login(input: LoginInput, authenticate: (email: string, password: string) => string | undefined): LoginResult {
+-  const userId = authenticate(input.email, input.password)
++  const email = input.email.trim()
++  if (!email) return { ok: false, error: "Email is required." }
++  if (!input.password) return { ok: false, error: "Password is required." }
++
++  const userId = authenticate(email, input.password)
+   if (!userId) return { ok: false, error: "Invalid credentials." }
+   return { ok: true, userId }
+ }

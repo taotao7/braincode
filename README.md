@@ -2,7 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-205%20passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-99.20%25%20lines-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -20,6 +20,32 @@ It is not another AI CLI that asks one model to plan, code, and review itself. B
 
 <img width="1774" height="887" alt="Braincode routing diagram" src="./apps/site/src/assets/routing-diagram.png" />
 
+## Quickstart
+
+```sh
+npm i -g @taotao7/braincode
+braincode config
+braincode run --dry-run "review this repo"
+```
+
+`braincode config` opens the local configuration UI and stores user settings under `~/.braincode/`. The dry run asks routeBrain for the same routing plan used by real execution, but does not edit files or run tools.
+
+### First Real Edit
+
+```sh
+braincode run --allow-edits "update README wording"
+```
+
+`--allow-edits` auto-approves first-party local reads and file edits. Command execution, MCP tools, unknown tools, and permission-policy deny matches remain blocked.
+
+### Full Autonomous Local Run
+
+```sh
+braincode run --yes "fix failing test and run checks"
+```
+
+`--yes` auto-approves local tool calls that are not denied by policy. Use it when you want Braincode to patch, run checks, invoke the review gate, and return a structured final report without stopping for terminal approval prompts.
+
 ## Why Braincode?
 
 Most coding agents ask one model to plan, code, and review itself. Braincode separates these roles.
@@ -30,7 +56,7 @@ Most coding agents ask one model to plan, code, and review itself. Braincode sep
 - Require independent review for risky file edits
 - Produce structured final reports
 
-## Example
+## Common Commands
 
 ```bash
 braincode run "add login validation"
@@ -44,6 +70,28 @@ braincode benchmark
 `braincode run` uses the configured Brain Model. Non-interactive runs are read-only by default because there is no approval UI; use `--allow-edits` to auto-approve first-party local reads and file edits while blocking command execution, MCP tools, and unknown tools, or `--yes` to auto-approve tool calls that are not denied by policy. `--dry-run` previews the same routeBrain planning path used by real execution; add `--heuristic` only when you need a no-provider fallback diagnostic. Use `braincode config` to change the active Brain Model and provider/model settings.
 
 `braincode benchmark` runs a deterministic demo suite of representative coding prompts: README edits, failing-test fixes, auth-risk changes, package/script changes, and security-review-only runs. By default it asks routeBrain when credentials are available and labels heuristic fallback checks; use `--heuristic` for a no-provider diagnostic run.
+
+## Safe Review Patch Demo
+
+The runnable demo at [examples/login-validation-demo](./examples/login-validation-demo) shows the core loop on a small TS/Bun/React fixture:
+
+```text
+routeBrain -> frontend/backend/qa -> primary -> checks -> review -> final report
+```
+
+Run the offline smoke test from the repository root:
+
+```sh
+bun run braincode -- benchmark --execute --task login-validation
+```
+
+Expected report shape:
+
+```text
+login-validation       PASSED changed=src/login.ts +5 -1 checks=passed review=approved
+```
+
+For a full provider-backed run, see the demo prompt, expected patch, and asciinema transcript in [examples/login-validation-demo](./examples/login-validation-demo).
 
 ## How It Works
 
@@ -69,6 +117,16 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 ```
 
 Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. After install, run `braincode` for the TUI or `braincode config` to open the local configuration page.
+
+## Common Error Paths
+
+| Symptom | Fix |
+| --- | --- |
+| Missing API key | Run `braincode config`, or add the provider key to `~/.braincode/auth.json`. |
+| Image input requires vision model | Choose a vision-capable routeBrain/primary model in `braincode config`. |
+| Empty assistant response | Set `BRAINCODE_DEBUG=true` and verify the model API type in `~/.braincode/models.json`. |
+| Context handoff required | Retry with a narrower task or include exact `@file` references so workers receive smaller context. |
+| Command blocked by permission mode | Use the TUI for approval, use `--yes` for non-denied commands, or update `tools.json`; deny rules cannot be bypassed. |
 
 ## Release Notes
 
@@ -100,6 +158,7 @@ See [RELEASES.md](./RELEASES.md).
 - Prompt references for `@file`, compact `@@session` context, and image attachments.
 - Router-plan UX: `/plan` asks the configured `routeBrain` by default, heuristic diagnostics are explicit, and the TUI shows routing source, confidence, and reason in plan and intent views.
 - Demo benchmark CLI for representative coding tasks covering docs edits, failing tests, auth-risk implementation, package/script changes, and security-review-only prompts.
+- Login validation safe-review demo with a TS/Bun/React fixture, expected patch, focused check policy, and asciinema transcript under `examples/login-validation-demo`.
 
 ## Remaining Work
 
