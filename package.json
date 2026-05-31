@@ -14,7 +14,7 @@
     "config": "bun run apps/cli/src/index.ts config",
     "check": "bunx tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "coverage": "bun test --coverage",
+    "coverage": "env -u BRAINCODE_DEBUG -u BRAINCODE_DEBUG_FILE bun test --coverage --coverage-reporter=lcov",
     "build:binaries": "bash scripts/build-binaries.sh",
     "build:site": "bun run --filter @braincode/site build",
     "site": "bun run --filter @braincode/site dev"
