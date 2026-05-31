@@ -12,6 +12,10 @@ export const INK_RENDER_SAFETY_ROWS = 1;
 export const HEADER_ROWS = 5;
 export const OVERLAY_SUGGESTION_MIN_ROWS = 4;
 export const OVERLAY_SUGGESTION_MAX_ROWS = 12;
+// Max session rows shown at once in the /resume browse panel. The full history
+// is loaded; the panel scrolls a fixed-height window over it so a long list
+// does not push the input off-screen.
+export const SESSION_PANEL_VISIBLE_ROWS = 12;
 export const PET_PANEL_MIN_WIDTH = 28;
 export const PET_PANEL_MAX_WIDTH = 42;
 export const RUN_SPINNER_FRAMES = [

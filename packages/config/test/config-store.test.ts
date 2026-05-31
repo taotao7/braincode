@@ -714,6 +714,45 @@ test("listSessions limits after sorting by recent session file time", async () =
   expect(sessions[0]?.prompt).toBe("latest prompt")
 })
 
+test("listSessions returns every session when given an unbounded limit", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  for (let index = 0; index < 80; index++) {
+    const filePath = join(paths.sessions, `session-${index}.jsonl`)
+    await Bun.write(filePath, `${JSON.stringify({ type: "run_start", prompt: `prompt ${index}` })}\n`)
+  }
+
+  const sessions = await listSessions(home, Number.POSITIVE_INFINITY)
+
+  expect(sessions).toHaveLength(80)
+})
+
+test("listSessions filters by project root when requested", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  const write = async (id: string, root: string | undefined) => {
+    const runStart: Record<string, unknown> = { type: "run_start", prompt: `prompt ${id}` }
+    if (root !== undefined) runStart.projectSupport = { root }
+    await Bun.write(join(paths.sessions, `${id}.jsonl`), `${JSON.stringify(runStart)}\n`)
+  }
+
+  await write("alpha-1", "/repo/alpha")
+  await write("alpha-2", "/repo/alpha")
+  await write("beta-1", "/repo/beta")
+  await write("rootless", undefined)
+
+  const alpha = await listSessions(home, Number.POSITIVE_INFINITY, { projectRoot: "/repo/alpha" })
+  expect(alpha.map((session) => session.sessionId).sort()).toEqual(["alpha-1", "alpha-2"])
+  expect(alpha.every((session) => session.projectRoot === "/repo/alpha")).toBe(true)
+
+  // No filter returns every session, including ones without a recorded root.
+  const all = await listSessions(home, Number.POSITIVE_INFINITY)
+  expect(all).toHaveLength(4)
+  expect(all.find((session) => session.sessionId === "rootless")?.projectRoot).toBeUndefined()
+})
+
 test("readUsageStats can limit parsing to recent session files", async () => {
   const home = await makeTempHome()
   const paths = await ensureBraincodeHome(home)

@@ -177,6 +177,9 @@ export type SessionPanelState = {
   entries: SessionSummary[];
   selected: number;
   message?: string;
+  // Browse panel scope: "project" lists only sessions started in the current
+  // project directory; "all" lists every recorded session across projects.
+  scope: "project" | "all";
 };
 
 export type BrainPanelState = {

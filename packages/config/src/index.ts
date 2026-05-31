@@ -1020,6 +1020,7 @@ export type SessionSummary = {
   role?: string;
   summary?: string;
   status: "completed" | "failed" | "incomplete";
+  projectRoot?: string;
 };
 
 export type SessionContextEntry =
@@ -1107,10 +1108,16 @@ export type SessionContext = SessionSummary & {
 export async function listSessions(
   home = getBraincodeHome(),
   limit = 25,
+  options: { projectRoot?: string } = {},
 ): Promise<SessionSummary[]> {
   const paths = await ensureBraincodeHome(home);
   const safeLimit = Math.max(1, Math.floor(limit));
-  const candidates = await listSessionFiles(paths, safeLimit * 4);
+  const filterRoot = options.projectRoot;
+  // When filtering by project we must scan every session (a matching session may
+  // be arbitrarily far down the recency list), so widen the file scan in that
+  // case and apply the limit only after filtering.
+  const fileScanLimit = filterRoot === undefined ? safeLimit * 4 : undefined;
+  const candidates = await listSessionFiles(paths, fileScanLimit);
   const records: Array<SessionSummary & { sortKey: number }> = [];
   for (const candidate of candidates) {
     const file = Bun.file(candidate.path);
@@ -1118,6 +1125,7 @@ export async function listSessions(
     let brainId: string | undefined;
     let role: string | undefined;
     let summary: string | undefined;
+    let projectRoot: string | undefined;
     let status: SessionSummary["status"] = "incomplete";
     try {
       const text = await file.text();
@@ -1132,6 +1140,8 @@ export async function listSessions(
             const plan = record.plan as { brain?: { id?: unknown }; role?: unknown } | undefined;
             if (plan?.brain && typeof plan.brain.id === "string") brainId = brainId ?? plan.brain.id;
             if (typeof plan?.role === "string") role = role ?? plan.role;
+            const projectSupport = record.projectSupport as { root?: unknown } | undefined;
+            if (typeof projectSupport?.root === "string" && !projectRoot) projectRoot = projectSupport.root;
           } else if (record.type === "run_end") {
             if (typeof record.summary === "string") summary = record.summary;
             status = "completed";
@@ -1146,7 +1156,8 @@ export async function listSessions(
     } catch {
       // ignore unreadable session
     }
-    records.push({ sessionId: candidate.sessionId, path: candidate.path, updatedAt: candidate.updatedAt, prompt, brainId, role, summary, status, sortKey: candidate.updatedAt });
+    if (filterRoot !== undefined && projectRoot !== filterRoot) continue;
+    records.push({ sessionId: candidate.sessionId, path: candidate.path, updatedAt: candidate.updatedAt, prompt, brainId, role, summary, status, projectRoot, sortKey: candidate.updatedAt });
   }
   records.sort((left, right) => right.sortKey - left.sortKey);
   return records.slice(0, safeLimit).map(({ sortKey: _drop, ...rest }) => rest);

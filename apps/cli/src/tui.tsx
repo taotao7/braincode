@@ -92,6 +92,7 @@ import {
   PET_PANEL_MAX_WIDTH,
   PET_PANEL_MIN_WIDTH,
   PET_SNAPSHOT_FLUSH_MS,
+  SESSION_PANEL_VISIBLE_ROWS,
   STREAM_FLUSH_MAX_WAIT_MS,
   STREAM_FLUSH_MIN_CHARS,
   TRANSCRIPT_MOUSE_WHEEL_ROWS,
@@ -1298,10 +1299,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     });
   }
 
-  async function showSessionPanel() {
+  async function showSessionPanel(scope: "project" | "all" = "project") {
     let sessions: SessionSummary[];
     try {
-      sessions = (await refreshSessionSuggestions(50)).slice(0, 25);
+      // Load every recorded session so the browse panel never hides history;
+      // the panel renders a fixed-height scroll window so a long list does not
+      // overflow the terminal. By default the list is scoped to the current
+      // project directory; press "a" in the panel to see all projects.
+      sessions = await listSessions(
+        undefined,
+        Number.POSITIVE_INFINITY,
+        scope === "project" ? { projectRoot } : {},
+      );
     } catch (error) {
       appendItem({
         kind: "error",
@@ -1312,7 +1321,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     if (sessions.length === 0) {
       appendItem({
         kind: "panel",
-        text: "No sessions recorded yet. Sessions land under ~/.braincode/sessions/.",
+        text:
+          scope === "project"
+            ? `No sessions recorded for this project yet (${projectRoot}). Press "a" after /resume to browse all projects, or run a task here first.`
+            : "No sessions recorded yet. Sessions land under ~/.braincode/sessions/.",
       });
       return;
     }
@@ -1320,7 +1332,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     setHookPanel(null);
     setIntentPanel(null);
     setOverlay(null);
-    setSessionPanel({ entries: sessions, selected: 0 });
+    setSessionPanel({ entries: sessions, selected: 0, scope });
   }
 
   async function resumeSession(argument: string) {
@@ -1330,7 +1342,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
       return;
     }
     try {
-      const sessions = await listSessions(undefined, 100);
+      const sessions = await listSessions(undefined, Number.POSITIVE_INFINITY);
       const target = sessions.find(
         (entry) =>
           entry.sessionId === trimmed || entry.sessionId.startsWith(trimmed),
@@ -3249,6 +3261,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         });
         return;
       }
+      if (input === "a") {
+        // Toggle between project-scoped and all-projects listing.
+        const nextScope =
+          sessionPanel.scope === "project" ? "all" : "project";
+        void showSessionPanel(nextScope).catch((error) =>
+          appendItem({
+            kind: "error",
+            text: `Sessions failed: ${formatError(error)}`,
+          }),
+        );
+        return;
+      }
       return;
     }
 
@@ -3553,34 +3577,82 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
             marginBottom={1}
           >
             <Text color={colors.blue} bold>
-              Sessions
+              Sessions{" "}
+              <Text color={colors.gray}>
+                ·{" "}
+                {sessionPanel.scope === "project"
+                  ? "this project"
+                  : "all projects"}
+              </Text>
             </Text>
-            {sessionPanel.entries.map((entry, index) => (
-              <Box key={entry.sessionId} flexDirection="column">
-                <Text
-                  color={
-                    index === sessionPanel.selected ? colors.green : undefined
-                  }
-                >
-                  {index === sessionPanel.selected ? "›" : " "}{" "}
-                  {sessionStatusGlyph(entry.status)}{" "}
-                  {entry.sessionId.slice(0, 8)} ·{" "}
-                  {formatTimestamp(entry.updatedAt)}
-                  {entry.role ? ` · ${entry.role}` : ""}
-                </Text>
-                {entry.prompt ? (
+            {(() => {
+              const total = sessionPanel.entries.length;
+              const visible = Math.min(SESSION_PANEL_VISIBLE_ROWS, total);
+              // Keep the selection inside the window: center it where possible,
+              // then clamp so we never scroll past either end of the list.
+              let start = Math.max(
+                0,
+                sessionPanel.selected - Math.floor(visible / 2),
+              );
+              start = Math.min(start, Math.max(0, total - visible));
+              const windowEntries = sessionPanel.entries.slice(
+                start,
+                start + visible,
+              );
+              return (
+                <Box flexDirection="column">
+                  {start > 0 ? (
+                    <Text color={colors.gray}>↑ {start} more</Text>
+                  ) : null}
+                  {windowEntries.map((entry, offset) => {
+                    const index = start + offset;
+                    return (
+                      <Box key={entry.sessionId} flexDirection="column">
+                        <Text
+                          color={
+                            index === sessionPanel.selected
+                              ? colors.green
+                              : undefined
+                          }
+                        >
+                          {index === sessionPanel.selected ? "›" : " "}{" "}
+                          {sessionStatusGlyph(entry.status)}{" "}
+                          {entry.sessionId.slice(0, 8)} ·{" "}
+                          {formatTimestamp(entry.updatedAt)}
+                          {entry.role ? ` · ${entry.role}` : ""}
+                        </Text>
+                        {entry.prompt ? (
+                          <Text color={colors.gray}>
+                            {" "}
+                            {truncate(
+                              entry.prompt.replace(/\s+/g, " ").trim(),
+                              120,
+                            )}
+                          </Text>
+                        ) : null}
+                      </Box>
+                    );
+                  })}
+                  {start + visible < total ? (
+                    <Text color={colors.gray}>
+                      ↓ {total - (start + visible)} more
+                    </Text>
+                  ) : null}
                   <Text color={colors.gray}>
-                    {" "}
-                    {truncate(entry.prompt.replace(/\s+/g, " ").trim(), 120)}
+                    {total > 0
+                      ? `${sessionPanel.selected + 1}/${total} sessions`
+                      : "no sessions"}
                   </Text>
-                ) : null}
-              </Box>
-            ))}
+                </Box>
+              );
+            })()}
             {sessionPanel.message ? (
               <Text color={colors.cyan}>{sessionPanel.message}</Text>
             ) : null}
             <Text color={colors.gray}>
-              ↑↓ / Ctrl+P/N navigate · Enter resume · v details · Esc close
+              ↑↓ / Ctrl+P/N navigate · Enter resume · v details ·{" "}
+              {sessionPanel.scope === "project" ? "a all projects" : "a this project"}{" "}
+              · Esc close
             </Text>
           </Box>
         ) : null}
