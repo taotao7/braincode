@@ -329,6 +329,8 @@ test("default tool configuration enables local coding tools with approval for wr
     "apply_patch",
     "exec_command",
     "write_stdin",
+    "list_background",
+    "kill_background",
     "shell",
     "git_diff",
     "get_changed_files",

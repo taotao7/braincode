@@ -440,7 +440,7 @@ function toolCallRequiresApproval(toolName: string, args: unknown, policyEvaluat
   if (policyEvaluation?.action === "allow") return false
   const name = toolName.toLowerCase()
   if (name === "web_search" || name.startsWith("mcp__")) return false
-  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script)/.test(name)) return true
+  if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script|kill_background)/.test(name)) return true
   if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return true
   const serialized = safeStringify(args).toLowerCase()
   return /\b(rm\s+-rf|sudo|chmod|chown|git\s+push|git\s+reset|drop\s+table|delete\s+from|truncate\s+table|npm\s+publish|bun\s+publish)\b/.test(serialized)

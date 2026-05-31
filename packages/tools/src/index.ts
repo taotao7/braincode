@@ -167,6 +167,22 @@ export const builtInToolDefinitions: ToolDefinition[] = [
     approvalPolicy: "confirm-dangerous",
   },
   {
+    name: "list_background",
+    description: "List active and recently-exited exec_command sessions, including background processes.",
+    permissions: ["execute"],
+    risk: "low",
+    defaultEnabled: true,
+    approvalPolicy: "allow",
+  },
+  {
+    name: "kill_background",
+    description: "Terminate an exec_command session (background or foreground) by its session id.",
+    permissions: ["execute"],
+    risk: "medium",
+    defaultEnabled: true,
+    approvalPolicy: "confirm-dangerous",
+  },
+  {
     name: "shell",
     description: "Run shell commands in the current project workspace.",
     permissions: ["execute"],
@@ -212,7 +228,7 @@ export function createDefaultToolConfiguration(): ToolConfigDocument {
   }
 }
 
-export { createLocalCodingTools, localCodingToolNames, type LocalCodingToolName, type LocalCodingToolOptions, type LocalToolMode } from "./local"
+export { createLocalCodingTools, localCodingToolNames, ExecSessionManager, type LocalCodingToolName, type LocalCodingToolOptions, type LocalToolMode, type BackgroundExitInfo, type BackgroundExitListener, type ExecSessionSummary } from "./local"
 
 export function normalizeToolConfiguration(document: ToolConfigDocument): ToolConfigDocument {
   const configuredTools = Array.isArray(document.tools) ? document.tools : []

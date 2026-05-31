@@ -26,6 +26,10 @@ export type LocalCodingToolOptions = {
   fallbackSearchConcurrency?: number
   maxSearchableFileBytes?: number
   permissionPolicy?: PermissionPolicyDocument
+  /** Reuse an existing session manager so background processes survive across prompts and are shared between tool sets. */
+  execSessions?: ExecSessionManager
+  /** Notified when a background session's process exits. Registered once on the shared manager. */
+  onBackgroundExit?: BackgroundExitListener
 }
 
 type LocalToolSpec = {
@@ -63,6 +67,8 @@ export const localCodingToolNames = [
   "apply_patch",
   "exec_command",
   "write_stdin",
+  "list_background",
+  "kill_background",
   "shell",
   "git_diff",
   "get_changed_files",
@@ -95,6 +101,8 @@ const FALLBACK_IGNORE_DIRECTORIES = new Set([
 ])
 
 export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTool[] {
+  const execSessions = options.execSessions ?? new ExecSessionManager()
+  if (options.onBackgroundExit) execSessions.setBackgroundExitListener(options.onBackgroundExit)
   const context: LocalToolContext = {
     projectRoot: resolve(options.projectRoot),
     maxReadBytes: options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
@@ -103,7 +111,7 @@ export function createLocalCodingTools(options: LocalCodingToolOptions): AgentTo
     fallbackSearchConcurrency: clampInteger(options.fallbackSearchConcurrency, 1, 64, DEFAULT_FALLBACK_SEARCH_CONCURRENCY),
     maxSearchableFileBytes: clampInteger(options.maxSearchableFileBytes, 1, 50_000_000, DEFAULT_MAX_SEARCHABLE_FILE_BYTES),
     permissionPolicy: options.permissionPolicy ?? createDefaultPermissionPolicy(),
-    execSessions: new ExecSessionManager(),
+    execSessions,
   }
   const enabled = new Map((options.tools ?? []).map((tool) => [tool.name, tool.enabled]))
   const mode = options.mode ?? "all"
@@ -167,6 +175,20 @@ const localToolSpecs: LocalToolSpec[] = [
     description: "Write input to, or poll output from, an ongoing exec_command session.",
     permissions: ["execute"],
     create: createWriteStdinTool,
+  },
+  {
+    name: "list_background",
+    label: "List Background",
+    description: "List active and recently-exited exec_command sessions, including background processes.",
+    permissions: ["execute"],
+    create: createListBackgroundTool,
+  },
+  {
+    name: "kill_background",
+    label: "Kill Background",
+    description: "Terminate an exec_command session (background or foreground) by its session id.",
+    permissions: ["execute"],
+    create: createKillBackgroundTool,
   },
   {
     name: "shell",
@@ -444,6 +466,7 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
     cmd: Type.String(),
     workdir: Type.Optional(Type.String()),
     shell: Type.Optional(Type.String()),
+    background: Type.Optional(Type.Boolean()),
     yieldTimeMs: Type.Optional(Type.Number()),
     yield_time_ms: Type.Optional(Type.Number()),
     timeoutMs: Type.Optional(Type.Number()),
@@ -454,7 +477,12 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
   return {
     name: "exec_command",
     label: "Exec Command",
-    description: "Run a shell command in the current project workspace. Returns a session id when the command is still running.",
+    description:
+      "Run a shell command in the current project workspace. Returns a session id when the command is still running.\n" +
+      "Set background:true for long-running processes you want to keep working alongside (dev servers, watchers, `npm run dev`, log tails). " +
+      "A background command returns a session id immediately and is NOT killed by the timeout, so you can continue with other work across turns. " +
+      "Poll its new output with write_stdin (empty chars), inspect all sessions with list_background, and stop it with kill_background. " +
+      "When a background process exits, a reminder is delivered automatically. Leave background unset for ordinary commands you want to wait on.",
     parameters,
     prepareArguments: (args) => {
       const record = asRecord(args)
@@ -463,13 +491,14 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
         cmd: pickRequiredString(record, ["cmd", "command"]),
         workdir: pickString(record, ["workdir", "cwd"]),
         shell: pickString(record, ["shell"]),
+        background: pickBoolean(record, ["background", "run_in_background", "detach"]),
         yieldTimeMs: pickNumber(record, ["yieldTimeMs", "yield_time_ms"]),
         timeoutMs: pickNumber(record, ["timeoutMs", "timeout_ms", "timeout"]),
         maxOutputBytes: pickNumber(record, ["maxOutputBytes", "max_output_bytes"]) ?? (maxOutputTokens === undefined ? undefined : maxOutputTokens * 4),
       }
     },
     execute: async (_toolCallId, params, signal) => {
-      const input = params as { cmd: string; workdir?: string; shell?: string; yieldTimeMs?: number; timeoutMs?: number; maxOutputBytes?: number }
+      const input = params as { cmd: string; workdir?: string; shell?: string; background?: boolean; yieldTimeMs?: number; timeoutMs?: number; maxOutputBytes?: number }
       const cwd = await resolveCommandCwd(context.projectRoot, input.workdir)
       const policy = enforceLocalPermissionPolicy(context, "exec_command", { cmd: input.cmd })
       const result = await context.execSessions.exec({
@@ -477,6 +506,8 @@ function createExecCommandTool(context: LocalToolContext): AgentTool {
         cwd,
         shell: input.shell,
         signal,
+        background: input.background === true,
+        explicitTimeout: input.timeoutMs !== undefined,
         yieldTimeMs: clampInteger(input.yieldTimeMs, 0, 30_000, 1_000),
         timeoutMs: clampInteger(input.timeoutMs, 1_000, 900_000, context.commandTimeoutMs),
         maxOutputBytes: clampInteger(input.maxOutputBytes, 1_000, 512_000, context.maxOutputBytes),
@@ -523,6 +554,47 @@ function createWriteStdinTool(context: LocalToolContext): AgentTool {
         maxOutputBytes: clampInteger(input.maxOutputBytes, 1_000, 512_000, context.maxOutputBytes),
       })
       return textResult(formatExecSessionResult(result), { tool: "write_stdin", ...result })
+    },
+    executionMode: "sequential",
+  }
+}
+
+function createListBackgroundTool(context: LocalToolContext): AgentTool {
+  return {
+    name: "list_background",
+    label: "List Background",
+    description: "List all active and recently-exited exec_command sessions (background and foreground), with their session id, state, and command.",
+    parameters: Type.Object({}),
+    prepareArguments: () => ({}),
+    execute: async () => {
+      const summaries = context.execSessions.listSessions()
+      return textResult(formatBackgroundList(summaries), { tool: "list_background", sessions: summaries })
+    },
+    executionMode: "sequential",
+  }
+}
+
+function createKillBackgroundTool(context: LocalToolContext): AgentTool {
+  const parameters = Type.Object({
+    sessionId: Type.Optional(Type.Number()),
+    session_id: Type.Optional(Type.Number()),
+  })
+  return {
+    name: "kill_background",
+    label: "Kill Background",
+    description: "Terminate an exec_command session (background or foreground) by its session id. Kills the whole process tree.",
+    parameters,
+    prepareArguments: (args) => {
+      const record = asRecord(args)
+      return { sessionId: pickNumber(record, ["sessionId", "session_id"]) }
+    },
+    execute: async (_toolCallId, params) => {
+      const input = params as { sessionId?: number }
+      const sessionId = input.sessionId
+      if (typeof sessionId !== "number" || !Number.isInteger(sessionId)) throw new Error("kill_background requires a numeric sessionId")
+      const policy = enforceLocalPermissionPolicy(context, "kill_background", { sessionId })
+      const result = context.execSessions.kill(sessionId)
+      return textResult(formatExecSessionResult(result), withPermissionPolicyDetails({ tool: "kill_background", ...result }, policy))
     },
     executionMode: "sequential",
   }
@@ -1055,7 +1127,35 @@ type ExecCommandRequest = {
   yieldTimeMs: number
   timeoutMs: number
   maxOutputBytes: number
+  background?: boolean
+  /** Set when the caller explicitly provided a timeout. Background sessions only arm the hard-kill timer when this is true. */
+  explicitTimeout?: boolean
 }
+
+export type BackgroundExitInfo = {
+  sessionId: number
+  command: string
+  cwd: string
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  timedOut: boolean
+  elapsedMs: number
+  output: string
+}
+
+export type ExecSessionSummary = {
+  sessionId: number
+  command: string
+  cwd: string
+  background: boolean
+  running: boolean
+  exitCode: number | null
+  signal: NodeJS.Signals | null
+  elapsedMs: number
+  idleMs: number
+}
+
+export type BackgroundExitListener = (info: BackgroundExitInfo) => void
 
 type WriteStdinRequest = {
   sessionId: number
@@ -1091,19 +1191,33 @@ type ExecSession = {
   signal: NodeJS.Signals | null
   timedOut: boolean
   closed: boolean
+  background: boolean
+  exitReported: boolean
   timeout: ReturnType<typeof setTimeout>
 }
 
 const MAX_EXEC_SESSIONS = 16
+const MAX_BACKGROUND_SESSIONS = 8
 const EXEC_SESSION_TTL_MS = 5 * 60_000
 
-class ExecSessionManager {
+export class ExecSessionManager {
   private nextId = 1
   private sessions = new Map<number, ExecSession>()
+  private onBackgroundExit?: BackgroundExitListener
+
+  /** Idempotent: a manager fires at most one listener; later calls replace it. */
+  setBackgroundExitListener(listener: BackgroundExitListener): void {
+    this.onBackgroundExit = listener
+  }
 
   async exec(request: ExecCommandRequest): Promise<ExecSessionResult> {
     this.cleanup()
-    if (this.runningSessionCount() >= MAX_EXEC_SESSIONS) {
+    const background = request.background === true
+    if (background) {
+      if (this.backgroundSessionCount() >= MAX_BACKGROUND_SESSIONS) {
+        throw new Error(`Too many background sessions (${MAX_BACKGROUND_SESSIONS}); kill one with kill_background before starting another`)
+      }
+    } else if (this.foregroundSessionCount() >= MAX_EXEC_SESSIONS) {
       throw new Error(`Too many running exec_command sessions (${MAX_EXEC_SESSIONS}); poll or finish an existing session before starting another`)
     }
 
@@ -1115,6 +1229,9 @@ class ExecSessionManager {
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     })
+    // Background sessions are not killed on a timer unless the caller asked for
+    // one explicitly; the noop keeps the field type without arming a kill.
+    const armHardKill = !background || request.explicitTimeout === true
     const session: ExecSession = {
       id,
       child,
@@ -1129,11 +1246,16 @@ class ExecSessionManager {
       signal: null,
       timedOut: false,
       closed: false,
-      timeout: setTimeout(() => {
-        session.timedOut = true
-        this.terminate(session)
-      }, request.timeoutMs),
+      background,
+      exitReported: false,
+      timeout: armHardKill
+        ? setTimeout(() => {
+            session.timedOut = true
+            this.terminate(session)
+          }, request.timeoutMs)
+        : setTimeout(() => {}, 0),
     }
+    if (!armHardKill) clearTimeout(session.timeout)
     this.sessions.set(id, session)
 
     child.stdout.on("data", (chunk: Buffer) => this.appendOutput(session, chunk))
@@ -1143,6 +1265,7 @@ class ExecSessionManager {
       this.appendOutput(session, Buffer.from(`[error] ${error.message}\n`))
       session.closed = true
       session.lastActivityAt = Date.now()
+      this.reportBackgroundExit(session)
     })
     child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(session.timeout)
@@ -1150,6 +1273,7 @@ class ExecSessionManager {
       session.signal = signal
       session.closed = true
       session.lastActivityAt = Date.now()
+      this.reportBackgroundExit(session)
     })
 
     const abort = () => {
@@ -1161,7 +1285,9 @@ class ExecSessionManager {
     request.signal?.removeEventListener("abort", abort)
 
     const result = this.snapshot(session, request.maxOutputBytes)
-    if (session.closed) this.sessions.delete(session.id)
+    // Background sessions are kept after close so list_background can surface
+    // them and the exit listener/cleanup own their removal.
+    if (session.closed && !session.background) this.sessions.delete(session.id)
     return result
   }
 
@@ -1185,14 +1311,73 @@ class ExecSessionManager {
 
     await this.waitForSession(session, request.yieldTimeMs)
     const result = this.snapshot(session, request.maxOutputBytes)
-    if (session.closed) this.sessions.delete(session.id)
+    if (session.closed && !session.background) this.sessions.delete(session.id)
     return result
   }
 
-  private runningSessionCount(): number {
+  private reportBackgroundExit(session: ExecSession) {
+    if (!session.background || session.exitReported) return
+    session.exitReported = true
+    const listener = this.onBackgroundExit
+    if (!listener) return
+    const output = tailBuffer(session.outputTail, session.maxOutputBytes).toString("utf8")
+    listener({
+      sessionId: session.id,
+      command: session.command,
+      cwd: session.cwd,
+      exitCode: session.exitCode,
+      signal: session.signal,
+      timedOut: session.timedOut,
+      elapsedMs: Date.now() - session.startedAt,
+      output,
+    })
+  }
+
+  listSessions(): ExecSessionSummary[] {
+    this.cleanup()
+    const now = Date.now()
+    const summaries: ExecSessionSummary[] = []
+    for (const session of this.sessions.values()) {
+      summaries.push({
+        sessionId: session.id,
+        command: session.command,
+        cwd: session.cwd,
+        background: session.background,
+        running: !session.closed,
+        exitCode: session.exitCode,
+        signal: session.signal,
+        elapsedMs: now - session.startedAt,
+        idleMs: now - session.lastActivityAt,
+      })
+    }
+    return summaries.sort((a, b) => a.sessionId - b.sessionId)
+  }
+
+  kill(sessionId: number): ExecSessionResult {
+    const session = this.sessions.get(sessionId)
+    if (!session) throw new Error(`Unknown exec_command session: ${sessionId}`)
+    if (!session.closed) this.terminate(session)
+    return this.snapshot(session, session.maxOutputBytes)
+  }
+
+  killAll(): void {
+    for (const session of this.sessions.values()) {
+      if (!session.closed) this.terminate(session)
+    }
+  }
+
+  private foregroundSessionCount(): number {
     let count = 0
     for (const session of this.sessions.values()) {
-      if (!session.closed) count++
+      if (!session.closed && !session.background) count++
+    }
+    return count
+  }
+
+  private backgroundSessionCount(): number {
+    let count = 0
+    for (const session of this.sessions.values()) {
+      if (!session.closed && session.background) count++
     }
     return count
   }
@@ -1200,7 +1385,11 @@ class ExecSessionManager {
   private cleanup() {
     const now = Date.now()
     for (const [id, session] of this.sessions) {
-      if (session.closed && now - session.lastActivityAt > EXEC_SESSION_TTL_MS) {
+      if (!session.closed) continue
+      // Background sessions linger after exit (for list_background) until both
+      // the exit has been reported and they have been idle past the TTL.
+      if (session.background && !session.exitReported) continue
+      if (now - session.lastActivityAt > EXEC_SESSION_TTL_MS) {
         this.sessions.delete(id)
       }
     }
@@ -1387,6 +1576,19 @@ function formatExecSessionResult(result: ExecSessionResult): string {
     parts.push("(no new output)")
   }
   return parts.join("\n")
+}
+
+function formatBackgroundList(summaries: ExecSessionSummary[]): string {
+  if (summaries.length === 0) return "No background or exec sessions."
+  const lines = summaries.map((session) => {
+    const kind = session.background ? "background" : "foreground"
+    const status = session.running
+      ? "running"
+      : `exited code=${session.exitCode}${session.signal ? ` signal=${session.signal}` : ""}`
+    const elapsed = `${Math.round(session.elapsedMs / 1000)}s`
+    return `session=${session.sessionId} [${kind}] ${status} elapsed=${elapsed} $ ${session.command}`
+  })
+  return lines.join("\n")
 }
 
 function validatePatchPaths(patch: string) {

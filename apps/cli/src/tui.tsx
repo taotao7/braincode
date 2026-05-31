@@ -6,10 +6,12 @@ import { join, relative, isAbsolute } from "node:path";
 import {
   ensureSessionHandoff,
   executePromptFromConfig,
+  ExecSessionManager,
   isHandoffRequiredError,
   isProviderMessageSizeLimitError,
   planRuntimeFromConfig,
   type AgentEvent,
+  type BackgroundExitInfo,
   type FinalReport,
   type RuntimePlan,
   type TodoLifecycleEvent,
@@ -223,6 +225,26 @@ async function configureTuiDebugSink(): Promise<() => void> {
   }
 }
 
+function formatBackgroundExitReminder(info: BackgroundExitInfo): string {
+  const status =
+    info.signal != null
+      ? `was terminated by signal ${info.signal}`
+      : `exited with code ${info.exitCode ?? "unknown"}`;
+  const elapsed = `${Math.round(info.elapsedMs / 1000)}s`;
+  const lines = [
+    `[Braincode background process] Session ${info.sessionId} (\`${info.command}\`) ${status} after ${elapsed}.`,
+  ];
+  const tail = info.output.trim();
+  if (tail) {
+    const clipped = tail.length > 4000 ? tail.slice(tail.length - 4000) : tail;
+    lines.push(`Last output:\n${clipped}`);
+  }
+  lines.push(
+    "If this exit was unexpected, investigate; otherwise acknowledge briefly and continue.",
+  );
+  return lines.join("\n");
+}
+
 export async function runTui(initialPrompt?: string): Promise<void> {
   const restoreDebugSink = await configureTuiDebugSink();
   // Render into the terminal's alternate screen buffer so the TUI owns the
@@ -263,6 +285,18 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const initialCursor = initialDraft.length;
   const [running, setRunning] = useState(false);
   const activeRunAbort = useRef<AbortController | null>(null);
+  // One session manager for the whole TUI lifetime so background processes
+  // (exec_command background:true) survive across turns. runningRef mirrors
+  // `running` so the once-registered exit listener never reads a stale value.
+  const execSessions = useMemo(() => new ExecSessionManager(), []);
+  const runningRef = useRef(running);
+  // Holds the latest reminder-injection handler. The exit listener is
+  // registered once but background exits must run fresh closures (enqueueTask /
+  // drainQueue / submitPrompt all capture current state), so we indirect
+  // through this ref, refreshed every render.
+  const backgroundExitHandlerRef = useRef<(info: BackgroundExitInfo) => void>(
+    () => {},
+  );
   const inputStore = useStableTuiStore<InputState>({
     draft: initialDraft,
     cursor: initialCursor,
@@ -1959,6 +1993,33 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
     }
   }
 
+  // Keep the exit-listener indirection fresh: runningRef mirrors `running`, and
+  // the handler ref captures the current enqueueTask/drainQueue closures.
+  useEffect(() => {
+    runningRef.current = running;
+  }, [running]);
+  backgroundExitHandlerRef.current = (info: BackgroundExitInfo) => {
+    enqueueTask(formatBackgroundExitReminder(info), {
+      skipCommand: true,
+      displayText: `background process exited · session ${info.sessionId}`,
+    });
+    // If idle, surface the reminder now; mid-turn exits are drained by the
+    // run's finally block, which already calls drainQueue() at turn end.
+    if (!runningRef.current) void drainQueue();
+  };
+
+  // Register the listener once and tear down all background processes when the
+  // TUI unmounts. Processes are OS-scoped and intentionally outlive logical
+  // session handoffs (setSessionId), so we do not kill on handoff.
+  useEffect(() => {
+    execSessions.setBackgroundExitListener((info) => {
+      backgroundExitHandlerRef.current(info);
+    });
+    return () => {
+      execSessions.killAll();
+    };
+  }, [execSessions]);
+
   function editMostRecentQueuedTask(): boolean {
     if (queueRef.current.length === 0) return false;
     const queue = queueRef.current;
@@ -2637,6 +2698,7 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         onWorkerEvent,
         forceRoles: options.forceRoles as never,
         ignoreDisabledLocalTools: approvalMode === "radical",
+        execSessions,
         signal: runAbort.signal,
       });
       rememberIntentPlan(result.plan);

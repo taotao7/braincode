@@ -20,8 +20,10 @@ import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
-import { createLocalCodingTools, defaultCheckRunnerConfiguration, mergeCheckRunnerConfiguration, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
+import { createLocalCodingTools, defaultCheckRunnerConfiguration, mergeCheckRunnerConfiguration, ExecSessionManager, type BackgroundExitListener, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
 export type { PermissionPolicyDocument, PermissionPolicyEvaluation, PermissionPolicyMatch } from "@braincode/tools"
+export { ExecSessionManager } from "@braincode/tools"
+export type { BackgroundExitInfo, BackgroundExitListener } from "@braincode/tools"
 import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
 export { runConfiguredHooks } from "./hooks"
 export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
@@ -77,6 +79,10 @@ export type AgentRunRequest = {
   mcpStartupBudgetMs?: number
   mcpPerServerConnectTimeoutMs?: number
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
+  /** Reuse a session manager across prompts so background processes survive between turns (TUI passes a session-scoped instance). */
+  execSessions?: ExecSessionManager
+  /** Notified when a background process started via exec_command exits. */
+  onBackgroundExit?: BackgroundExitListener
 }
 
 export type TodoLifecycleEvent = {
@@ -430,8 +436,14 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const projectChecks = await readProjectChecks(cwd)
   const checkOptions: CheckRunnerConfiguration = mergeCheckRunnerConfiguration(toolConfig.checks ?? defaultCheckRunnerConfiguration, projectChecks?.config)
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
-  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
-  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions })
+  // Share one session manager across both tool sets (and, via request.execSessions,
+  // across prompts) so background processes survive between turns and stay visible
+  // regardless of which tool mode reaches them. The exit listener is registered once
+  // on the manager; createLocalCodingTools re-registering it is idempotent.
+  const execSessions = request.execSessions ?? new ExecSessionManager()
+  if (request.onBackgroundExit) execSessions.setBackgroundExitListener(request.onBackgroundExit)
+  const localTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: localToolMode, ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions, execSessions })
+  const readOnlyTools = createLocalCodingTools({ projectRoot: cwd, tools: toolConfig.tools, mode: "read-only", ignoreDisabled: request.ignoreDisabledLocalTools, permissionPolicy: toolConfig.permissions, execSessions })
   const toolEvidenceCache = createToolEvidenceCache()
   const toolCallMetrics = createRuntimeToolCallMetricsTracker()
   // Dispatched specialist worker results, collected mid-run when the primary

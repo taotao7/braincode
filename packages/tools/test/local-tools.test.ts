@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, mergeCheckRunnerConfiguration, normalizeToolConfiguration } from "../src/index"
+import { createDefaultToolConfiguration, createLocalCodingTools, evaluateToolPermissionPolicy, ExecSessionManager, mergeCheckRunnerConfiguration, normalizeToolConfiguration } from "../src/index"
 
 function getTool(name: string, projectRoot: string) {
   const tool = createLocalCodingTools({ projectRoot }).find((candidate) => candidate.name === name)
@@ -153,6 +153,8 @@ test("createLocalCodingTools can ignore disabled config for explicit override mo
       "exec_command",
       "get_changed_files",
       "git_diff",
+      "kill_background",
+      "list_background",
       "list_files",
       "read_file",
       "run_script",
@@ -218,7 +220,8 @@ test("local tool prepareArguments normalizes aliases and primitive coercions", a
     expect(getTool("search_files", projectRoot).prepareArguments?.({ glob: "*.ts", limit: "5" })).toEqual({ query: undefined, mode: "path", glob: "*.ts", maxResults: 5 })
     expect(getTool("edit_file", projectRoot).prepareArguments?.({ file: "a.txt", old: "x", new: "y", replace_all: "true" })).toEqual({ path: "a.txt", content: undefined, oldString: "x", newString: "y", replaceAll: true })
     expect(getTool("apply_patch", projectRoot).prepareArguments?.({ diff: "patch" })).toEqual({ patch: "patch" })
-    expect(getTool("exec_command", projectRoot).prepareArguments?.({ command: "echo hi", yield_time_ms: "25", max_output_tokens: "10" })).toEqual({ cmd: "echo hi", workdir: undefined, shell: undefined, yieldTimeMs: 25, timeoutMs: undefined, maxOutputBytes: 40 })
+    expect(getTool("exec_command", projectRoot).prepareArguments?.({ command: "echo hi", yield_time_ms: "25", max_output_tokens: "10" })).toEqual({ cmd: "echo hi", workdir: undefined, shell: undefined, background: undefined, yieldTimeMs: 25, timeoutMs: undefined, maxOutputBytes: 40 })
+    expect(getTool("exec_command", projectRoot).prepareArguments?.({ command: "npm run dev", run_in_background: true })).toEqual({ cmd: "npm run dev", workdir: undefined, shell: undefined, background: true, yieldTimeMs: undefined, timeoutMs: undefined, maxOutputBytes: undefined })
     expect(getTool("write_stdin", projectRoot).prepareArguments?.({ session_id: "2", input: "x", yield_time_ms: "25" })).toEqual({ sessionId: 2, chars: "x", yieldTimeMs: 25, maxOutputBytes: undefined })
     expect(getTool("shell", projectRoot).prepareArguments?.({ cmd: "echo hi", timeout: "1000" })).toEqual({ command: "echo hi", timeoutMs: 1000 })
     expect(getTool("git_diff", projectRoot).prepareArguments?.({ file: "a.txt", cached: "false", summary: true })).toEqual({ path: "a.txt", staged: false, stat: true })
@@ -633,6 +636,93 @@ test("exec_command returns a session id for long commands and write_stdin polls 
     expect(textContent(pollResult)).toContain("completed exit=0")
     expect(textContent(pollResult)).toContain("done")
     expect((pollResult.details as { running?: boolean }).running).toBe(false)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("background exec_command survives a short timeout and keeps its session", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-bg-survive-test-"))
+  try {
+    const tools = createLocalCodingTools({ projectRoot })
+    const execCommand = tools.find((tool) => tool.name === "exec_command")!
+    const listBackground = tools.find((tool) => tool.name === "list_background")!
+
+    // timeoutMs is small but, because background is set without an explicit
+    // caller timeout, no hard-kill timer is armed; the process keeps running.
+    const startResult = await execCommand.execute("bg-1", {
+      cmd: "bun -e \"setTimeout(() => {}, 5000)\"",
+      background: true,
+      yieldTimeMs: 20,
+    } as never)
+    const sessionId = (startResult.details as { sessionId?: number | null }).sessionId
+    expect(typeof sessionId).toBe("number")
+    expect(textContent(startResult)).toContain("running session=")
+
+    // Well past the default foreground timeout window, it is still listed.
+    await new Promise((r) => setTimeout(r, 300))
+    const listResult = await listBackground.execute("list-1", {} as never)
+    expect(textContent(listResult)).toContain(`session=${sessionId}`)
+    expect(textContent(listResult)).toContain("[background] running")
+
+    const killBackground = tools.find((tool) => tool.name === "kill_background")!
+    await killBackground.execute("kill-1", { sessionId } as never)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("a shared execSessions manager makes background sessions visible across tool sets", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-bg-shared-test-"))
+  try {
+    const execSessions = new ExecSessionManager()
+    const writeTools = createLocalCodingTools({ projectRoot, mode: "all", execSessions })
+    const readTools = createLocalCodingTools({ projectRoot, mode: "read-only", execSessions })
+    const execCommand = writeTools.find((tool) => tool.name === "exec_command")!
+    // read-only tool sets exclude execute tools, so list_background lives on the
+    // write set; the point is both sets back onto the same manager.
+    const listBackground = writeTools.find((tool) => tool.name === "list_background")!
+    expect(readTools.some((tool) => tool.name === "list_background")).toBe(false)
+
+    const startResult = await execCommand.execute("shared-1", {
+      cmd: "bun -e \"setTimeout(() => {}, 5000)\"",
+      background: true,
+      yieldTimeMs: 20,
+    } as never)
+    const sessionId = (startResult.details as { sessionId?: number | null }).sessionId
+    const listResult = await listBackground.execute("shared-list", {} as never)
+    expect(textContent(listResult)).toContain(`session=${sessionId}`)
+
+    execSessions.killAll()
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("background exit fires the listener exactly once and kill_background terminates", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-bg-exit-test-"))
+  try {
+    const execSessions = new ExecSessionManager()
+    const exits: number[] = []
+    execSessions.setBackgroundExitListener((info) => exits.push(info.sessionId))
+    const tools = createLocalCodingTools({ projectRoot, execSessions })
+    const execCommand = tools.find((tool) => tool.name === "exec_command")!
+
+    const startResult = await execCommand.execute("exit-1", {
+      cmd: "bun -e \"setTimeout(() => {}, 80)\"",
+      background: true,
+      yieldTimeMs: 10,
+    } as never)
+    const sessionId = (startResult.details as { sessionId?: number | null }).sessionId as number
+
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exits).toEqual([sessionId])
+
+    // Kill of an already-exited background session is a no-op snapshot, and the
+    // listener does not fire again.
+    const killBackground = tools.find((tool) => tool.name === "kill_background")!
+    await killBackground.execute("exit-kill", { sessionId } as never)
+    expect(exits).toEqual([sessionId])
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
   }
