@@ -89,6 +89,20 @@ test("worker prompt helpers expose project support and primary tool guidance", (
   expect(primaryPrompt).toContain("Shell/command execution is available")
 })
 
+test("buildPrimaryPrompt surfaces web_search for live info and steers away from config files", () => {
+  const primaryPrompt = buildPrimaryPrompt("明天成都天气", [], "librarian", undefined, ["read_file", "web_search", "mcp__tavily__tavily_search"])
+  expect(primaryPrompt).toContain("Web search is available through web_search")
+  expect(primaryPrompt).toContain("Connected MCP tools usable directly: mcp__tavily__tavily_search")
+  expect(primaryPrompt).toContain("Do not read ~/.braincode config files")
+})
+
+test("buildPrimaryPrompt tells the agent to connect MCP when only mcp__connect is present", () => {
+  const primaryPrompt = buildPrimaryPrompt("latest news", [], "librarian", undefined, ["read_file", "mcp__connect"])
+  expect(primaryPrompt).toContain("MCP servers are still connecting")
+  expect(primaryPrompt).toContain("call mcp__connect first")
+  expect(primaryPrompt).not.toContain("Web search is available through web_search")
+})
+
 test("runWorkerPool refills a freed slot before the slowest worker in the wave finishes", async () => {
   // limit=2, 4 independent workers. Worker 0 is slow; the rest are fast. Under a
   // wave-barrier scheduler, worker 2 could not start until worker 0 finished.

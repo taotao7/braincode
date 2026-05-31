@@ -1,4 +1,5 @@
 import type { HandoffPacket, WorkerResult } from "@braincode/context"
+import type { ContextRef } from "@braincode/protocol"
 import type { PatchCheckSummary } from "./checks"
 import type { PatchDiffSnapshot, PatchSummary, UntrackedFilePreview } from "./patch"
 
@@ -51,6 +52,7 @@ export type PromptWorkerResult = {
   summary: string
   risks: string[]
   nextQuestions: string[]
+  artifacts?: ContextRef[]
 }
 
 export type ReviewMergeResult = {
@@ -193,8 +195,11 @@ export function formatWorkerResults(workerResults: PromptWorkerResult[]): string
     .map((result) => {
       const risks = result.risks.length > 0 ? `\nRisks:\n${result.risks.map((risk) => `- ${risk}`).join("\n")}` : ""
       const questions = result.nextQuestions.length > 0 ? `\nOpen questions:\n${result.nextQuestions.map((question) => `- ${question}`).join("\n")}` : ""
+      const artifacts = result.artifacts && result.artifacts.length > 0
+        ? `\nArtifacts:\n${result.artifacts.map((artifact) => `- ${artifact.uri}${artifact.label ? ` (${artifact.label})` : ""}`).join("\n")}`
+        : ""
       const progress = result.progress.summary ? `${result.progress.status}: ${result.progress.summary}` : result.progress.status
-      return `### ${result.role} (${result.status})\nTask: ${result.taskId} -> ${result.parentId}\nGoal: ${result.goal}\nProgress: ${progress}\nSummary: ${result.summary}${risks}${questions}`
+      return `### ${result.role} (${result.status})\nTask: ${result.taskId} -> ${result.parentId}\nGoal: ${result.goal}\nProgress: ${progress}\nSummary: ${result.summary}${artifacts}${risks}${questions}`
     })
     .join("\n\n")
 }

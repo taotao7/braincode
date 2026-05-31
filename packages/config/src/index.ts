@@ -30,7 +30,6 @@ export type BraincodeSettings = {
   defaultBrainId: string;
   features?: {
     hooks?: boolean;
-    fastPathSimpleTasks?: boolean;
     dynamicDispatch?: boolean;
   };
 };
@@ -298,7 +297,6 @@ export const defaultSettings: BraincodeSettings = {
   defaultBrainId: "brain",
   features: {
     hooks: true,
-    fastPathSimpleTasks: true,
     dynamicDispatch: true,
   },
 };
@@ -1826,12 +1824,6 @@ function assertSettings(value: BraincodeSettings) {
     typeof value.features.hooks !== "boolean"
   ) {
     throw new Error("settings.features.hooks must be a boolean");
-  }
-  if (
-    value.features?.fastPathSimpleTasks !== undefined &&
-    typeof value.features.fastPathSimpleTasks !== "boolean"
-  ) {
-    throw new Error("settings.features.fastPathSimpleTasks must be a boolean");
   }
   if (
     value.features?.dynamicDispatch !== undefined &&

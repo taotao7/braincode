@@ -547,10 +547,31 @@ function formatPrimaryToolContext(toolNames: string[]): string {
   const executeGuidance = hasExecuteTool
     ? "Shell/command execution is available through shell and/or exec_command. For workspace requests such as git status, git add, git commit, tests, and package scripts, use tools instead of saying shell/git tools are unavailable."
     : "Shell/command execution is not exposed in this run. If the user asks for git commits, shell commands, tests, or package scripts, explain that this run lacks execute tools and suggest TUI radical/current-session approval or `braincode run --yes`."
+  const hasWebSearch = names.includes("web_search")
+  const mcpToolNames = names.filter((name) => name.startsWith("mcp__") && name !== "mcp__connect")
+  const onlineGuidanceLines: string[] = []
+  if (hasWebSearch) {
+    onlineGuidanceLines.push(
+      "Web search is available through web_search. For live or external facts (weather, news, prices, current events, anything past your training cutoff, or an explicit request to look something up), call web_search instead of saying you cannot browse the internet.",
+    )
+  } else if (names.includes("mcp__connect")) {
+    onlineGuidanceLines.push(
+      "MCP servers are still connecting. If the user needs live/online facts and no web_search tool is listed yet, call mcp__connect first to finish loading MCP tools, then use the connected tool.",
+    )
+  }
+  if (mcpToolNames.length > 0) {
+    onlineGuidanceLines.push(`Connected MCP tools usable directly: ${mcpToolNames.join(", ")}.`)
+  }
+  if (hasWebSearch || mcpToolNames.length > 0 || names.includes("mcp__connect")) {
+    onlineGuidanceLines.push(
+      "Do not read ~/.braincode config files (mcp.json, auth.json) or other paths outside the project to discover capabilities; the tools listed here are already what you can call.",
+    )
+  }
   return [
     "Runtime tool access:",
     `Available tools: ${names.join(", ")}`,
     executeGuidance,
+    ...onlineGuidanceLines,
     "Tool-use discipline: gather context with the fewest calls. Issue independent read-only calls (read_file, search_files, list_files, git_diff) together in one turn so they run in parallel instead of one at a time. Read whole files rather than paging through small windows, search before reading to find the right files, and do not re-read or re-search the same target you already have this run. State-changing tools (edits, shell, scripts) still run one at a time.",
     "If a tool call is blocked or fails, report the concrete tool result or block reason.",
     "",

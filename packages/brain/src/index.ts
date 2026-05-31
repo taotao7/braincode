@@ -846,22 +846,6 @@ export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRouti
   })
 }
 
-// A heuristic plan is "trivial" when it lands on the catch-all `rush` role with
-// a single worker, requires no review, AND the prompt carries no file-edit verb.
-// In that case no domain keyword, workspace operation, or edit intent matched,
-// so the LLM router call would not change the routing outcome and can be skipped.
-//
-// The file-edit check is evaluated directly against the prompt (not inferred
-// from `requiresReview`) so the fast path stays disqualified for edit-intent
-// prompts like "fix the bug" even when a brain disables `requireReviewForFileEdits`.
-export function isTrivialHeuristicPlan(plan: AgentRoutingPlan, prompt: string): boolean {
-  return plan.primaryRole === "rush"
-    && plan.workers.length === 1
-    && plan.workers[0]?.role === "rush"
-    && plan.requiresReview === false
-    && !fileEditRiskPattern.test(prompt.toLowerCase())
-}
-
 function selectFallbackPrimaryRole(normalizedPrompt: string): RoutedAgentRole {
   if (imageGenerationPattern.test(normalizedPrompt)) return "imageMaker"
   if (workspaceOperationPattern.test(normalizedPrompt) && !hasDomainWork(normalizedPrompt)) return "devops"

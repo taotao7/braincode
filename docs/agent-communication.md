@@ -135,6 +135,8 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
 ```
 1. Run SessionStart + UserPromptSubmit hooks (either may block, both may add context).
 2. expandPromptReferences:   resolve @<file>, @@<session>  -> appended sections.
+   - applySessionContinuity: if this session has prior runs, prepend a compact
+     "Conversation so far" summary so follow-ups keep context.
 3. buildRuntimePlan:         heuristic routing, then router-brain refinement.
    - When --team forced roles are supplied, plan.workers is overridden.
 4. runSupportWorkers (parallel when independent, capped by the mode-adjusted routing limit):
@@ -142,6 +144,7 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
    - If todo dependencies require one support result before another, Brain runs the upstream worker first and supplies only its normalized summary to the dependent worker.
    - Librarian, QA, security, and review-style support workers receive read-only project tools for evidence gathering.
 5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
+   - A non-imageMaker primary on a write-capable run also gets the generate_image tool.
 6. Try each model candidate for the primary role:
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
      (+ dispatch guidance when dynamic dispatch is enabled)
@@ -178,7 +181,7 @@ Two routers cooperate to produce an `AgentRoutingPlan`:
 - `planAgentRouting(prompt, brain)` in `packages/brain` — deterministic safe fallback. Used for heuristic diagnostics, provider failures, and the baseline the router brain refines.
 - `routePromptWithBrain(prompt, brain, models, mode, fallback, home)` in `packages/agent-runtime/src/router.ts` — calls the brain's `planner` / `roles.routeBrain` model with a strict JSON prompt and parses the result. `normalizeRouterDecision` validates and caps the choice against the heuristic fallback and `brain.routing.maxParallelAgents`.
 
-**Fast path for trivial prompts.** Before calling the router brain, `buildRuntimePlan` checks `isTrivialHeuristicPlan(heuristicPlan, prompt)`: when the heuristic lands on the catch-all `rush` role with a single worker, requires no review, and the prompt carries no file-edit verb, the LLM router call would not change the outcome, so it is skipped and the heuristic plan is used directly. The file-edit check is evaluated directly against the prompt rather than inferred from `requiresReview`, so edit-intent prompts like "fix the bug" stay on the router path even when a brain disables `requireReviewForFileEdits`. This saves a routeBrain token call and its latency on prompts like plain questions. The fast path is gated by `settings.features.fastPathSimpleTasks` (default `true`), is disabled when images are attached (vision routing needs the brain) and for `/team` forced-roles runs, and records `routing.source = "heuristic"` with a `"fast path: ..."` reason so the decision stays observable in `--dry-run` and the final report.
+**Every prompt goes through the router brain.** `buildRuntimePlan` calls `routePromptWithBrain` for all prompts except `/team` forced-roles runs and heuristic-only diagnostics (`useRouterBrain=false`, e.g. `braincode run --heuristic`). There is no keyword-based fast path that skips the router brain: deciding whether a prompt is "trivial" is exactly the intent-classification job the router brain does best, and a regex predictor would mis-route live-info prompts (weather, news, web lookups) onto the catch-all `rush` role, which has no tool access. The deterministic `planAgentRouting` heuristic is retained only as the fallback baseline for when the router brain is unavailable, fails, or is not requested; it still records `routing.source = "heuristic"` with a reason so the decision stays observable in `--dry-run` and the final report.
 
 The two paths normalize into the same shape:
 
@@ -330,6 +333,17 @@ Dispatchable roles are `routedAgentRoles` minus `review` (the review gate runs t
 The feature is gated by `settings.features.dynamicDispatch` (default `true`). Set it to `false` to freeze the plan at routing time and force the primary to complete with only the planned workers.
 
 If you are extending this: keep the handler the only initiation point, keep dispatched workers going through `runWorkerFromPlan` (do not hand-roll a second worker driver), and keep the budget in mode policy rather than hard-coding a number at the call site.
+
+## Mid-run image generation: the `generate_image` tool
+
+`imageMaker` is deliberately not dispatchable (its artifact-writing path is not an advisory consult), so a primary that discovers it needs an image mid-run cannot reach it through `dispatch_specialist`. Instead, a non-imageMaker primary on a write-capable run (`localToolMode === "all"`) gets a `generate_image` tool, defined in `packages/agent-runtime/src/generate-image-tool.ts` and appended to `primaryLocalTools` next to the dispatch tool (so MCP tool sync, which splices after `localToolCount`, never drops it). It lives in `agent-runtime`, not `packages/tools`, because `@braincode/tools` does not depend on `@braincode/llm`; the runtime package already imports both.
+
+The tool resolves an image-generation model the same way the imageMaker worker does — `selectModelPolicy(brain, "imageMaker")` -> `selectImageMakerModelCandidates` -> `generateImage` -> `saveGeneratedImageArtifact` — falling back across candidate models and returning the saved artifact path in its result text. When no image-generation model/API key is configured it returns a graceful message instead of throwing, so the agent can fall back to a placeholder. This complements the planned-worker path (when routing foresees the need, imageMaker still runs as a worker and hands its artifact to the primary via worker results). Worker artifacts reach the primary both in the result summary and as an explicit `Artifacts:` list of `uri (label)` lines in `formatWorkerResults`, so the primary does not have to parse the path out of prose.
+
+## Session continuity across turns
+
+The TUI reuses one `sessionId` until `/new`, and every turn appends `run_start` (prompt) and `run_end` (summary) to the session JSONL. To make follow-ups like "try again" or "make it blue" work, `executePromptFromConfig` calls `readSessionContext(sessionId)` after `expandPromptReferences` and, when the session already has prior `run` entries, prepends a compact "Conversation so far" summary (via `formatSessionContext`, the same renderer used by `@@<session>`) to the prompt. That combined prompt feeds both `buildRuntimePlan` (so the router brain understands the follow-up instead of misrouting it to `rush`) and `buildPrimaryPrompt`. The injection is skipped when the user already referenced this session explicitly with `@@<thisSessionId>` (to avoid duplication) and on the first turn (no prior runs). The decision is isolated in the pure `applySessionContinuity(prompt, priorContext)` helper for testing. `run_start` records the raw user prompt, not the injected blob, so continuity does not compound across turns.
+
 
 ## Why we do not let workers message each other
 

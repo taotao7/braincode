@@ -15,7 +15,7 @@ export type { ToolEvidenceCache, ToolEvidenceCacheOptions } from "./evidence-cac
 import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey, selectRuntimeModelWithApiKey, toPiModelSummary } from "./model-selection"
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
-import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
@@ -37,6 +37,7 @@ export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewDecision
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
 export type { ExpandedPromptResult, ExpandPromptReferencesOptions, PromptReference } from "./prompt-references"
 import { buildImageMakerPrompt, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
+import { createGenerateImageTool } from "./generate-image-tool"
 export { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
 export type { ImageMakerWorkerPlan, ImageMakerWorkerResult } from "./image-maker"
 import { buildFinalReport, type FinalReport } from "./final-report"
@@ -328,6 +329,16 @@ async function ensureReviewWorker(
   return reviewWorker
 }
 
+// Prepend a compact "conversation so far" summary to the current prompt when the
+// session already has prior runs, giving the router brain and primary agent
+// continuity for follow-ups. Returns the prompt unchanged when there is no prior
+// run history (first turn, or caller passed no context to avoid duplication).
+export function applySessionContinuity(prompt: string, priorContext: SessionContext | undefined): string {
+  const hasPriorRuns = priorContext?.entries.some((entry) => entry.type === "run") ?? false
+  if (!hasPriorRuns || !priorContext) return prompt
+  return `Conversation so far (most recent session activity, for continuity with this follow-up):\n${formatSessionContext(priorContext)}\n\nCurrent request:\n${prompt}`
+}
+
 export async function executePromptFromConfig(request: AgentRunRequest, home?: string): Promise<AgentRunResult> {
   throwIfRunAborted(request.signal)
   const sessionId = request.sessionId ?? crypto.randomUUID()
@@ -359,7 +370,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const expanded = await expandPromptReferences(request.prompt, cwd, home)
   throwIfRunAborted(request.signal)
   const promptImages = expanded.images
-  const effectivePrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
+  const hookPrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
+  // Automatic multi-turn continuity: when this session already has prior runs,
+  // inject a compact summary of the conversation so far so both the router brain
+  // and the primary agent understand follow-ups like "try again" or "make it
+  // blue". Skip when the user already referenced this session with @@<id> (the
+  // expansion above already injected it) to avoid duplication.
+  const alreadyReferencedThisSession = expanded.references.some((ref) => ref.kind === "session" && ref.sessionId === sessionId)
+  const priorContext = alreadyReferencedThisSession ? undefined : await readSessionContext(sessionId, home)
+  const effectivePrompt = applySessionContinuity(hookPrompt, priorContext)
   const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId, sessionId)
   throwIfRunAborted(request.signal)
   await appendSessionRecord(sessionId, { type: "context_plan", context: plan.context }, home)
@@ -374,6 +393,10 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
   const runtimeSettings = await readSettings(home)
+  // Full brain (the plan only carries an id/name/description pick) so we can
+  // resolve the imageMaker model policy for the mid-run generate_image tool.
+  const brainDocument = await readBrains(home)
+  const brain = selectBrain((brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains) as BrainPreset[], plan.brain.id) as BrainModel
   const requirements = runtimeModelRequirementsForRole(plan.role, promptImages)
   const candidates = plan.role === "imageMaker"
     ? await selectImageMakerModelCandidates(plan.policy, models, home)
@@ -441,6 +464,15 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   // which splices everything after localToolCount, never removes it. It only
   // reaches the primary runtime; workers receive their own tool lists.
   const primaryLocalTools = dispatchTool ? [...localTools, dispatchTool.tool] : [...localTools]
+  // Let a non-imageMaker primary generate image assets mid-run (e.g. a frontend
+  // agent that needs a hero image). imageMaker primaries already own generation,
+  // and read-only runs cannot write artifacts, so both are excluded. The tool
+  // resolves an image-generation model the same way the imageMaker worker does
+  // and returns a graceful message when none is configured.
+  if (localToolMode === "all" && plan.role !== "imageMaker") {
+    const imagePolicy = selectModelPolicy(brain, "imageMaker")
+    primaryLocalTools.push(createGenerateImageTool({ models, home, sessionId, imagePolicy, signal: request.signal }))
+  }
   const runtimeTools = [...primaryLocalTools]
   let permissionPolicyReviewRequired = false
   const onPermissionPolicyEvaluation = (evaluation: PermissionPolicyEvaluation) => {

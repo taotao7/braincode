@@ -2613,7 +2613,15 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
         onEvent,
         onToolApproval,
         onMcpReport,
-        mcpLoadingStrategy: "background",
+        // Eager so MCP tools (e.g. web_search via Tavily) are connected and
+        // present in the primary agent's tool set before its prompt is built.
+        // initialize() returns as soon as connect settles, so warm runs stay
+        // fast; the raised budget/timeout only cost extra on first-run bunx
+        // downloads. If the budget is exceeded the run still proceeds and the
+        // agent can finish loading via the mcp__connect tool.
+        mcpLoadingStrategy: "eager",
+        mcpStartupBudgetMs: 30_000,
+        mcpPerServerConnectTimeoutMs: 30_000,
         onWorkerEvent,
         forceRoles: options.forceRoles as never,
         ignoreDisabledLocalTools: approvalMode === "radical",

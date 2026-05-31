@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, isTrivialHeuristicPlan, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset } from "./index"
+import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -69,36 +69,6 @@ test("planAgentRouting keeps tiny direct replies in rush", () => {
   const plan = planAgentRouting("hello there", brain)
   expect(plan.primaryRole).toBe("rush")
   expect(plan.workers.map((worker) => worker.role)).toEqual(["rush"])
-})
-
-test("isTrivialHeuristicPlan is true for a plain rush prompt", () => {
-  expect(isTrivialHeuristicPlan(planAgentRouting("what is the capital of France?", brain), "what is the capital of France?")).toBe(true)
-  expect(isTrivialHeuristicPlan(planAgentRouting("hello there", brain), "hello there")).toBe(true)
-})
-
-test("isTrivialHeuristicPlan is false for file-edit, domain, and workspace prompts", () => {
-  expect(isTrivialHeuristicPlan(planAgentRouting("implement a login form", brain), "implement a login form")).toBe(false)
-  expect(isTrivialHeuristicPlan(planAgentRouting("add an API endpoint for auth", brain), "add an API endpoint for auth")).toBe(false)
-  expect(isTrivialHeuristicPlan(planAgentRouting("git status and commit them", brain), "git status and commit them")).toBe(false)
-  expect(isTrivialHeuristicPlan(planAgentRouting("review this patch", brain), "review this patch")).toBe(false)
-})
-
-test("isTrivialHeuristicPlan rejects edit-intent prompts even when review is disabled", () => {
-  // "fix" is a file-edit verb but matches no domain role, so the heuristic still
-  // lands on rush with a single worker. With requireReviewForFileEdits disabled,
-  // requiresReview is false — the direct file-edit check must still disqualify it.
-  const noReviewBrain: BrainModel = { ...brain, routing: { ...brain.routing, requireReviewForFileEdits: false } }
-  const plan = planAgentRouting("fix the bug", noReviewBrain)
-  expect(plan.primaryRole).toBe("rush")
-  expect(plan.requiresReview).toBe(false)
-  expect(isTrivialHeuristicPlan(plan, "fix the bug")).toBe(false)
-})
-
-test("isTrivialHeuristicPlan is false when review is required for file edits", () => {
-  const reviewBrain = { ...brain, routing: { ...brain.routing, requireReviewForFileEdits: true } }
-  const plan = planAgentRouting("fix the bug", reviewBrain)
-  // "fix" is a file-edit verb, so this should not be trivial regardless of review.
-  expect(isTrivialHeuristicPlan(plan, "fix the bug")).toBe(false)
 })
 
 test("planAgentRouting fallback routes obvious reviews to review", () => {

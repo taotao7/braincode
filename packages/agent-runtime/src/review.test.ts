@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { applyReviewGatesToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, mergeReviewResult, normalizeReviewDecisionText, type ReviewDecision } from "./review"
+import { applyReviewGatesToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText, type PromptWorkerResult, type ReviewDecision } from "./review"
 import type { PatchCheckSummary } from "./checks"
 
 const failedChecks: PatchCheckSummary = {
@@ -224,4 +224,36 @@ test("applyReviewGatesToReviewDecision can block missing review artifacts by pol
   expect(decision.decision).toBe("blocked")
   expect(decision.blockingIssues[0]).toContain("Review artifacts were not collected")
   expect(decision.residualRisks[0]).toContain("Review artifacts were not collected")
+})
+
+test("formatWorkerResults lists artifact uris on their own lines", () => {
+  const result: PromptWorkerResult = {
+    role: "imageMaker",
+    status: "completed",
+    taskId: "t1",
+    parentId: "p1",
+    goal: "make a hero image",
+    progress: { status: "completed", summary: "done" },
+    summary: "Generated image artifact at /tmp/hero.png.",
+    risks: [],
+    nextQuestions: [],
+    artifacts: [{ kind: "artifact", uri: "/tmp/hero.png", label: "Generated image" }],
+  }
+  const text = formatWorkerResults([result])
+  expect(text).toContain("Artifacts:\n- /tmp/hero.png (Generated image)")
+})
+
+test("formatWorkerResults omits the Artifacts section when there are none", () => {
+  const result: PromptWorkerResult = {
+    role: "backend",
+    status: "completed",
+    taskId: "t2",
+    parentId: "p2",
+    goal: "add endpoint",
+    progress: { status: "completed" },
+    summary: "added /users",
+    risks: [],
+    nextQuestions: [],
+  }
+  expect(formatWorkerResults([result])).not.toContain("Artifacts:")
 })
