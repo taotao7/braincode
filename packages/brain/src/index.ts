@@ -388,9 +388,24 @@ function buildAgentRoleSystemPrompt(role: AgentRole, directives: string[] = []):
     ...profile.boundaries.map((boundary) => `- ${boundary}`),
     `Output contract: ${profile.output}`,
     "Context contract: You own exactly one isolated task context. Use only the user request, system/project instructions, explicit handoff packets, allowed context references, tool results, and worker summaries supplied to you. Do not assume access to hidden Brain transcript or another worker's private context.",
+    ...coreOperatingDirectives,
     ...directives,
   ].join("\n")
 }
+
+// Behaviour shared by every executing/advisory role (everything that flows
+// through buildAgentRoleSystemPrompt; routeBrain and pet have their own prompts
+// and are intentionally excluded). Each line is phrased conditionally so it is a
+// no-op for read-only/advisory roles that never change code or run commands.
+// Response-format/conciseness guidance lives in the primary user-prompt instead,
+// because the same role prompt also drives JSON-only support workers.
+const coreOperatingDirectives = [
+  "Core operating directives:",
+  "- Investigate before asserting: read the relevant code or run the relevant command before making claims about it, and keep what you verified separate from what you assume.",
+  "- Match the codebase: when you change code, follow the surrounding file's existing style, naming, and libraries, and solve the task asked without unrequested refactors or scope creep.",
+  "- Verify your work: after changing code, run the project's build and the relevant tests before reporting done; if they fail, fix them or report the failure with its output instead of claiming success.",
+  "- Scale caution to impact: take reversible local actions directly, but before destructive or hard-to-reverse actions (deleting data, dropping tables, force-push, production or infrastructure changes, removing auth) state the risk and get explicit confirmation.",
+]
 
 function buildRouteBrainSystemPrompt(): string {
   return [

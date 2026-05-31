@@ -97,6 +97,20 @@ test("buildPrimaryPrompt surfaces web_search for live info and steers away from 
   expect(primaryPrompt).toContain("Do not read ~/.braincode config files")
 })
 
+test("buildPrimaryPrompt prepends the environment section when provided", () => {
+  const envSection = "Environment:\n- Working directory: /repo/project\n- Today's date: 2026-05-31\n"
+  const primaryPrompt = buildPrimaryPrompt("fix the bug", [], "backend", undefined, ["read_file"], envSection)
+  expect(primaryPrompt.startsWith("Environment:")).toBe(true)
+  expect(primaryPrompt).toContain("- Working directory: /repo/project")
+  expect(primaryPrompt).toContain("User request:\nfix the bug")
+})
+
+test("buildPrimaryPrompt includes user-facing response style guidance", () => {
+  const primaryPrompt = buildPrimaryPrompt("explain this function", [], "rush", undefined, ["read_file"])
+  expect(primaryPrompt).toContain("Response style:")
+  expect(primaryPrompt).toContain("Reply in the language the user used")
+})
+
 test("buildPrimaryPrompt tells the agent to connect MCP when only mcp__connect is present", () => {
   const primaryPrompt = buildPrimaryPrompt("latest news", [], "librarian", undefined, ["read_file", "mcp__connect"])
   expect(primaryPrompt).toContain("MCP servers are still connecting")

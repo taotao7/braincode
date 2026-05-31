@@ -147,6 +147,17 @@ test("agent role prompts cover every routed role and the router", () => {
   expect(agentRoleSystemPrompts.routeBrain).not.toMatch(/\b(GPT|Claude|Gemini|modelId|provider)\b/i)
 })
 
+test("executing roles carry the core operating directives; routeBrain and pet do not", () => {
+  for (const role of routedAgentRoles) {
+    expect(agentRoleSystemPrompts[role]).toContain("Core operating directives:")
+    expect(agentRoleSystemPrompts[role]).toContain("Investigate before asserting")
+    expect(agentRoleSystemPrompts[role]).toContain("Verify your work")
+    expect(agentRoleSystemPrompts[role]).toContain("Scale caution to impact")
+  }
+  expect(agentRoleSystemPrompts.routeBrain).not.toContain("Core operating directives:")
+  expect(agentRoleSystemPrompts.pet).not.toContain("Core operating directives:")
+})
+
 test("formatRoutedAgentRoleCatalog lists each routed role exactly once", () => {
   const catalog = formatRoutedAgentRoleCatalog()
   for (const role of routedAgentRoles) {

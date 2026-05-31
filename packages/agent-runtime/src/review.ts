@@ -2,6 +2,7 @@ import type { HandoffPacket, WorkerResult } from "@braincode/context"
 import type { ContextRef } from "@braincode/protocol"
 import type { PatchCheckSummary } from "./checks"
 import type { PatchDiffSnapshot, PatchSummary, UntrackedFilePreview } from "./patch"
+import { formatReadOnlyToolAccess } from "./tool-discipline"
 
 export type PatchReviewArtifacts = {
   patch?: PatchSummary
@@ -68,13 +69,13 @@ export function buildReviewPrompt(
   handoff: HandoffPacket,
   projectSupportContext = "",
   artifacts?: PatchReviewArtifacts,
+  environmentSection = "",
 ): string {
   const patchArtifacts = formatPatchReviewArtifacts(artifacts)
   return `Review this Braincode run as an isolated review agent.
 
-${projectSupportContext}
-Tool access:
-Read-only project tools may be available. Use them to verify changed files, inspect diffs, and check specific source evidence. Do not edit files or execute commands.
+${environmentSection}${projectSupportContext}
+${formatReadOnlyToolAccess()}
 
 Original user request:
 ${originalPrompt}

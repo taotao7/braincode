@@ -57,6 +57,8 @@ export type { ExecutedWorkerResult, WorkerLifecycleEvent, WorkerTodoStatusHandle
 import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFAULT_MCP_STARTUP_BUDGET_MS, normalizeRuntimeInteger } from "./mcp-loading"
 import { createDispatchSpecialistTool, formatDispatchToolGuidance, type DispatchSpecialistTool } from "./dynamic-dispatch"
 export { createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchToolGuidance } from "./dynamic-dispatch"
+import { gatherEnvironmentContext, formatEnvironmentSection } from "./environment"
+export { gatherEnvironmentContext, formatEnvironmentSection, type EnvironmentContext } from "./environment"
 export type { DispatchSpecialistTool, DispatchSpecialistToolOptions } from "./dynamic-dispatch"
 import { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker, type RuntimeMetricsPhase, type RuntimeMetricsSummary } from "./metrics"
 export { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker } from "./metrics"
@@ -409,6 +411,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     : await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
 
   const projectSupport = await readProjectSupport(cwd)
+  const environmentContext = await gatherEnvironmentContext({ cwd, modelId: plan.model.id })
+  const environmentSection = formatEnvironmentSection(environmentContext)
   const userSupport = await readUserSupport(home)
   const auth = await readAuth(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
@@ -462,6 +466,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         home,
         sessionId,
         projectSupport,
+        environmentSection,
         hookContext,
         readOnlyTools,
         getMcpTools: () => mcpHub.getTools(),
@@ -520,7 +525,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools())
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools(), environmentSection)
     if (plan.role === "imageMaker") {
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
@@ -621,7 +626,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       throw lastError instanceof Error ? lastError : new Error(String(lastError))
     }
 
-    const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name))
+    const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name), environmentSection)
     const dispatchGuidance = dispatchTool ? formatDispatchToolGuidance(plan.mode) : ""
     const primaryPrompt = dispatchGuidance ? `${dispatchGuidance}\n${primaryPromptBase}` : primaryPromptBase
     let lastError: unknown
@@ -774,7 +779,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           }
           reviewResult =
             plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, [...readOnlyTools, ...mcpHub.getTools()], toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
+              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts, environmentSection), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, [...readOnlyTools, ...mcpHub.getTools()], toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
               : undefined
           reviewDecision = reviewResult
             ? applyCheckGateToReviewDecision(

@@ -139,6 +139,9 @@ test("buildReviewPrompt includes patch checks diff and untracked previews", () =
   expect(prompt).toContain("export const value = 1")
   expect(prompt).toContain("assets/icon.png")
   expect(prompt).toContain("binary content omitted")
+  // Review reuses the shared read-only tool discipline.
+  expect(prompt).toContain("Tool access:")
+  expect(prompt).toContain("search before reading")
 })
 
 test("normalizeReviewDecisionText and mergeReviewResult keep failed checks from approving", () => {

@@ -220,6 +220,9 @@ test("buildDispatchWorkerPrompt embeds the request, goal, and handoff ids", () =
   expect(prompt).toContain("Audit the JWT signing flow for replay risk.")
   expect(prompt).toContain('"taskId":"task-9"')
   expect(prompt).toContain('"parentId":"brain-ctx"')
+  // Dispatched specialists are read-only/advisory and reuse the shared discipline.
+  expect(prompt).toContain("Tool access:")
+  expect(prompt).toContain("search before reading")
   // No project instructions means no project-support preamble.
   expect(prompt).not.toContain("Project instructions")
 })

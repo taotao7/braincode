@@ -9,6 +9,7 @@ import type { HookRuntimeContext } from "./hooks"
 import { formatWorkerResults } from "./review"
 import { createRuntimeWorkerPlan, type RuntimePlan } from "./router"
 import { throwIfRunAborted } from "./runtime-agent"
+import { formatReadOnlyToolAccess } from "./tool-discipline"
 import { readOnlyToolWorkerRoles, runWorkerFromPlan, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
 
 // Roles the primary agent may request mid-run through the dispatch tool. This is
@@ -27,6 +28,9 @@ export type DispatchSpecialistToolOptions = {
   home: string | undefined
   sessionId: string
   projectSupport: ProjectSupport
+  // Run-global environment facts prepended to the dispatched specialist's
+  // prompt so it has the same cwd/platform/date/git context as the primary.
+  environmentSection?: string
   hookContext: HookRuntimeContext
   readOnlyTools: AgentTool[]
   // Live accessor for connected MCP tools so dispatched specialists, which run
@@ -171,7 +175,7 @@ async function runDispatchedWorker(
   const workerTools = [...localSet, ...(options.getMcpTools?.() ?? [])]
   const result = await runWorkerFromPlan(
     worker,
-    (handoff) => buildDispatchWorkerPrompt(options.plan.context.goal, goal, handoff, options.projectSupport),
+    (handoff) => buildDispatchWorkerPrompt(options.plan.context.goal, goal, handoff, options.projectSupport, options.environmentSection ?? ""),
     options.sessionId,
     options.home,
     options.models,
@@ -210,11 +214,13 @@ async function resolveBrain(home: string | undefined, brainId: string): Promise<
 // Exported for direct unit testing: the prompt builders only run deep inside a
 // successful worker execution, so they are verified in isolation rather than
 // through a full dispatched run.
-export function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: ProjectSupport): string {
+export function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: ProjectSupport, environmentSection = ""): string {
   const support = formatDispatchProjectSupport(projectSupport)
   return `Run this isolated Braincode specialist consultation requested mid-run by the primary agent.
 
-${support}Original user request:
+${environmentSection}${support}${formatReadOnlyToolAccess()}
+
+Original user request:
 ${originalRequest}
 
 Specialist goal (self-contained; you do not have the primary agent's transcript):

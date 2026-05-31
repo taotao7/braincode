@@ -14,6 +14,7 @@ import { normalizeReviewDecisionText, formatWorkerResults, type ReviewDecision }
 import { createBraincodeAgentRuntime, createRunAbortedError, linkRuntimeAbort, recordAgentTokenUsage, recordAutomaticHandoffIfNeeded, requireAssistantText, throwIfRunAborted } from "./runtime-agent"
 import type { RuntimePlan, RuntimeWorkerPlan } from "./router"
 import type { ToolEvidenceCache } from "./evidence-cache"
+import { READ_TOOL_DISCIPLINE, formatReadOnlyToolAccess } from "./tool-discipline"
 
 export type WorkerLifecycleEvent =
   | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "primary" | "support" | "review"; modelId: string; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; todoIds?: string[] }
@@ -104,15 +105,20 @@ export function summarizeProjectSupport(projectSupport: ProjectSupport) {
   }
 }
 
-export function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: ProjectSupport, toolNames: string[] = []): string {
+// User-facing response guidance for the primary agent only. Support workers and
+// dispatched specialists return strict JSON, so this lives here rather than in
+// the shared role prompt where it would conflict with their output contract.
+const PRIMARY_RESPONSE_GUIDANCE = "Response style:\nKeep responses proportional to the task: answer simple questions directly, and reserve headers, bullet lists, and step-by-step breakdowns for genuinely multi-part work. Lead with the result, explain reasoning only where it matters, and do not pad with restatements or filler. Reply in the language the user used.\n"
+
+export function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: ProjectSupport, toolNames: string[] = [], environmentSection = ""): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
   const toolContext = formatPrimaryToolContext(toolNames)
+  const header = `${environmentSection}${supportContext}${toolContext}${PRIMARY_RESPONSE_GUIDANCE}`
   if (workerResults.length === 0) {
-    return `${supportContext}${toolContext}${supportContext || toolContext ? "\n" : ""}User request:\n${originalPrompt}`
+    return `${header}\nUser request:\n${originalPrompt}`
   }
 
-  return `${supportContext}
-${toolContext}
+  return `${header}
 User request:
 ${originalPrompt}
 
@@ -412,6 +418,7 @@ export async function runSupportWorkers(
   onEvent?: (event: AgentEvent) => void | Promise<void>,
   signal?: AbortSignal,
   getMcpTools: () => AgentTool[] = () => [],
+  environmentSection = "",
 ): Promise<ExecutedWorkerResult[]> {
   throwIfRunAborted(signal)
   if (workers.length === 0) return []
@@ -448,7 +455,7 @@ export async function runSupportWorkers(
     const workerTools = [...localSet, ...getMcpTools()]
     return runWorkerFromPlan(
       worker,
-      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
+      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults, environmentSection),
       sessionId,
       home,
       models,
@@ -518,17 +525,17 @@ function clipPromptText(text: string, label: string, maxChars: number): string {
   return `${text.slice(0, maxChars)}\n\n[${label} truncated at ${maxChars}/${text.length} chars; use project files/tools to inspect the remaining content if needed.]`
 }
 
-function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = []): string {
+function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = [], environmentSection = ""): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
   const priorResultContext = priorResults.length > 0
     ? `\nBrain-supplied prior worker results for dependencies:\n${formatWorkerResults(priorResults)}\n`
     : ""
   const toolContext = readOnlyToolWorkerRoles.has(handoff.task.agentRole as RoutedAgentRole)
-    ? "\nTool access:\nRead-only project tools may be available. Use them to gather concrete evidence, but do not attempt edits, shell execution, package scripts, or other state-changing actions. Batch independent read_file/search_files/list_files calls in one turn so they run in parallel, read whole files instead of small windows, search before reading, and avoid re-reading targets you already have.\n"
+    ? `\n${formatReadOnlyToolAccess()}\n`
     : ""
   return `Run this isolated Braincode worker handoff.
 
-${supportContext}
+${environmentSection}${supportContext}
 Original user request:
 ${originalPrompt}
 ${priorResultContext}
@@ -576,7 +583,7 @@ function formatPrimaryToolContext(toolNames: string[]): string {
     `Available tools: ${names.join(", ")}`,
     executeGuidance,
     ...onlineGuidanceLines,
-    "Tool-use discipline: gather context with the fewest calls. Issue independent read-only calls (read_file, search_files, list_files, git_diff) together in one turn so they run in parallel instead of one at a time. Read whole files rather than paging through small windows, search before reading to find the right files, and do not re-read or re-search the same target you already have this run. State-changing tools (edits, shell, scripts) still run one at a time.",
+    "Tool-use discipline: gather context with the fewest calls. " + READ_TOOL_DISCIPLINE + " State-changing tools (edits, shell, scripts) still run one at a time.",
     "If a tool call is blocked or fails, report the concrete tool result or block reason.",
     "",
   ].join("\n")
