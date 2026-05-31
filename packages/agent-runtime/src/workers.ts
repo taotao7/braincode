@@ -245,7 +245,7 @@ export async function runWorkerFromPlan(
 
     try {
       const workerPrompt = addHookAdditionalContext(
-        buildPrompt(handoff),
+        applyWorkerMcpToolContext(buildPrompt(handoff), tools),
         [
           ...subagentStartHooks.additionalContext,
           ...(subagentStartHooks.blockedReason ? [subagentStartHooks.blockedReason] : []),
@@ -411,6 +411,7 @@ export async function runSupportWorkers(
   toolEvidenceCache?: ToolEvidenceCache,
   onEvent?: (event: AgentEvent) => void | Promise<void>,
   signal?: AbortSignal,
+  getMcpTools: () => AgentTool[] = () => [],
 ): Promise<ExecutedWorkerResult[]> {
   throwIfRunAborted(signal)
   if (workers.length === 0) return []
@@ -443,7 +444,8 @@ export async function runSupportWorkers(
 
   const runWorker = (index: number, priorResults: ExecutedWorkerResult[]): Promise<ExecutedWorkerResult> => {
     const worker = workers[index]!
-    const workerTools = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
+    const localSet = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
+    const workerTools = [...localSet, ...getMcpTools()]
     return runWorkerFromPlan(
       worker,
       (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults),
@@ -562,6 +564,7 @@ function formatPrimaryToolContext(toolNames: string[]): string {
   }
   if (mcpToolNames.length > 0) {
     onlineGuidanceLines.push(`Connected MCP tools usable directly: ${mcpToolNames.join(", ")}.`)
+    onlineGuidanceLines.push(...formatMcpUsageGuidance(mcpToolNames))
   }
   if (hasWebSearch || mcpToolNames.length > 0 || names.includes("mcp__connect")) {
     onlineGuidanceLines.push(
@@ -577,6 +580,55 @@ function formatPrimaryToolContext(toolNames: string[]): string {
     "If a tool call is blocked or fails, report the concrete tool result or block reason.",
     "",
   ].join("\n")
+}
+
+// Capability-aware guidance for connected MCP servers. The plain tool list does
+// not tell the model *when* to reach for a browser or a renderer, so it tends to
+// reason from source instead of driving the tools. We key off the server name
+// embedded in `mcp__<server>__<tool>` and emit one concrete line per connected
+// server (specific copy for servers we know, a generic nudge otherwise). Only
+// servers actually connected this run produce lines, so the guidance never
+// references a capability that is not available.
+export function formatMcpUsageGuidance(mcpToolNames: string[]): string[] {
+  const servers = new Set<string>()
+  for (const name of mcpToolNames) {
+    const match = /^mcp__([^_]+(?:_[^_]+)*?)__/.exec(name)
+    const server = match?.[1]
+    if (server && server !== "connect") servers.add(server)
+  }
+  const lines: string[] = []
+  for (const server of [...servers].sort()) {
+    const normalized = server.toLowerCase().replace(/[-_]/g, "")
+    if (normalized.includes("chromedevtools") || normalized === "chrome" || normalized.includes("playwright") || normalized.includes("puppeteer")) {
+      lines.push(`A real browser is connected via the '${server}' MCP server. To verify or review UI, layout, or visual/runtime behavior, navigate to the running app and take a snapshot or screenshot with these tools instead of reasoning only from source.`)
+    } else if (normalized.includes("blender")) {
+      lines.push(`A Blender instance is connected via the '${server}' MCP server. For 3D modeling, scene, or render tasks, drive Blender with these tools to produce the actual artifact rather than only describing what to build.`)
+    } else if (normalized.includes("figma") || normalized.includes("opendesign")) {
+      lines.push(`A design tool is connected via the '${server}' MCP server. When the task involves inspecting or producing designs, use these tools to read or edit the real design rather than guessing.`)
+    } else {
+      lines.push(`The '${server}' MCP server is connected and exposes real capabilities; when the task matches what it does, prefer calling its tools over reasoning from source alone.`)
+    }
+  }
+  return lines
+}
+
+// Workers receive their tool list directly (not via the primary's tool-context
+// block), so any connected MCP tools they get need the same "when to use this"
+// framing appended to their handoff prompt. No-op when the worker has no MCP
+// tools this run.
+export function applyWorkerMcpToolContext(prompt: string, tools: AgentTool[]): string {
+  const mcpToolNames = tools
+    .map((tool) => tool.name)
+    .filter((name) => name.startsWith("mcp__") && name !== "mcp__connect")
+  if (mcpToolNames.length === 0) return prompt
+  const names = [...new Set(mcpToolNames)].sort()
+  const lines = [
+    "Connected MCP tools available to you this run:",
+    `${names.join(", ")}.`,
+    ...formatMcpUsageGuidance(names),
+    "",
+  ]
+  return `${lines.join("\n")}\n${prompt}`
 }
 
 function normalizeStringArray(value: unknown): string[] {

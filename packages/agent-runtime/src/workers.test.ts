@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, runWorkerPool, type ExecutedWorkerResult } from "./workers"
+import { applyWorkerMcpToolContext, buildPrimaryPrompt, createWorkerHandoff, formatMcpUsageGuidance, formatProjectSupportPromptSection, runWorkerPool, type ExecutedWorkerResult } from "./workers"
+import type { AgentTool } from "@earendil-works/pi-agent-core"
 import type { RuntimeWorkerPlan } from "./router"
 
 function executedResult(index: number, status: ExecutedWorkerResult["status"] = "completed"): ExecutedWorkerResult {
@@ -101,6 +102,44 @@ test("buildPrimaryPrompt tells the agent to connect MCP when only mcp__connect i
   expect(primaryPrompt).toContain("MCP servers are still connecting")
   expect(primaryPrompt).toContain("call mcp__connect first")
   expect(primaryPrompt).not.toContain("Web search is available through web_search")
+})
+
+test("buildPrimaryPrompt adds capability guidance for connected browser/3D MCP servers", () => {
+  const primaryPrompt = buildPrimaryPrompt("review the homepage", [], "frontend", undefined, [
+    "read_file",
+    "mcp__chrome-devtools__navigate_page",
+    "mcp__chrome-devtools__take_screenshot",
+    "mcp__blender__get_scene_info",
+  ])
+  expect(primaryPrompt).toContain("A real browser is connected via the 'chrome-devtools' MCP server")
+  expect(primaryPrompt).toContain("A Blender instance is connected via the 'blender' MCP server")
+})
+
+test("formatMcpUsageGuidance keys off server name and emits one line per connected server", () => {
+  const lines = formatMcpUsageGuidance([
+    "mcp__chrome-devtools__navigate_page",
+    "mcp__chrome-devtools__take_screenshot",
+    "mcp__blender__render",
+    "mcp__some-other__do_thing",
+  ])
+  expect(lines).toHaveLength(3)
+  expect(lines.some((line) => line.includes("'chrome-devtools'") && line.includes("real browser"))).toBe(true)
+  expect(lines.some((line) => line.includes("'blender'") && line.includes("Blender"))).toBe(true)
+  expect(lines.some((line) => line.includes("'some-other'") && line.includes("exposes real capabilities"))).toBe(true)
+})
+
+test("applyWorkerMcpToolContext prepends MCP guidance only when the worker has MCP tools", () => {
+  const tool = (name: string): AgentTool => ({ name } as unknown as AgentTool)
+  const base = "Run this isolated Braincode worker handoff."
+
+  const withMcp = applyWorkerMcpToolContext(base, [tool("read_file"), tool("mcp__chrome-devtools__navigate_page")])
+  expect(withMcp).toContain("Connected MCP tools available to you this run:")
+  expect(withMcp).toContain("mcp__chrome-devtools__navigate_page")
+  expect(withMcp).toContain("A real browser is connected")
+  expect(withMcp.endsWith(base)).toBe(true)
+
+  const withoutMcp = applyWorkerMcpToolContext(base, [tool("read_file"), tool("mcp__connect")])
+  expect(withoutMcp).toBe(base)
 })
 
 test("runWorkerPool refills a freed slot before the slowest worker in the wave finishes", async () => {

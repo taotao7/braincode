@@ -29,6 +29,10 @@ export type DispatchSpecialistToolOptions = {
   projectSupport: ProjectSupport
   hookContext: HookRuntimeContext
   readOnlyTools: AgentTool[]
+  // Live accessor for connected MCP tools so dispatched specialists, which run
+  // mid-primary, see the fully-loaded set. Defaults to none for callers/tests
+  // that do not wire MCP.
+  getMcpTools?: () => AgentTool[]
   toolEvidenceCache: ToolEvidenceCache
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
   onWorkerTodoStatus?: WorkerTodoStatusHandler
@@ -160,8 +164,11 @@ async function runDispatchedWorker(
 
   // Dispatched specialists are advisory: they get read-only tools only when
   // their role is a read-only evidence role, exactly like planned support
-  // workers. They never receive write/execute tools.
-  const workerTools = readOnlyToolWorkerRoles.has(role) ? options.readOnlyTools : []
+  // workers. They never receive write/execute tools, but they do get the
+  // connected MCP tools so e.g. a frontend/designer consult can drive a browser
+  // or renderer.
+  const localSet = readOnlyToolWorkerRoles.has(role) ? options.readOnlyTools : []
+  const workerTools = [...localSet, ...(options.getMcpTools?.() ?? [])]
   const result = await runWorkerFromPlan(
     worker,
     (handoff) => buildDispatchWorkerPrompt(options.plan.context.goal, goal, handoff, options.projectSupport),

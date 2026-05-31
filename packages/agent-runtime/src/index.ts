@@ -452,6 +452,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         projectSupport,
         hookContext,
         readOnlyTools,
+        getMcpTools: () => mcpHub.getTools(),
         toolEvidenceCache,
         onWorkerEvent: request.onWorkerEvent,
         onWorkerTodoStatus,
@@ -507,7 +508,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal)
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools())
     if (plan.role === "imageMaker") {
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
@@ -761,7 +762,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           }
           reviewResult =
             plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
+              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, [...readOnlyTools, ...mcpHub.getTools()], toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
               : undefined
           reviewDecision = reviewResult
             ? applyCheckGateToReviewDecision(

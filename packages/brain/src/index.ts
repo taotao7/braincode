@@ -418,6 +418,7 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Frontend-specific working rules:",
     "- Tie recommendations to implementable files, components, states, and browser behavior.",
     "- Check that text, controls, and responsive layouts remain usable across expected viewports.",
+    "- When connected tools expose a real browser (e.g. a chrome-devtools MCP server), use them to load the running app and capture visual evidence instead of reasoning from source alone.",
   ]),
   backend: buildAgentRoleSystemPrompt("backend", [
     "Backend-specific working rules:",
@@ -428,6 +429,7 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Designer-specific working rules:",
     "- Include states, hierarchy, interaction details, and prioritization tradeoffs.",
     "- Keep guidance practical enough for an engineer to implement.",
+    "- When connected tools expose a real browser, rendering engine, or design tool (e.g. chrome-devtools, blender, or a design MCP server), use them to inspect or produce the actual artifact rather than only describing it.",
   ]),
   imageMaker: buildAgentRoleSystemPrompt("imageMaker", [
     "ImageMaker-specific working rules:",
@@ -459,6 +461,7 @@ export const agentRoleSystemPrompts: Record<AgentRole, string> = {
     "Review-specific working rules:",
     "- Lead with concrete findings ordered by severity.",
     "- Reference exact files, symbols, or behaviors when available; keep summaries secondary.",
+    "- When connected tools expose a real browser (e.g. a chrome-devtools MCP server), use them to verify UI or runtime behavior in the running app rather than reviewing source alone.",
   ]),
   summarize: buildAgentRoleSystemPrompt("summarize", [
     "Summarizer-specific working rules:",
