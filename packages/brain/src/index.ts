@@ -361,14 +361,12 @@ export const agentRoleProfiles: Record<AgentRole, AgentRoleProfile> = {
 
 function formatAgentRoleProfile(role: AgentRole): string {
   const profile = agentRoleProfiles[role]
-  return [
-    `- ${role} (${profile.label})`,
-    `  Identity: ${profile.identity}`,
-    `  Owns: ${profile.responsibility}`,
-    `  Capabilities: ${profile.capabilities.join(" ")}`,
-    `  Boundaries: ${profile.boundaries.join(" ")}`,
-    `  Output: ${profile.output}`,
-  ].join("\n")
+  // Routing only needs each role's scope to classify intent. The full
+  // identity/capabilities/boundaries/output live in agentRoleProfiles and are
+  // injected into a worker's own system prompt once it is selected (see
+  // buildAgentRoleSystemPrompt), so the catalog stays a compact one-liner to
+  // keep the high-frequency routeBrain prompt small.
+  return `- ${role} (${profile.label}): ${profile.responsibility}`
 }
 
 export function formatAgentRoleCatalog(options: { includeInternal?: boolean } = {}): string {

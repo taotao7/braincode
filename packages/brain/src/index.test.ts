@@ -163,7 +163,10 @@ test("formatAgentRoleCatalog can include internal non-routed roles for routeBrai
   const internalCatalog = formatAgentRoleCatalog({ includeInternal: true })
   expect(internalCatalog).toContain("- routeBrain ")
   expect(internalCatalog).toContain("- pet ")
-  expect(internalCatalog).toContain("Boundaries:")
+  // The catalog is a compact one-line-per-role scope list; full role detail
+  // lives in each role's own system prompt, not the high-frequency router prompt.
+  expect(internalCatalog).not.toContain("Boundaries:")
+  expect(internalCatalog).not.toContain("Capabilities:")
 })
 
 test("selectBrain and selectModelPolicy return configured policies", () => {

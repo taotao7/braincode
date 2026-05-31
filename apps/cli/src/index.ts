@@ -4,6 +4,7 @@ import { demoBenchmarkTasks, executePromptFromConfig, humanizeAgentRuntimeError,
 import { startConfigServer } from "@braincode/server"
 import { runTui } from "./tui"
 import { formatDoctorReport, runDoctor, type DoctorOptions } from "./doctor"
+import { runUsageCommand } from "./usage"
 
 function readFlag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name)
@@ -31,6 +32,7 @@ Usage:
   braincode benchmark [--heuristic] [--task <id>] [--json]
   braincode benchmark --execute [--real] [--task <id>] [--json]
   braincode doctor [--json] [--project <path>] [--mcp] [--checks]
+  braincode usage [--json] [--sessions <n>] [--recent <n>]
   braincode help
 
 Commands:
@@ -40,6 +42,7 @@ Commands:
   benchmark
            Run representative coding-task plan benchmarks.
   doctor   Diagnose configuration, models, tools, permissions, checks, and MCP.
+  usage    Report recorded token usage and prompt-cache hit rate.
   help     Show this help message.
 
 Run flags:
@@ -67,6 +70,11 @@ Doctor flags:
   --project     Diagnose a specific project root instead of the current directory.
   --mcp         Focus on MCP diagnostics only.
   --checks      Focus on check diagnostics only.
+
+Usage flags:
+  --json        Print the structured usage stats as JSON.
+  --sessions    Aggregate only the most recent <n> sessions.
+  --recent      Show the latest <n> per-call rows (default 5).
 `)
 }
 
@@ -470,6 +478,9 @@ async function main() {
       break
     case "doctor":
       await runDoctorCommand(args.slice(1))
+      break
+    case "usage":
+      await runUsageCommand(args.slice(1))
       break
     case "help":
     case "--help":
