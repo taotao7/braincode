@@ -728,6 +728,32 @@ test("background exit fires the listener exactly once and kill_background termin
   }
 })
 
+test("killAllSync terminates running background processes (signal-handler backstop)", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-killallsync-test-"))
+  try {
+    const execSessions = new ExecSessionManager()
+    const tools = createLocalCodingTools({ projectRoot, execSessions })
+    const execCommand = tools.find((tool) => tool.name === "exec_command")!
+    const listBackground = tools.find((tool) => tool.name === "list_background")!
+
+    const startResult = await execCommand.execute("sync-1", {
+      cmd: "bun -e \"setTimeout(() => {}, 10000)\"",
+      background: true,
+      yieldTimeMs: 20,
+    } as never)
+    const sessionId = (startResult.details as { sessionId?: number | null }).sessionId as number
+
+    execSessions.killAllSync()
+
+    // The SIGKILL'd process closes; the session flips to not-running.
+    await new Promise((r) => setTimeout(r, 300))
+    const listResult = await listBackground.execute("sync-list", {} as never)
+    expect(textContent(listResult)).not.toContain(`session=${sessionId} [background] running`)
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("run_script uses npm when package-lock.json is present", async () => {
   const npmCheck = spawnSync("npm", ["--version"])
   if (npmCheck.status !== 0) return

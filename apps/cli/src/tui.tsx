@@ -247,21 +247,54 @@ function formatBackgroundExitReminder(info: BackgroundExitInfo): string {
 
 export async function runTui(initialPrompt?: string): Promise<void> {
   const restoreDebugSink = await configureTuiDebugSink();
+  // One session manager for the whole TUI lifetime so background processes
+  // (exec_command background:true) survive across turns. Created here, not in
+  // the component, so process-level signal handlers can reap detached children
+  // even on paths that bypass React unmount. Keyboard Ctrl+C is consumed by
+  // Ink as raw input (no SIGINT is raised in raw mode) and unmounts cleanly via
+  // the component effect; these handlers cover external signals (SIGINT/SIGTERM/
+  // SIGHUP from `kill` or a closed terminal) that would otherwise orphan a
+  // backgrounded `npm run dev`.
+  const execSessions = new ExecSessionManager();
+  let reaped = false;
+  const reap = () => {
+    if (reaped) return;
+    reaped = true;
+    execSessions.killAllSync();
+  };
+  const onSignal = (signal: NodeJS.Signals) => {
+    reap();
+    // Re-raise with the default handler so the exit status reflects the signal.
+    process.removeListener(signal, onSignal);
+    process.kill(process.pid, signal);
+  };
+  process.once("exit", reap);
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  process.once("SIGHUP", onSignal);
   // Render into the terminal's alternate screen buffer so the TUI owns the
   // whole terminal (like vim/htop/less) and the original screen is restored on
   // exit. The alt-screen has no native scrollback, so the transcript provides
   // its own in-app scrolling (PageUp/PageDown/Ctrl+↑↓/Home/End + mouse wheel).
-  const instance = render(<BraincodeTui initialPrompt={initialPrompt} />, {
-    alternateScreen: true,
-  });
+  const instance = render(
+    <BraincodeTui initialPrompt={initialPrompt} execSessions={execSessions} />,
+    {
+      alternateScreen: true,
+    },
+  );
   try {
     await instance.waitUntilExit();
   } finally {
+    reap();
+    process.removeListener("exit", reap);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    process.removeListener("SIGHUP", onSignal);
     restoreDebugSink();
   }
 }
 
-function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
+function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [terminalCols, setTerminalCols] = useState<number>(
@@ -285,10 +318,9 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const initialCursor = initialDraft.length;
   const [running, setRunning] = useState(false);
   const activeRunAbort = useRef<AbortController | null>(null);
-  // One session manager for the whole TUI lifetime so background processes
-  // (exec_command background:true) survive across turns. runningRef mirrors
-  // `running` so the once-registered exit listener never reads a stale value.
-  const execSessions = useMemo(() => new ExecSessionManager(), []);
+  // execSessions is owned by runTui (so signal handlers can reap detached
+  // children even when React unmount is bypassed). runningRef mirrors `running`
+  // so the once-registered exit listener never reads a stale value.
   const runningRef = useRef(running);
   // Holds the latest reminder-injection handler. The exit listener is
   // registered once but background exits must run fresh closures (enqueueTask /
@@ -297,6 +329,10 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   const backgroundExitHandlerRef = useRef<(info: BackgroundExitInfo) => void>(
     () => {},
   );
+  // Guards drainQueue against re-entrancy: several background processes can exit
+  // at once and each calls drainQueue() when idle, but only one drain loop may
+  // own the queue at a time.
+  const drainingRef = useRef(false);
   const inputStore = useStableTuiStore<InputState>({
     draft: initialDraft,
     cursor: initialCursor,
@@ -1978,18 +2014,24 @@ function BraincodeTui({ initialPrompt }: BraincodeTuiProps) {
   }
 
   async function drainQueue() {
-    while (queueRef.current.length > 0) {
-      const next = queueRef.current[0]!;
-      queueRef.current = queueRef.current.slice(1);
-      bumpQueue();
-      setItems((previous) =>
-        previous.filter((item) => item.id !== next.itemId),
-      );
-      await submitPrompt(next.prompt, {
-        displayText: next.displayText,
-        skipCommand: next.skipCommand,
-        forceRoles: next.forceRoles,
-      });
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    try {
+      while (queueRef.current.length > 0) {
+        const next = queueRef.current[0]!;
+        queueRef.current = queueRef.current.slice(1);
+        bumpQueue();
+        setItems((previous) =>
+          previous.filter((item) => item.id !== next.itemId),
+        );
+        await submitPrompt(next.prompt, {
+          displayText: next.displayText,
+          skipCommand: next.skipCommand,
+          forceRoles: next.forceRoles,
+        });
+      }
+    } finally {
+      drainingRef.current = false;
     }
   }
 

@@ -1,4 +1,5 @@
 import type {
+  ExecSessionManager,
   FinalReport,
   RuntimePlan,
 } from "@braincode/agent-runtime";
@@ -235,6 +236,7 @@ export type DecisionPanelState = {
 
 export type BraincodeTuiProps = {
   initialPrompt?: string;
+  execSessions: ExecSessionManager;
 };
 
 export type UiColor =

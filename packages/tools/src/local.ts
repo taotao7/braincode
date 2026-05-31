@@ -1366,6 +1366,18 @@ export class ExecSessionManager {
     }
   }
 
+  /**
+   * Synchronously SIGKILL every running process tree. Use from process signal
+   * handlers (SIGTERM/SIGHUP/exit) where the graceful SIGTERM-then-SIGKILL
+   * timer in terminate() would never fire before the process dies, which would
+   * orphan detached children (e.g. a backgrounded `npm run dev`).
+   */
+  killAllSync(): void {
+    for (const session of this.sessions.values()) {
+      if (!session.closed) terminateProcessTree(session.child, "SIGKILL")
+    }
+  }
+
   private foregroundSessionCount(): number {
     let count = 0
     for (const session of this.sessions.values()) {
