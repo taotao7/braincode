@@ -10,6 +10,9 @@
 // survives tmux and any VT100-ish terminal.
 
 import { spawn } from "node:child_process"
+import { unlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 export type ImageProtocol = "kitty" | "halfblock"
 
@@ -196,10 +199,65 @@ function wrapForMultiplexer(sequence: string): string {
   return `${ESC}Ptmux;${escaped}${ESC}\\`
 }
 
-// Build the Kitty Graphics Protocol upload: transmit the PNG (base64, chunked)
-// with a virtual placement (U=1) so it is anchored to Unicode placeholders
-// rather than the cursor. The image is sized to exactly cols×rows cells.
-function buildKittyTransmit(
+// Build the Kitty Graphics Protocol upload. Rather than streaming the PNG
+// inline as dozens of base64 chunks — which, under tmux, must each be wrapped
+// in DCS passthrough and is prone to partial delivery (the image then decodes
+// only its top scanlines) — we write the PNG to a temporary file and transmit
+// just its path. This is a single short escape regardless of image size, the
+// approach yazi uses for robustness under multiplexers.
+//
+// t=t = temporary file: the terminal reads the pixel data then deletes the
+// file itself. Kitty/Ghostty only honor this when the path lives in a known
+// temp dir AND contains the literal string `tty-graphics-protocol`, so the
+// filename is constructed accordingly. U=1 anchors a virtual placement to the
+// Unicode placeholders; q=2 suppresses responses; c/r size it in cells.
+//
+// We still keep the file around briefly as a fallback target and best-effort
+// delete it after a short delay in case the terminal could not (e.g. an older
+// build, or the path safety check failing).
+async function buildKittyTransmit(
+  png: Buffer,
+  imageId: number,
+  cols: number,
+  rows: number,
+  multiplexed: boolean,
+): Promise<string> {
+  const filePath = await writeGraphicsTempFile(png, imageId)
+  if (!filePath) {
+    // Could not stage a temp file; fall back to inline chunked transfer.
+    return buildKittyTransmitInline(png, imageId, cols, rows, multiplexed)
+  }
+  const encodedPath = Buffer.from(filePath, "utf8").toString("base64")
+  const control = `a=T,U=1,q=2,f=100,t=t,i=${imageId},c=${cols},r=${rows}`
+  const apc = `${ESC}_G${control};${encodedPath}${ESC}\\`
+  return multiplexed ? wrapForMultiplexer(apc) : apc
+}
+
+// Stage the PNG in a temp file whose path satisfies the Kitty `t=t` safety
+// rules (lives under the system temp dir and contains the magic substring).
+// Returns null if the write fails so the caller can fall back to inline data.
+async function writeGraphicsTempFile(
+  png: Buffer,
+  imageId: number,
+): Promise<string | null> {
+  const name = `tty-graphics-protocol-braincode-${process.pid}-${imageId}-${Date.now()}.png`
+  const filePath = join(tmpdir(), name)
+  try {
+    await writeFile(filePath, png)
+  } catch {
+    return null
+  }
+  // The terminal deletes the file once it has read the pixels (t=t). Schedule
+  // a best-effort cleanup in case it does not, without blocking rendering.
+  setTimeout(() => {
+    void unlink(filePath).catch(() => {})
+  }, 10_000).unref?.()
+  return filePath
+}
+
+// Inline fallback: transmit the PNG (base64, chunked) with a virtual placement
+// (U=1). Used only when a temp file cannot be staged.
+function buildKittyTransmitInline(
   png: Buffer,
   imageId: number,
   cols: number,
@@ -339,7 +397,7 @@ export async function buildImagePreview(
         rows,
         imageId,
         fgColor: placeholderFgColor(imageId),
-        transmit: buildKittyTransmit(
+        transmit: await buildKittyTransmit(
           png,
           imageId,
           cols,
