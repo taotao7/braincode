@@ -7,12 +7,14 @@ import { isImageGenerationModel } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
 import { runtimeModelRequirementsForImages, runtimeModelRequirementsForRole, selectRuntimeModel, selectRuntimeModelWithApiKey, toPiModelSummary, type RuntimeModelRequirements, type RuntimePiModelSummary } from "./model-selection"
 import { createBraincodeAgentRuntime, recordAgentTokenUsage, requireAssistantText } from "./runtime-agent"
+import { deriveCompactionPolicy, type RuntimeCompactionPolicy } from "./compaction"
 
 export type RuntimeWorkerPlan = AgentWorkerPlan & {
   contextId: string
   model: BraincodeModel
   policy: ModelPolicy
   piModel: RuntimePiModelSummary
+  compaction?: RuntimeCompactionPolicy
 }
 
 export type RuntimePlan = {
@@ -38,6 +40,7 @@ export type RuntimePlan = {
   policy: ModelPolicy
   piModel: RuntimePiModelSummary
   toolExecution: "sequential" | "parallel"
+  compaction?: RuntimeCompactionPolicy
 }
 
 export type PlanRuntimeOptions = {
@@ -73,6 +76,7 @@ export function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainMod
     model: selection.configured,
     policy,
     piModel: toPiModelSummary(selection),
+    compaction: deriveCompactionPolicy(brain.context),
   }
 }
 
@@ -442,6 +446,7 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
     // Read-only tools fan out within a turn; state-changing tools self-serialize
     // via their executionMode. See createBraincodeAgentRuntime for the rationale.
     toolExecution: "parallel",
+    compaction: deriveCompactionPolicy(brain.context),
   }
 }
 

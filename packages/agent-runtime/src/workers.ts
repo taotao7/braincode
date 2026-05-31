@@ -239,6 +239,7 @@ export async function runWorkerFromPlan(
       toolEvidenceCache,
       getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
       onEvent,
+      compaction: worker.compaction,
     })
     const unlinkAbort = linkRuntimeAbort(runtime, signal)
 

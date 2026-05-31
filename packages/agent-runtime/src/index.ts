@@ -656,6 +656,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         onToolApproval: request.onToolApproval,
         permissionPolicy: toolConfig.permissions,
         onPermissionPolicyEvaluation,
+        compaction: plan.compaction,
       })
       mcpLoader.activeRuntimes.add(runtime)
       mcpLoader.refreshRuntimeTools(runtime)

@@ -12,6 +12,7 @@ import {
   type PermissionPolicyEvaluation,
 } from "@braincode/tools"
 import { ContextHandoffRequiredError, enforceHandoffContextBudget, isHandoffRequiredError } from "./context-budget"
+import { createRuntimeCompactor, type RuntimeCompactionPolicy } from "./compaction"
 import { wrapToolsWithEvidenceCache, type ToolEvidenceCache } from "./evidence-cache"
 import type { RuntimeModelSelection } from "./model-selection"
 
@@ -41,6 +42,9 @@ export type BraincodeAgentRuntimeOptions = {
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
   usage?: TokenUsageScope
+  // Soft, non-destructive context compaction applied before the byte-size
+  // handoff guard. When omitted, only the hard guard runs (legacy behavior).
+  compaction?: RuntimeCompactionPolicy
 }
 
 export type TokenUsageScope = {
@@ -86,6 +90,15 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
   const tools = options.toolEvidenceCache && options.tools
     ? wrapToolsWithEvidenceCache(options.tools, options.toolEvidenceCache)
     : options.tools ?? []
+  const compactor = options.compaction
+    ? createRuntimeCompactor({
+        policy: options.compaction,
+        model: piModel,
+        thinkingLevel: normalizeSummarizerThinkingLevel(options.model, options.policy),
+        getApiKey: options.getApiKey,
+        sessionId: options.sessionId,
+      })
+    : undefined
   const agent = new Agent({
     sessionId: options.sessionId,
     initialState: {
@@ -95,10 +108,15 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
       tools,
       messages: [],
     },
-    transformContext: async (messages) => enforceHandoffContextBudget(messages, {
-      systemPrompt: options.systemPrompt,
-      sessionId: options.sessionId,
-    }),
+    transformContext: async (messages, signal) => {
+      // Soft compaction reduces the message list sent this turn; the byte-size
+      // guard then enforces the hard provider-payload limit as a final backstop.
+      const compacted = compactor ? await compactor.transform(messages, signal) : messages
+      return enforceHandoffContextBudget(compacted, {
+        systemPrompt: options.systemPrompt,
+        sessionId: options.sessionId,
+      })
+    },
     getApiKey: options.getApiKey,
     onPayload: (payload, model) => {
       if (!isDebugEnabled()) return undefined
@@ -439,6 +457,14 @@ function safeStringify(value: unknown): string {
 function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolicy): ModelPolicy["thinkingLevel"] {
   if (model.baseUrl && policy.thinkingLevel === "minimal") return "low"
   return policy.thinkingLevel
+}
+
+// pi-ai's ThinkingLevel excludes "off"; the summarizer expects undefined when
+// thinking is disabled. Keep summary cost low by never inheriting "xhigh".
+function normalizeSummarizerThinkingLevel(model: BraincodeModel, policy: ModelPolicy): Exclude<ModelPolicy["thinkingLevel"], "off"> | undefined {
+  const level = normalizeRuntimeThinkingLevel(model, policy)
+  if (!level || level === "off") return undefined
+  return level === "xhigh" ? "high" : level
 }
 
 function formatDebugModelLabel(debugContext: Record<string, unknown>): string {
