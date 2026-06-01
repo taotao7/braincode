@@ -123,6 +123,8 @@ Supported targets: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Aft
 | --- | --- |
 | Missing API key | Run `braincode config`, or add the provider key to `~/.braincode/auth.json`. |
 | Image input requires vision model | Choose a vision-capable routeBrain/primary model in `braincode config`. |
+| Terminal image preview is blurry | Braincode falls back to text rendering when no native image protocol is available or tmux blocks passthrough. Kitty/Ghostty use `kitty`; Warp/iTerm2 use `iterm2`; otherwise `text` previews are lower fidelity. |
+| Terminal image preview is blank | In tmux, check `tmux show -g allow-passthrough`; `off` prevents native image escapes from reaching the terminal. Enable it with `tmux set -g allow-passthrough on`, or force a backend with `BRAINCODE_TUI_IMAGE_PROTOCOL=text|kitty|iterm2`. |
 | Empty assistant response | Set `BRAINCODE_DEBUG=true` and verify the model API type in `~/.braincode/models.json`. |
 | Context handoff required | Retry with a narrower task or include exact `@file` references so workers receive smaller context. |
 | Command blocked by permission mode | Use the TUI for approval, use `--yes` for non-denied commands, or update `tools.json`; deny rules cannot be bypassed. |

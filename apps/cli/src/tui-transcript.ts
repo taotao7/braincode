@@ -55,7 +55,8 @@ export function imageCaption(
   rows: number,
   protocol: ImageProtocol,
 ): string {
-  const tag = protocol === "kitty" ? "kitty" : "text";
+  const tag =
+    protocol === "kitty" ? "kitty" : protocol === "iterm2" ? "iterm2" : "text";
   return `${displayImagePath(path)} · ${cols}×${rows} cells · ${tag}`;
 }
 

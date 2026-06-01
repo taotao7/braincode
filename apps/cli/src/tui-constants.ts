@@ -37,8 +37,8 @@ export const RESTORED_TEXT_CHUNK_LINE_LIMIT = 12;
 export const RESTORED_TEXT_CHUNK_CHAR_LIMIT = 1800;
 export const TOOL_DETAIL_CHAR_LIMIT = 320;
 export const TRANSCRIPT_MOUSE_WHEEL_ROWS = 4;
-export const IMAGE_PREVIEW_MAX_COLS = 72;
-export const IMAGE_PREVIEW_MAX_ROWS = 12;
+export const IMAGE_PREVIEW_MAX_COLS = 160;
+export const IMAGE_PREVIEW_MAX_ROWS = 44;
 export const IMAGE_PREVIEW_MIN_COLS = 12;
 export const IMAGE_PREVIEW_MIN_ROWS = 4;
 export const IMAGE_PREVIEW_VIEWPORT_CHROME_ROWS = 4;
@@ -121,7 +121,7 @@ export const COMMANDS: CommandDefinition[] = [
   {
     name: "image",
     label: "/image",
-    hint: "Preview an image in the terminal (kitty/ghostty or text fallback)",
+    hint: "Preview an image in the terminal (kitty/iterm2 or text fallback)",
     insert: "/image ",
   },
   { name: "auto", label: "/auto", hint: "Switch execution mode to auto" },

@@ -119,6 +119,8 @@ curl -L https://github.com/taotao7/braincode/releases/latest/download/braincode-
 | --- | --- |
 | 缺少 API key | 运行 `braincode config`，或把 provider key 写入 `~/.braincode/auth.json`。 |
 | 图片输入要求 vision model | 在 `braincode config` 里给 routeBrain / primary 选择支持 vision 的模型。 |
+| 终端图片预览很糊 | 没有可用原生图片协议，或 tmux 阻止协议透传时，Braincode 会回退到文本渲染。Kitty/Ghostty 使用 `kitty`；Warp/iTerm2 使用 `iterm2`；否则 `text` 预览清晰度较低是预期行为。 |
+| 终端图片预览空白 | 在 tmux 里检查 `tmux show -g allow-passthrough`；如果是 `off`，原生图片 escape 到不了终端。可以运行 `tmux set -g allow-passthrough on`，或用 `BRAINCODE_TUI_IMAGE_PROTOCOL=text|kitty|iterm2` 强制后端。 |
 | assistant 返回空内容 | 设置 `BRAINCODE_DEBUG=true`，并检查 `~/.braincode/models.json` 里的模型 API 类型。 |
 | 需要 context handoff | 缩小任务范围，或用明确的 `@file` 引用减少 worker 上下文。 |
 | 命令被权限模式阻止 | 用 TUI 审批，非交互模式用 `--yes`；策略 deny 命中的命令不能绕过。 |

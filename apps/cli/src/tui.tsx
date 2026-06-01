@@ -58,6 +58,7 @@ import {
 } from "./tool-edit-preview";
 import { moveDraftCursorVertically } from "./input-cursor";
 import { buildImagePreview } from "./image-preview";
+import { isExistingImageFile, resolveImagePromptPath } from "./image-path";
 import type {
   BrainPanelState,
   BraincodeTuiProps,
@@ -637,6 +638,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
           imageLines: preview.lines,
           imageCols: preview.cols,
           imageRows: preview.rows,
+          imageProtocol: preview.protocol,
           text: imageCaption(path, preview.cols, preview.rows, preview.protocol),
         });
         if (shouldStickToBottom) scrollTranscriptTo("bottom");
@@ -944,7 +946,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
         showTheme(argument);
         return true;
       case "image":
-        showImagePreview(argument);
+        void showImagePreview(argument);
         return true;
       case "auto":
         void switchMode("auto");
@@ -1772,20 +1774,32 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     });
   }
 
-  function showImagePreview(argument: string) {
-    const path = argument.trim().replace(/^["']|["']$/g, "");
-    if (!path) {
+  async function showImagePreview(argument: string) {
+    const rawPath = argument.trim();
+    if (!rawPath) {
       appendItem({
         kind: "error",
         text: "Usage: /image <path-to-image>",
       });
       return;
     }
-    const resolved = path.startsWith("~")
-      ? join(homedir(), path.slice(1))
-      : isAbsolute(path)
-        ? path
-        : join(projectRoot, path);
+
+    const parsedPath = resolveImagePromptPath(rawPath, projectRoot);
+    const path = parsedPath ?? rawPath.replace(/^["']|["']$/g, "");
+    const resolved =
+      parsedPath ??
+      (path.startsWith("~")
+        ? join(homedir(), path.slice(1))
+        : isAbsolute(path)
+          ? path
+          : join(projectRoot, path));
+    if (!(await isExistingImageFile(resolved))) {
+      appendItem({
+        kind: "error",
+        text: `Image not found: ${displayImagePath(resolved)}`,
+      });
+      return;
+    }
     appendImagePreview(resolved);
   }
 
@@ -2084,6 +2098,29 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
   ) {
     const trimmed = prompt.trim();
     if (!trimmed) return;
+
+    if (
+      !trimmed.startsWith("/") &&
+      !options.skipCommand &&
+      !options.forceRoles?.length
+    ) {
+      const directImagePath = resolveImagePromptPath(trimmed, projectRoot);
+      if (directImagePath) {
+        const displayText = options.displayText ?? trimmed;
+        applyDraftChange("");
+        scrollTranscriptTo("bottom");
+        appendItem({ kind: "user", text: displayText });
+        if (await isExistingImageFile(directImagePath)) {
+          appendImagePreview(directImagePath);
+        } else {
+          appendItem({
+            kind: "error",
+            text: `Image not found: ${displayImagePath(directImagePath)}`,
+          });
+        }
+        return;
+      }
+    }
 
     if (running) {
       enqueueTask(trimmed, options);

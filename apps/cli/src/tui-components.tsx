@@ -448,7 +448,7 @@ export function ImagePreviewView({ item }: { item: TranscriptItem }) {
   }
   // Image lines embed their own SGR. For Kitty this is required because the
   // placeholder foreground color encodes the image id and must not be stripped
-  // or quantized by Ink/Chalk color handling.
+  // by NO_COLOR or quantized by Ink/Chalk color handling.
   return (
     <Box flexDirection="column">
       {item.imageLines.map((line, index) => (

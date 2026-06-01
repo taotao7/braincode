@@ -9,12 +9,9 @@
 // truecolor half-block rendering, which is pure text + SGR and therefore
 // survives tmux and any VT100-ish terminal.
 
-import { spawn } from "node:child_process"
-import { unlink, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { spawn, spawnSync } from "node:child_process"
 
-export type ImageProtocol = "kitty" | "halfblock"
+export type ImageProtocol = "kitty" | "iterm2" | "halfblock"
 
 export type ImagePreview = {
   protocol: ImageProtocol
@@ -23,8 +20,8 @@ export type ImagePreview = {
   // For "kitty": the APC upload sequence to write to stdout exactly once.
   transmit?: string
   // The text lines to place in the transcript. For "kitty" these are
-  // SGR-colored placeholder glyphs that encode the image id in foreground color;
-  // for "halfblock" they are SGR-colored half blocks rendered as-is.
+  // SGR-colored placeholder glyphs that encode the image id in foreground
+  // color; for "halfblock" they are SGR-colored half blocks rendered as-is.
   lines: string[]
   imageId?: number
 }
@@ -49,10 +46,49 @@ export type TerminalCapability = {
   multiplexed: boolean
 }
 
-// Decide which image backend the current terminal supports. Mirrors yazi's
-// env-driven adapter selection ($TERM / $TERM_PROGRAM). Kitty and Ghostty
-// implement the Kitty Graphics Protocol including Unicode placeholders;
-// everything else gets the half-block text fallback.
+function requestedImageProtocol(env: NodeJS.ProcessEnv): ImageProtocol | "auto" {
+  const value = (env.BRAINCODE_TUI_IMAGE_PROTOCOL ?? "").trim().toLowerCase()
+  if (value === "kitty") return "kitty"
+  if (value === "iterm2" || value === "iterm" || value === "imgcat") {
+    return "iterm2"
+  }
+  if (value === "auto") return "auto"
+  if (value === "text" || value === "halfblock" || value === "half-block") {
+    return "halfblock"
+  }
+  return "auto"
+}
+
+function truthyEnv(value: string | undefined): boolean | null {
+  if (!value) return null
+  const normalized = value.trim().toLowerCase()
+  if (["1", "true", "yes", "on", "all"].includes(normalized)) return true
+  if (["0", "false", "no", "off"].includes(normalized)) return false
+  return null
+}
+
+function tmuxAllowsPassthrough(env: NodeJS.ProcessEnv): boolean {
+  const override = truthyEnv(env.BRAINCODE_TUI_TMUX_PASSTHROUGH)
+  if (override !== null) return override
+
+  try {
+    const result = spawnSync("tmux", ["show", "-gqv", "allow-passthrough"], {
+      encoding: "utf8",
+      env: env as NodeJS.ProcessEnv,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 200,
+    })
+    if (result.status !== 0) return false
+    return truthyEnv(result.stdout) === true
+  } catch {
+    return false
+  }
+}
+
+// Decide which image backend to use. Kitty/Ghostty get Kitty Graphics Protocol;
+// Warp/iTerm2 get the iTerm2 inline image protocol; plain terminals get text.
+// BRAINCODE_TUI_IMAGE_PROTOCOL=text|kitty|iterm2 can force a backend for
+// diagnostics.
 export function detectTerminalCapability(
   env: NodeJS.ProcessEnv = process.env,
 ): TerminalCapability {
@@ -60,6 +96,9 @@ export function detectTerminalCapability(
   const termProgram = (env.TERM_PROGRAM ?? "").toLowerCase()
   const multiplexed =
     Boolean(env.TMUX) || term.startsWith("tmux") || term.startsWith("screen")
+  const requested = requestedImageProtocol(env)
+  if (requested !== "auto") return { protocol: requested, multiplexed }
+
   const supportsKitty =
     Boolean(env.KITTY_WINDOW_ID) ||
     Boolean(env.GHOSTTY_RESOURCES_DIR) ||
@@ -68,8 +107,19 @@ export function detectTerminalCapability(
     term.includes("ghostty") ||
     termProgram.includes("ghostty") ||
     termProgram.includes("kitty")
+  const supportsIterm2 =
+    Boolean(env.ITERM_SESSION_ID) ||
+    Boolean(env.WARP_SESSION_ID) ||
+    Boolean(env.WARP_TERMINAL) ||
+    termProgram.includes("iterm") ||
+    termProgram.includes("warp") ||
+    termProgram.includes("wezterm") ||
+    termProgram.includes("hyper")
+  if ((supportsKitty || supportsIterm2) && multiplexed && !tmuxAllowsPassthrough(env)) {
+    return { protocol: "halfblock", multiplexed }
+  }
   return {
-    protocol: supportsKitty ? "kitty" : "halfblock",
+    protocol: supportsKitty ? "kitty" : supportsIterm2 ? "iterm2" : "halfblock",
     multiplexed,
   }
 }
@@ -195,22 +245,10 @@ function wrapForMultiplexer(sequence: string): string {
   return `${ESC}Ptmux;${escaped}${ESC}\\`
 }
 
-// Build the Kitty Graphics Protocol upload. Rather than streaming the PNG
-// inline as dozens of base64 chunks — which, under tmux, must each be wrapped
-// in DCS passthrough and is prone to partial delivery (the image then decodes
-// only its top scanlines) — we write the PNG to a temporary file and transmit
-// just its path. This is a single short escape regardless of image size, the
-// approach yazi uses for robustness under multiplexers.
-//
-// t=t = temporary file: the terminal reads the pixel data then deletes the
-// file itself. Kitty/Ghostty only honor this when the path lives in a known
-// temp dir AND contains the literal string `tty-graphics-protocol`, so the
-// filename is constructed accordingly. U=1 anchors a virtual placement to the
-// Unicode placeholders; q=2 suppresses responses; c/r size it in cells.
-//
-// We still keep the file around briefly as a fallback target and best-effort
-// delete it after a short delay in case the terminal could not (e.g. an older
-// build, or the path safety check failing).
+// Build the Kitty Graphics Protocol upload: transmit the PNG (base64, chunked)
+// with a virtual placement (U=1) so it is anchored to Unicode placeholders
+// rather than the cursor. The first chunk carries the placement dimensions;
+// continuation chunks carry only `m`.
 async function buildKittyTransmit(
   png: Buffer,
   imageId: number,
@@ -218,48 +256,6 @@ async function buildKittyTransmit(
   rows: number,
   multiplexed: boolean,
 ): Promise<string> {
-  const filePath = await writeGraphicsTempFile(png, imageId)
-  if (!filePath) {
-    // Could not stage a temp file; fall back to inline chunked transfer.
-    return buildKittyTransmitInline(png, imageId, cols, rows, multiplexed)
-  }
-  const encodedPath = Buffer.from(filePath, "utf8").toString("base64")
-  const control = `a=T,U=1,q=2,f=100,t=t,i=${imageId},c=${cols},r=${rows}`
-  const apc = `${ESC}_G${control};${encodedPath}${ESC}\\`
-  return multiplexed ? wrapForMultiplexer(apc) : apc
-}
-
-// Stage the PNG in a temp file whose path satisfies the Kitty `t=t` safety
-// rules (lives under the system temp dir and contains the magic substring).
-// Returns null if the write fails so the caller can fall back to inline data.
-async function writeGraphicsTempFile(
-  png: Buffer,
-  imageId: number,
-): Promise<string | null> {
-  const name = `tty-graphics-protocol-braincode-${process.pid}-${imageId}-${Date.now()}.png`
-  const filePath = join(tmpdir(), name)
-  try {
-    await writeFile(filePath, png)
-  } catch {
-    return null
-  }
-  // The terminal deletes the file once it has read the pixels (t=t). Schedule
-  // a best-effort cleanup in case it does not, without blocking rendering.
-  setTimeout(() => {
-    void unlink(filePath).catch(() => {})
-  }, 10_000).unref?.()
-  return filePath
-}
-
-// Inline fallback: transmit the PNG (base64, chunked) with a virtual placement
-// (U=1). Used only when a temp file cannot be staged.
-function buildKittyTransmitInline(
-  png: Buffer,
-  imageId: number,
-  cols: number,
-  rows: number,
-  multiplexed: boolean,
-): string {
   const payload = png.toString("base64")
   const chunkSize = 4096
   const parts: string[] = []
@@ -287,11 +283,13 @@ function diacritic(index: number): string {
   return DIACRITICS[index] ?? DIACRITICS[DIACRITICS.length - 1] ?? ""
 }
 
-// Encode the image id into an explicit truecolor SGR foreground. Kitty reads
-// the cell's 24-bit fg color as the image id for Unicode placeholders. This
-// must not go through Ink/Chalk color props: NO_COLOR or color-level detection
-// can strip or quantize the color, leaving invisible placeholders with no image.
+// Encode the image id into an explicit foreground SGR. Kitty/Ghostty read the
+// cell foreground as the image id for Unicode placeholders. Prefer indexed
+// color for ids <= 255: it survives tmux color handling much more reliably than
+// near-black truecolor values such as 38;2;0;0;1.
 function placeholderColorSgr(imageId: number): string {
+  if (imageId >= 1 && imageId <= 255) return `${ESC}[38;5;${imageId}m`
+
   const r = (imageId >> 16) & 0xff
   const g = (imageId >> 8) & 0xff
   const b = imageId & 0xff
@@ -319,6 +317,32 @@ function buildPlaceholderLines(
     lines.push(line)
   }
   return lines
+}
+
+function buildIterm2ImageLines(
+  png: Buffer,
+  imageName: string,
+  cols: number,
+  rows: number,
+  multiplexed: boolean,
+): string[] {
+  const encodedName = Buffer.from(imageName, "utf8").toString("base64")
+  const payload = png.toString("base64")
+  const control = [
+    "File=inline=1",
+    `width=${cols}`,
+    `height=${rows}`,
+    "preserveAspectRatio=1",
+    `size=${png.length}`,
+    `name=${encodedName}`,
+  ].join(";")
+  const osc = `${ESC}]1337;${control}:${payload}\x07`
+  const line = multiplexed ? wrapForMultiplexer(osc) : osc
+
+  // Ink does not understand the visual height of terminal image escapes. Keep
+  // a blank grid behind the inline image so transcript layout and scrolling
+  // reserve the same number of terminal rows as the image itself.
+  return [line, ...Array.from({ length: Math.max(0, rows - 1) }, () => " ")]
 }
 
 // Render the image as truecolor half-block text. Each cell uses the upper
@@ -366,6 +390,12 @@ function buildHalfBlockLines(
 
 let nextImageId = 1
 
+function allocateImageId(): number {
+  const imageId = nextImageId
+  nextImageId = nextImageId >= 255 ? 1 : nextImageId + 1
+  return imageId
+}
+
 // Build a renderable preview for an image file, sized to fit within
 // maxCols×maxRows terminal cells. Returns null only when the file cannot be
 // read at all; otherwise always yields something paintable (KGP on capable
@@ -391,7 +421,7 @@ export async function buildImagePreview(
     // Upload at roughly one source pixel per drawn pixel: cell ~10x20 px.
     const png = await resizePng(path, cols * 10, rows * 20)
     if (png) {
-      const imageId = nextImageId++
+      const imageId = allocateImageId()
       return {
         protocol: "kitty",
         cols,
@@ -405,6 +435,24 @@ export async function buildImagePreview(
           capability.multiplexed,
         ),
         lines: buildPlaceholderLines(cols, rows, imageId),
+      }
+    }
+  }
+
+  if (capability.protocol === "iterm2") {
+    const png = await resizePng(path, cols * 10, rows * 20)
+    if (png) {
+      return {
+        protocol: "iterm2",
+        cols,
+        rows,
+        lines: buildIterm2ImageLines(
+          png,
+          path.split("/").at(-1) ?? "image.png",
+          cols,
+          rows,
+          capability.multiplexed,
+        ),
       }
     }
   }

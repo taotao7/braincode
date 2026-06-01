@@ -105,15 +105,15 @@ test("user transcript rows are left aligned with continuation indentation", () =
 
 test("image preview bounds are stable and fit inside transcript viewports", () => {
   expect(__test.imagePreviewBounds(160, 60, 30)).toEqual({
-    maxCols: 72,
-    maxRows: 12,
+    maxCols: 156,
+    maxRows: 26,
   });
   expect(__test.imagePreviewBounds(160, 60, 10)).toEqual({
-    maxCols: 72,
+    maxCols: 156,
     maxRows: 6,
   });
   expect(__test.imagePreviewBounds(160, 24, 0)).toEqual({
-    maxCols: 72,
+    maxCols: 156,
     maxRows: 6,
   });
 });
