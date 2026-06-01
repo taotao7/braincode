@@ -187,6 +187,7 @@ Supprimés dans cette release : `coding`, `fastReply`, `research`. Les configs u
 - [Architecture](./docs/architecture.md) — architecture principale, conception du Brain Model, isolation du contexte, intégration Pi, service de configuration local (anglais uniquement).
 - [Gestion du contexte](./docs/context-management.fr.md) — isolation Brain / worker, packets handoff / result, références de prompt, JSONL de session.
 - [Communication entre agents](./docs/agent-communication.fr.md) — cycle de vie des workers, routage, hooks, événements runtime, exécutions multi-agents.
+- [Review and audit](./docs/review-and-audit.md) — gates de review, décisions de permission, review patch/check et audit de session (anglais uniquement).
 - [Project structure and plan](./docs/project-structure.md) — disposition du workspace, responsabilités des paquets, jalons (anglais uniquement).
 - [Visual style](./docs/visual-style.md) — direction UI / marque (anglais uniquement).
 - [References](./docs/references.md) — matériaux de référence Amp / Pi utilisés pour les décisions de conception (anglais uniquement).

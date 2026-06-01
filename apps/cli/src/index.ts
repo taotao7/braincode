@@ -189,6 +189,9 @@ export function formatRunReport(report: FinalReport): string {
   const review = report.review
     ? `${report.review.decision}${report.review.confidence !== undefined ? ` (${Math.round(report.review.confidence * 100)}%)` : ""}`
     : "not run"
+  const planReview = report.planReview
+    ? `${report.planReview.status} by ${report.planReview.approver} (${report.planReview.proposedSideEffects.length} side effect${report.planReview.proposedSideEffects.length === 1 ? "" : "s"}${report.planReview.requiredReview ? ", review required" : ""})`
+    : "not recorded"
   const usage = formatFinalReportUsageLine(report)
   const warnings = report.warnings.length > 0
     ? ["", "Warnings:", ...report.warnings.map((warning) => `- ${warning}`)]
@@ -206,6 +209,7 @@ export function formatRunReport(report: FinalReport): string {
     `Workers: ${workers}`,
     `Patch: ${patch}`,
     `Checks: ${checks}`,
+    `Plan Review: ${planReview}`,
     `Review: ${review}`,
     ...(usage ? [`Usage: ${usage}`] : []),
     `Session: ${report.sessionId}`,
@@ -232,13 +236,13 @@ function formatCompactCount(value: number): string {
 
 function createRunApprovalHandler(mode: "yes" | "allow-edits") {
   return (request: ToolApprovalRequest): ToolApprovalDecision => {
-    if (mode === "yes") return { approved: true, reason: "auto-approved by --yes" }
+    if (mode === "yes") return { approved: true, reason: "auto-approved by --yes", approver: "mode_policy" }
     if (isExecuteToolName(request.toolName)) {
-      return { approved: false, reason: "Command execution is blocked by --allow-edits; use --yes or the TUI to allow commands." }
+      return { approved: false, reason: "Command execution is blocked by --allow-edits; use --yes or the TUI to allow commands.", approver: "runtime_policy" }
     }
-    if (localWriteToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local file edit by --allow-edits" }
-    if (localReadOnlyToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local read-only tool call by --allow-edits" }
-    return { approved: false, reason: `Tool ${request.toolName} is not auto-approved by --allow-edits; use --yes or the TUI to allow it.` }
+    if (localWriteToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local file edit by --allow-edits", approver: "runtime_policy" }
+    if (localReadOnlyToolNames.has(request.toolName)) return { approved: true, reason: "auto-approved local read-only tool call by --allow-edits", approver: "runtime_policy" }
+    return { approved: false, reason: `Tool ${request.toolName} is not auto-approved by --allow-edits; use --yes or the TUI to allow it.`, approver: "runtime_policy" }
   }
 }
 

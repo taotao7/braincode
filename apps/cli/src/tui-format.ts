@@ -86,6 +86,7 @@ export function formatTuiFinalReportCompact(report: FinalReport): string {
     `${report.routing.source} → ${report.routing.primaryRole}`,
     `patch ${formatFinalReportPatchLabel(report)}`,
     `checks ${formatFinalReportChecksLabel(report)}`,
+    report.planReview ? `plan ${formatFinalReportPlanReviewLabel(report)}` : "",
     `review ${formatFinalReportReviewLabel(report)}`,
     report.metrics ? `usage ${formatFinalReportUsageLabel(report)}` : "",
     `session ${report.sessionId.slice(0, 8)}`,
@@ -110,6 +111,12 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
   lines.push(`Checks: ${formatFinalReportChecksLabel(report)}`);
   if (report.checks?.results.length) {
     lines.push(`Check details: ${report.checks.results.map((result) => `${result.name} ${result.status}`).join(", ")}`);
+  }
+  if (report.planReview) {
+    lines.push(`Plan review: ${formatFinalReportPlanReviewLabel(report)}`);
+    if (report.planReview.proposedSideEffects.length) {
+      lines.push(`Planned side effects: ${report.planReview.proposedSideEffects.map((effect) => `${effect.kind}:${effect.target}`).slice(0, 4).join(", ")}${report.planReview.proposedSideEffects.length > 4 ? `, +${report.planReview.proposedSideEffects.length - 4} more` : ""}`);
+    }
   }
   lines.push(`Review: ${formatFinalReportReviewLabel(report)}`);
   if (report.metrics) {
@@ -138,6 +145,12 @@ export function formatTuiFinalReportSections(report: FinalReport): string[] {
 export function formatFinalReportReviewLabel(report: FinalReport): string {
   if (!report.review) return "not run";
   return `${report.review.decision}${report.review.confidence !== undefined ? ` (${Math.round(report.review.confidence * 100)}%)` : ""}`;
+}
+
+export function formatFinalReportPlanReviewLabel(report: FinalReport): string {
+  if (!report.planReview) return "not recorded";
+  const sideEffects = report.planReview.proposedSideEffects.length;
+  return `${report.planReview.status} by ${report.planReview.approver} · ${sideEffects} side effect${sideEffects === 1 ? "" : "s"}${report.planReview.requiredReview ? " · review required" : ""}`;
 }
 
 export function formatFinalReportPatchLabel(report: FinalReport): string {

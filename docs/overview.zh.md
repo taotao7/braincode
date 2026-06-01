@@ -7,6 +7,7 @@
 - [Architecture](./architecture.md) — 设计意图、模式、Pi 集成、配置布局。
 - [上下文管理](./context-management.zh.md) — Brain 与 worker 上下文如何隔离、有哪些东西可以越过边界。
 - [Agent 通信](./agent-communication.zh.md) — handoff/result 协议、worker 生命周期、运行时事件。
+- [Review and audit](./review-and-audit.md) — 执行前后 review gate、权限决策和 session 审计记录（仅英文）。
 - [Project structure and plan](./project-structure.md) — 工作区布局、各包职责、实现状态。
 - [Visual style](./visual-style.md) — UI / 品牌方向。
 

@@ -192,6 +192,7 @@ harness 暴露 **15 个角色**，整体以角色（专业人设）为主，并�
 - [Architecture](./docs/architecture.md) —— 主系统架构、Brain Model 设计、上下文隔离、Pi 集成、本地配置服务（仅英文）。
 - [上下文管理](./docs/context-management.zh.md) —— Brain / worker 隔离、handoff / result packet、prompt 引用、session JSONL。
 - [Agent 通信](./docs/agent-communication.zh.md) —— worker 生命周期、路由、hook、运行时事件、多 agent 运行。
+- [Review and audit](./docs/review-and-audit.md) —— review gate、权限决策、patch/check review、session 审计记录（仅英文）。
 - [Project structure and plan](./docs/project-structure.md) —— 工作区布局、各包职责、里程碑（仅英文）。
 - [Visual style](./docs/visual-style.md) —— UI / 品牌方向（仅英文）。
 - [References](./docs/references.md) —— 设计决策参考的 Amp / Pi 资料（仅英文）。

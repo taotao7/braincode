@@ -2,10 +2,11 @@
 
 This document is the main architecture reference for Braincode.
 
-For contributors, two companion docs go deeper on the trickiest parts:
+For contributors, companion docs go deeper on the trickiest parts:
 
 - [Context management](./context-management.md) — how Brain and worker contexts stay isolated, packet shapes, prompt references, session JSONL.
 - [Agent communication](./agent-communication.md) — worker lifecycle, routing, hooks, runtime events, multi-agent runs.
+- [Review and audit](./review-and-audit.md) — pre-execution review gates, permission decisions, patch/check review, and the session audit trail.
 
 If you are new to the codebase, start with [Overview](./overview.md).
 

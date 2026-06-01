@@ -7,6 +7,7 @@ Ceci est la carte de haut niveau du code Braincode. Lisez d'abord ce document ; 
 - [Architecture](./architecture.md) — intention de conception, modes, intégration Pi, disposition de la configuration.
 - [Gestion du contexte](./context-management.fr.md) — comment les contextes Brain et worker sont isolés et ce qui traverse la frontière.
 - [Communication entre agents](./agent-communication.fr.md) — protocole handoff/result, cycle de vie des workers, événements runtime.
+- [Review and audit](./review-and-audit.md) — gates de review avant/après exécution, décisions de permission et audit de session (anglais uniquement).
 - [Project structure and plan](./project-structure.md) — disposition de l'espace de travail, responsabilités des paquets, état d'implémentation.
 - [Visual style](./visual-style.md) — direction UI / marque.
 

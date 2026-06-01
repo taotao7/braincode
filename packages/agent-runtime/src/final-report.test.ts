@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { buildFinalReport, resolveFinalReportStatus, type FinalReportRuntimePlan } from "./final-report"
+import type { ExecutionPlanReviewRecord } from "./execution-plan-review"
 
 function testPlan(overrides: Partial<FinalReportRuntimePlan> = {}): FinalReportRuntimePlan {
   return {
@@ -33,6 +34,7 @@ test("buildFinalReport uses runtime facts for routing, todos, workers, and model
     modelSummary: "Changed validation and ran tests.",
     patch: patchSummary(),
     checks: { status: "passed", results: [] },
+    planReview: planReviewRecord(),
     review: approvedReview(),
     metrics: {
       tokens: {
@@ -73,9 +75,44 @@ test("buildFinalReport uses runtime facts for routing, todos, workers, and model
   expect(report.modelSummary).toBe("Changed validation and ran tests.")
   expect(report.metrics?.tokens.total.total).toBe(140)
   expect(report.metrics?.toolCalls.total).toBe(3)
+  expect(report.planReview).toMatchObject({
+    status: "approved",
+    approver: "runtime_policy",
+    requiredReview: true,
+    validationChecks: ["smart package-script selection"],
+  })
   expect(report.warnings).toEqual([])
   expect(JSON.parse(JSON.stringify(report)).sessionId).toBe("session-1")
 })
+
+function planReviewRecord(): ExecutionPlanReviewRecord {
+  return {
+    type: "execution_plan_review",
+    planId: "session-1:plan",
+    sessionId: "session-1",
+    brainTaskId: "session-1",
+    mode: "auto",
+    status: "approved",
+    approver: "runtime_policy",
+    rationale: "allowed",
+    brain: { id: "brain", name: "Brain", description: "Test brain" },
+    primaryRole: "backend",
+    routing: { source: "router-brain", confidence: 0.8, reason: "backend change" },
+    requiredReview: true,
+    workers: [],
+    todos: [],
+    dependencies: [],
+    promptReferences: [],
+    proposedSideEffects: [{ kind: "file_edit", target: "project files via edit_file", risk: "medium" }],
+    validationPlan: {
+      checks: ["smart package-script selection"],
+      evidence: ["changed file summary"],
+      successCriteria: ["Implement fix"],
+    },
+    riskTriggers: ["project file mutation exposed"],
+    residualPreExecutionRisks: [],
+  }
+}
 
 test("resolveFinalReportStatus makes failed checks override review approval", () => {
   const status = resolveFinalReportStatus({

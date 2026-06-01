@@ -7,6 +7,7 @@ This is the high-level map of the Braincode codebase. Read this first; the deepe
 - [Architecture](./architecture.md) — design intent, modes, Pi integration, configuration layout.
 - [Context management](./context-management.md) — how Brain and worker contexts are isolated and what crosses the boundary.
 - [Agent communication](./agent-communication.md) — handoff/result protocol, worker lifecycle, runtime events.
+- [Review and audit](./review-and-audit.md) — review gates before and after execution, permission decisions, and session audit records.
 - [Project structure and plan](./project-structure.md) — workspace layout, package responsibilities, implementation status.
 - [Visual style](./visual-style.md) — UI/brand direction.
 

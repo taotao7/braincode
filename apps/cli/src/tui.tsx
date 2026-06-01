@@ -2646,17 +2646,18 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
         !policyRequiresDecision &&
         !requiresToolDecision(toolCategory, request.toolName, request.args)
       )
-        return { approved: true };
+        return { approved: true, approver: "runtime_policy" };
       const policySummary = formatPermissionPolicySummary(
         request.permissionPolicy,
       );
       if (approvalMode === "radical") {
-        return { approved: true, reason: "auto-approved in radical mode" };
+        return { approved: true, reason: "auto-approved in radical mode", approver: "mode_policy" };
       }
       if (sessionApprovedToolPrompts.current.has(sessionId)) {
         return {
           approved: true,
           reason: `auto-approved for current session ${sessionId.slice(0, 8)}`,
+          approver: "human",
         };
       }
       try {
@@ -2669,7 +2670,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
             configuredTools,
           )
         ) {
-          return { approved: true };
+          return { approved: true, approver: "runtime_policy" };
         }
       } catch (error) {
         appendItemRaw({
@@ -3142,9 +3143,10 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     const resolve = pendingDecisionResolve.current;
     pendingDecisionResolve.current = null;
     resolve?.({
-      approved,
-      reason: approved
-        ? undefined
+          approved,
+          approver: "human",
+          reason: approved
+            ? undefined
         : `User blocked tool call: ${decisionPanel.toolName}`,
     });
   }

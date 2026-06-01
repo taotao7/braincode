@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
@@ -597,6 +597,54 @@ test("createBraincodeAgentRuntime includes permission policy context in approval
   })
 })
 
+test("createBraincodeAgentRuntime records tool approval decisions", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-tool-approval-audit-"))
+  try {
+    const runtime = createBraincodeAgentRuntime({
+      mode: "auto",
+      systemPrompt: "test",
+      model: {
+        id: "custom/fast",
+        provider: "custom",
+        modelId: "fast",
+        name: "Fast",
+        api: "openai-responses",
+        baseUrl: "http://localhost:9999/v1",
+        contextWindow: 128000,
+        supportsTools: true,
+      },
+      policy: { modelId: "custom/fast", thinkingLevel: "low" },
+      onToolApproval: () => ({ approved: true, reason: "ok", approver: "human" }),
+      audit: { sessionId: "tool-approval-audit", home, phase: "primary", role: "backend", taskId: "task-1", parentId: "root-1", attempt: 1 },
+    })
+
+    const decision = await runtime.agent.beforeToolCall?.({
+      toolCall: { id: "tool-call-1", name: "edit_file" },
+      args: { path: "src/index.ts", content: "x" },
+    } as never)
+
+    expect(decision).toBeUndefined()
+    const paths = await ensureBraincodeHome(home)
+    const records = (await readFile(join(paths.sessions, "tool-approval-audit.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(records[0]).toMatchObject({
+      type: "tool_approval_decision",
+      toolCallId: "tool-call-1",
+      toolName: "edit_file",
+      decision: "approved",
+      approver: "human",
+      phase: "primary",
+      role: "backend",
+      taskId: "task-1",
+      parentId: "root-1",
+    })
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", async () => {
   let calls = 0
   const runtime = createBraincodeAgentRuntime({
@@ -875,6 +923,7 @@ test("runPatchChecks supports configured script selection and disabled checks", 
 
 test("runPatchChecksWithApproval skips command execution when approval is denied", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-approval-test-"))
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-checks-approval-home-"))
   try {
     await Bun.write(join(projectRoot, "package.json"), JSON.stringify({
       scripts: {
@@ -886,7 +935,8 @@ test("runPatchChecksWithApproval skips command execution when approval is denied
       mode: "auto",
       sessionId: "approval-test",
       attempt: 1,
-      onToolApproval: () => ({ approved: false, reason: "no commands" }),
+      onToolApproval: () => ({ approved: false, reason: "no commands", approver: "human" }),
+      audit: { sessionId: "approval-test", home, phase: "primary", role: "backend", attempt: 1 },
     })
 
     expect(skipped.status).toBe("skipped")
@@ -897,13 +947,25 @@ test("runPatchChecksWithApproval skips command execution when approval is denied
       mode: "auto",
       sessionId: "approval-test",
       attempt: 2,
-      onToolApproval: () => ({ approved: true }),
+      onToolApproval: () => ({ approved: true, approver: "human" }),
+      audit: { sessionId: "approval-test", home, phase: "primary", role: "backend", attempt: 2 },
     })
 
     expect(passed.status).toBe("passed")
     await expect(Bun.file(join(projectRoot, "ran.txt")).exists()).resolves.toBe(true)
+    const paths = await ensureBraincodeHome(home)
+    const records = (await readFile(join(paths.sessions, "approval-test.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(records.filter((record) => record.type === "tool_approval_decision").map((record) => [record.decision, record.approver])).toEqual([
+      ["blocked", "human"],
+      ["approved", "human"],
+    ])
+    expect(records.filter((record) => record.type === "tool_execution_summary").map((record) => record.event)).toEqual(["start", "end"])
   } finally {
     await rm(projectRoot, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
   }
 })
 
@@ -1691,6 +1753,71 @@ test("executePromptFromConfig pauses before workers when intent needs clarificat
       "plan-first",
       "provide-details",
     ])
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("executePromptFromConfig records execution plan review before write-capable provider execution", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-plan-review-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-plan-review-project-"))
+  const sessionId = "plan-review-test"
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom",
+            modelId: "text",
+            name: "Text",
+            api: "openai-responses",
+            baseUrl: "http://127.0.0.1:9/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(createTestBrainDocument("custom/text"), home)
+    await writeProviderApiKey("custom", "test-key", home)
+
+    await expect(executePromptFromConfig({
+      prompt: "hello",
+      sessionId,
+      projectRoot,
+      forceRoles: ["rush"],
+      localToolMode: "read-write",
+      onToolApproval: () => ({ approved: true }),
+      mcpLoadingStrategy: "eager",
+      mcpStartupBudgetMs: 0,
+    }, home)).rejects.toThrow()
+
+    const paths = await ensureBraincodeHome(home)
+    const records = (await readFile(join(paths.sessions, `${sessionId}.jsonl`), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const reviewIndex = records.findIndex((record) => record.type === "execution_plan_review")
+    const runStartIndex = records.findIndex((record) => record.type === "run_start")
+    const reviewRecord = records[reviewIndex]
+
+    expect(reviewIndex).toBeGreaterThanOrEqual(0)
+    expect(runStartIndex).toBeGreaterThan(reviewIndex)
+    expect(reviewRecord.status).toBe("approved")
+    expect(reviewRecord.proposedSideEffects.map((effect: { kind: string }) => effect.kind)).toEqual(["file_edit", "patch"])
+    expect(reviewRecord.validationPlan.checks).toEqual(["smart package-script selection"])
   } finally {
     await rm(home, { recursive: true, force: true })
     await rm(projectRoot, { recursive: true, force: true })

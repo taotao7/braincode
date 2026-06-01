@@ -44,7 +44,7 @@ export { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifa
 export type { ImageMakerWorkerPlan, ImageMakerWorkerResult } from "./image-maker"
 import { buildFinalReport, type FinalReport } from "./final-report"
 export { buildFinalReport, resolveFinalReportStatus } from "./final-report"
-export type { BuildFinalReportInput, FinalReport, FinalReportStatus } from "./final-report"
+export type { BuildFinalReportInput, FinalReport, FinalReportPlanReview, FinalReportStatus } from "./final-report"
 import { createBraincodeAgentRuntime, createRunAbortedError, linkRuntimeAbort, recordAgentTokenUsage, recordAutomaticHandoffIfNeeded, requireAssistantText, throwIfRunAborted, type ToolApprovalDecision, type ToolApprovalRequest } from "./runtime-agent"
 export { createBraincodeAgentRuntime, extractAssistantText, requireAssistantText } from "./runtime-agent"
 export type { BraincodeAgentRuntime, BraincodeAgentRuntimeOptions, TokenUsageScope, ToolApprovalDecision, ToolApprovalRequest } from "./runtime-agent"
@@ -63,6 +63,12 @@ export type { DispatchSpecialistTool, DispatchSpecialistToolOptions } from "./dy
 import { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker, type RuntimeMetricsPhase, type RuntimeMetricsSummary } from "./metrics"
 export { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker } from "./metrics"
 export type { RuntimeMetricsPhase, RuntimeMetricsSummary, RuntimeTokenUsageSummary, RuntimeToolCallPhaseSummary, RuntimeToolCallSummary } from "./metrics"
+import { buildExecutionPlanReview, type ExecutionPlanReviewRecord } from "./execution-plan-review"
+export { buildExecutionPlanReview }
+export type { ExecutionPlanReviewApprover, ExecutionPlanReviewRecord, ExecutionPlanReviewStatus, ExecutionPlanSideEffect, ExecutionPlanSideEffectKind } from "./execution-plan-review"
+import type { ToolAuditScope } from "./tool-audit"
+export { recordToolApprovalDecision, recordToolExecutionEvent, recordToolExecutionSummary } from "./tool-audit"
+export type { ToolApprovalAuditApprover, ToolApprovalAuditDecision, ToolApprovalDecisionRecord, ToolAuditScope, ToolExecutionSummaryRecord } from "./tool-audit"
 
 export type AgentRunRequest = {
   prompt: string
@@ -108,6 +114,31 @@ export type AgentRunResult = {
   checks?: PatchCheckSummary
   reviewDecision?: ReviewDecision
   fixIterations?: number
+}
+
+async function appendExecutionPlanReviewIfNeeded(
+  sessionId: string,
+  home: string | undefined,
+  plan: RuntimePlan,
+  options: {
+    localToolMode: LocalToolMode
+    hasApprovalCallback: boolean
+    expanded: ExpandedPromptResult
+    checkOptions: CheckRunnerConfiguration
+    mcpServers: Array<{ scope: string; name: string }>
+  },
+): Promise<ExecutionPlanReviewRecord | undefined> {
+  const record = buildExecutionPlanReview(plan, {
+    sessionId,
+    localToolMode: options.localToolMode,
+    hasApprovalCallback: options.hasApprovalCallback,
+    promptReferences: options.expanded.references,
+    checkOptions: options.checkOptions,
+    mcpServers: options.mcpServers,
+  })
+  if (!record) return undefined
+  await appendSessionRecord(sessionId, record, home)
+  return record
 }
 
 async function buildRunMetrics(
@@ -587,6 +618,13 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       await appendSessionRecord(sessionId, { type: "mcp_connect", report }, home)
     },
   })
+  const executionPlanReview = await appendExecutionPlanReviewIfNeeded(sessionId, home, plan, {
+    localToolMode,
+    hasApprovalCallback: Boolean(request.onToolApproval),
+    expanded,
+    checkOptions,
+    mcpServers: mcpServers.map((server) => ({ scope: server.scope, name: server.name })),
+  })
   await mcpLoader.initialize()
 
   try {
@@ -663,6 +701,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             workerResults,
             modelSummary: primarySummary,
             patch,
+            planReview: executionPlanReview,
             metrics,
             runtimeToolCount: metrics.toolCalls.total,
           })
@@ -741,6 +780,17 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         permissionPolicy: toolConfig.permissions,
         onPermissionPolicyEvaluation,
         compaction: plan.compaction,
+        audit: {
+          sessionId,
+          home,
+          phase: "primary",
+          role: plan.role,
+          agentSessionId: sessionId,
+          taskId: primaryTaskId,
+          parentId: plan.context.id,
+          attempt: attempt + 1,
+          brainId: plan.brain.id,
+        },
       })
       mcpLoader.activeRuntimes.add(runtime)
       mcpLoader.refreshRuntimeTools(runtime)
@@ -809,6 +859,17 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           // them. Idempotent: dispatched results have unique task ids.
           mergeDispatchedResults(workerResults, dispatchedResults)
           const patchAfterPrimary = await collectPatchSummary(cwd, patchBaseline)
+          const checkAuditScope: ToolAuditScope = {
+            sessionId,
+            home,
+            phase: "primary",
+            role: plan.role,
+            agentSessionId: sessionId,
+            taskId: primaryTaskId,
+            parentId: plan.context.id,
+            attempt: attempt + 1,
+            brainId: plan.brain.id,
+          }
           checks = hasPatchActivity(patchAfterPrimary)
             ? await runPatchChecksWithApproval(cwd, { ...checkOptions, patch: patchAfterPrimary }, {
                 mode: plan.mode,
@@ -816,6 +877,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
                 attempt: attempt + 1,
                 onToolApproval: request.onToolApproval,
                 signal: request.signal,
+                audit: checkAuditScope,
               })
             : undefined
           if (checks) {
@@ -960,6 +1022,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           modelSummary: primarySummary,
           patch,
           checks,
+          planReview: executionPlanReview,
           review: reviewDecision,
           metrics,
           runtimeToolCount: metrics.toolCalls.total,

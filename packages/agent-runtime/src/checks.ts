@@ -3,6 +3,8 @@ import { basename, extname, resolve as resolvePath } from "node:path"
 import type { BraincodeMode } from "@braincode/brain"
 import type { CheckPatchKind, CheckPolicyConfiguration, CheckPolicyConfigurationMap, CheckSelectionStrategy } from "@braincode/tools"
 import type { PatchFileChange, PatchSummary } from "./patch"
+import { recordToolApprovalDecision, recordToolExecutionSummary, summarizeJson, type ToolAuditScope } from "./tool-audit"
+import type { ToolApprovalDecision, ToolApprovalRequest } from "./runtime-agent"
 
 const DEFAULT_CHECK_TIMEOUT_MS = 180_000
 const DEFAULT_CHECK_OUTPUT_BYTES = 24_000
@@ -51,14 +53,11 @@ type PatchCheckApproval = {
   sessionId: string
   attempt: number
   onToolApproval?: (
-    request: {
-      toolCallId: string
-      toolName: string
-      args: unknown
-    },
+    request: ToolApprovalRequest,
     signal?: AbortSignal,
-  ) => { approved: boolean; reason?: string } | Promise<{ approved: boolean; reason?: string }>
+  ) => ToolApprovalDecision | Promise<ToolApprovalDecision>
   signal?: AbortSignal
+  audit?: ToolAuditScope
 }
 
 type PackageManager = {
@@ -101,8 +100,18 @@ export async function runPatchChecksWithApproval(
 ): Promise<PatchCheckSummary> {
   const planned = await planPatchChecks(projectRoot, options)
   if ("status" in planned) return planned
+  const approvalToolCallId = `patch-checks:${approval.sessionId}:${approval.attempt}`
+  const approvalArgs = { scripts: planned.scripts, patchKind: planned.patchKind, reason: planned.reason }
   if (approval.mode !== "radical" || planned.approvalRequired) {
     if (!approval.onToolApproval) {
+      await recordToolApprovalDecision(approval.audit, {
+        toolCallId: approvalToolCallId,
+        toolName: "run_script",
+        decision: "blocked",
+        approver: "runtime_policy",
+        reason: "check scripts require command execution approval",
+        argsSummary: summarizeJson(approvalArgs),
+      })
       return {
         status: "skipped",
         reason: "check scripts require command execution approval",
@@ -113,15 +122,19 @@ export async function runPatchChecksWithApproval(
       }
     }
     const decision = await approval.onToolApproval({
-      toolCallId: `patch-checks:${approval.sessionId}:${approval.attempt}`,
+      toolCallId: approvalToolCallId,
       toolName: "run_script",
-      args: {
-        scripts: planned.scripts,
-        patchKind: planned.patchKind,
-        reason: planned.reason,
-      },
+      args: approvalArgs,
     }, approval.signal)
     if (approval.signal?.aborted) throw createRunAbortedError()
+    await recordToolApprovalDecision(approval.audit, {
+      toolCallId: approvalToolCallId,
+      toolName: "run_script",
+      decision: decision?.approved === false ? "blocked" : "approved",
+      approver: decision?.approver ?? "human",
+      reason: decision?.reason,
+      argsSummary: summarizeJson(approvalArgs),
+    })
     if (decision?.approved === false) {
       return {
         status: "skipped",
@@ -132,8 +145,17 @@ export async function runPatchChecksWithApproval(
         results: [],
       }
     }
+  } else {
+    await recordToolApprovalDecision(approval.audit, {
+      toolCallId: approvalToolCallId,
+      toolName: "run_script",
+      decision: "auto_approved",
+      approver: "mode_policy",
+      reason: "auto-approved check scripts in radical mode",
+      argsSummary: summarizeJson(approvalArgs),
+    })
   }
-  return executePlannedPatchChecks(projectRoot, options, planned)
+  return executePlannedPatchChecks(projectRoot, options, planned, approval.audit)
 }
 
 export function classifyPatchKind(input?: PatchSummary | readonly PatchFileChange[]): PatchKind {
@@ -165,11 +187,19 @@ async function executePlannedPatchChecks(
   projectRoot: string,
   options: PatchCheckOptions,
   planned: PlannedPatchChecks,
+  audit?: ToolAuditScope,
 ): Promise<PatchCheckSummary> {
   const results: PatchCheckResult[] = []
   for (const script of planned.scripts) {
+    const toolCallId = audit?.sessionId ? `patch-check:${audit.sessionId}:${audit.attempt ?? 1}:${script}` : `patch-check:${script}`
+    await recordToolExecutionSummary(audit, {
+      event: "start",
+      toolCallId,
+      toolName: "run_script",
+      argsSummary: summarizeJson({ script, patchKind: planned.patchKind, reason: planned.reason }),
+    })
     if (!Object.prototype.hasOwnProperty.call(planned.packageScripts, script)) {
-      results.push({
+      const missingResult: PatchCheckResult = {
         name: script,
         command: planned.packageManager.command,
         args: planned.packageManager.runArgs(script),
@@ -180,13 +210,29 @@ async function executePlannedPatchChecks(
         stdout: "",
         stderr: `package.json script not found: ${script}`,
         timedOut: false,
+      }
+      results.push(missingResult)
+      await recordToolExecutionSummary(audit, {
+        event: "end",
+        toolCallId,
+        toolName: "run_script",
+        isError: true,
+        resultSummary: summarizeJson({ status: missingResult.status, exitCode: missingResult.exitCode, stderr: missingResult.stderr }),
       })
       continue
     }
-    results.push(await runPackageScriptCheck(projectRoot, script, planned.packageManager, {
+    const result = await runPackageScriptCheck(projectRoot, script, planned.packageManager, {
       timeoutMs: options.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
       maxOutputBytes: options.maxOutputBytes ?? DEFAULT_CHECK_OUTPUT_BYTES,
-    }))
+    })
+    results.push(result)
+    await recordToolExecutionSummary(audit, {
+      event: "end",
+      toolCallId,
+      toolName: "run_script",
+      isError: result.status !== "passed",
+      resultSummary: summarizeJson({ status: result.status, exitCode: result.exitCode, durationMs: result.durationMs, timedOut: result.timedOut }),
+    })
   }
 
   return {

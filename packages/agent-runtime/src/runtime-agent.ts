@@ -15,6 +15,7 @@ import { ContextHandoffRequiredError, enforceHandoffContextBudget, isHandoffRequ
 import { createRuntimeCompactor, type RuntimeCompactionPolicy } from "./compaction"
 import { wrapToolsWithEvidenceCache, type ToolEvidenceCache } from "./evidence-cache"
 import type { RuntimeModelSelection } from "./model-selection"
+import { recordToolApprovalDecision, recordToolExecutionEvent, summarizeJson, type ToolApprovalAuditApprover, type ToolAuditScope } from "./tool-audit"
 
 export type ToolApprovalRequest = {
   toolCallId: string
@@ -26,6 +27,7 @@ export type ToolApprovalRequest = {
 export type ToolApprovalDecision = {
   approved: boolean
   reason?: string
+  approver?: ToolApprovalAuditApprover
 }
 
 export type BraincodeAgentRuntimeOptions = {
@@ -41,6 +43,7 @@ export type BraincodeAgentRuntimeOptions = {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined
   onEvent?: (event: AgentEvent) => void | Promise<void>
   onToolApproval?: (request: ToolApprovalRequest, signal?: AbortSignal) => ToolApprovalDecision | Promise<ToolApprovalDecision>
+  audit?: ToolAuditScope
   usage?: TokenUsageScope
   // Soft, non-destructive context compaction applied before the byte-size
   // handoff guard. When omitted, only the hard guard runs (legacy behavior).
@@ -149,37 +152,94 @@ export function createBraincodeAgentRuntime(options: BraincodeAgentRuntimeOption
     toolExecution: "parallel",
     beforeToolCall: async (context, signal) => {
       const policyEvaluation = evaluateToolPermissionPolicy(context.toolCall.name, context.args, options.permissionPolicy)
+      const permissionPolicy = policyEvaluation.matches.length > 0 ? summarizePermissionPolicyEvaluation(policyEvaluation) : undefined
       if (policyEvaluation.matches.length > 0) {
         await options.onPermissionPolicyEvaluation?.(policyEvaluation)
       }
       if (policyEvaluation.action === "deny") {
-        return { block: true, reason: formatPermissionPolicyDenial(policyEvaluation) }
+        const reason = formatPermissionPolicyDenial(policyEvaluation)
+        await recordToolApprovalDecision(options.audit, {
+          toolCallId: context.toolCall.id,
+          toolName: context.toolCall.name,
+          decision: "denied",
+          approver: "permission_policy",
+          reason,
+          argsSummary: summarizeJson(context.args),
+          permissionPolicy,
+        })
+        return { block: true, reason }
       }
-      if (options.mode === "radical") return undefined
       const requiresApproval = toolCallRequiresApproval(context.toolCall.name, context.args, policyEvaluation)
+      if (options.mode === "radical") {
+        if (requiresApproval || permissionPolicy) {
+          await recordToolApprovalDecision(options.audit, {
+            toolCallId: context.toolCall.id,
+            toolName: context.toolCall.name,
+            decision: "auto_approved",
+            approver: "mode_policy",
+            reason: "auto-approved in radical mode",
+            argsSummary: summarizeJson(context.args),
+            permissionPolicy,
+          })
+        }
+        return undefined
+      }
+      if (!requiresApproval && policyEvaluation.action === "allow" && permissionPolicy) {
+        await recordToolApprovalDecision(options.audit, {
+          toolCallId: context.toolCall.id,
+          toolName: context.toolCall.name,
+          decision: "allowed",
+          approver: "permission_policy",
+          reason: "allowed by permission policy",
+          argsSummary: summarizeJson(context.args),
+          permissionPolicy,
+        })
+        return undefined
+      }
       if (options.onToolApproval && requiresApproval) {
-        const decision = await options.onToolApproval({
+        const request = {
           toolCallId: context.toolCall.id,
           toolName: context.toolCall.name,
           args: context.args,
-          ...(policyEvaluation.matches.length > 0 ? { permissionPolicy: summarizePermissionPolicyEvaluation(policyEvaluation) } : {}),
-        }, signal)
+          ...(permissionPolicy ? { permissionPolicy } : {}),
+        }
+        const decision = await options.onToolApproval(request, signal)
+        await recordToolApprovalDecision(options.audit, {
+          toolCallId: context.toolCall.id,
+          toolName: context.toolCall.name,
+          decision: decision?.approved === false ? "blocked" : "approved",
+          approver: decision?.approver ?? "human",
+          reason: decision?.reason,
+          argsSummary: summarizeJson(context.args),
+          permissionPolicy,
+        })
         if (decision?.approved === false) {
           return { block: true, reason: decision.reason ?? `User blocked tool call: ${context.toolCall.name}` }
         }
         return undefined
       }
       if (requiresApproval) {
-        return { block: true, reason: `Tool approval callback is required for risky tool call: ${context.toolCall.name}` }
+        const reason = `Tool approval callback is required for risky tool call: ${context.toolCall.name}`
+        await recordToolApprovalDecision(options.audit, {
+          toolCallId: context.toolCall.id,
+          toolName: context.toolCall.name,
+          decision: "blocked",
+          approver: "runtime_policy",
+          reason,
+          argsSummary: summarizeJson(context.args),
+          permissionPolicy,
+        })
+        return { block: true, reason }
       }
       return undefined
     },
   })
 
-  agent.subscribe((event) => {
+  agent.subscribe(async (event) => {
     if (isDebugEnabled() && shouldDebugAgentEvent(event)) {
       debugLog("runtime", "agent event", summarizeAgentEvent(event))
     }
+    await recordToolExecutionEvent(options.audit, event)
     return options.onEvent?.(event)
   })
 

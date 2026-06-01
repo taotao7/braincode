@@ -109,6 +109,15 @@ test("final report formatting exposes compact and expandable run facts", () => {
         },
       ],
     },
+    planReview: {
+      status: "approved",
+      approver: "runtime_policy",
+      requiredReview: true,
+      proposedSideEffects: [{ kind: "file_edit", target: "project files via edit_file", risk: "medium" }],
+      validationChecks: ["smart package-script selection"],
+      riskTriggers: ["project file mutation exposed"],
+      residualPreExecutionRisks: [],
+    },
     review: {
       decision: "changes_requested",
       confidence: 0.76,
@@ -135,6 +144,7 @@ test("final report formatting exposes compact and expandable run facts", () => {
 
   expect(formatTuiFinalReportCompact(report)).toContain("Braincode Run Report · changes_requested")
   expect(formatTuiFinalReportCompact(report)).toContain("patch 1 file, +8 -2")
+  expect(formatTuiFinalReportCompact(report)).toContain("plan approved by runtime_policy")
   expect(formatTuiFinalReportCompact(report)).toContain("review changes_requested (76%)")
   expect(formatTuiFinalReportCompact(report)).toContain("usage 1.3k tokens; 3 tool calls")
 
@@ -142,6 +152,8 @@ test("final report formatting exposes compact and expandable run facts", () => {
   expect(sections).toContain("Workers: librarian completed, backend completed, review changes_requested")
   expect(sections).toContain("Changed: M src/auth.ts")
   expect(sections).toContain("Check details: test failed")
+  expect(sections).toContain("Plan review: approved by runtime_policy · 1 side effect · review required")
+  expect(sections).toContain("Planned side effects: file_edit:project files via edit_file")
   expect(sections).toContain("Review: changes_requested (76%)")
   expect(sections).toContain("Usage: 1.3k tokens; 3 tool calls")
   expect(sections).toContain("Token phases: router 150, primary 1.1k")

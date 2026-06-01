@@ -208,6 +208,7 @@ Runtime user configuration belongs under `~/.braincode/`, not inside the reposit
 - [Architecture](./docs/architecture.md) - main system architecture, Brain Model design, context isolation, Pi integration, local config service.
 - [Context management](./docs/context-management.md) - Brain/worker isolation, handoff/result packets, prompt references, session JSONL.
 - [Agent communication](./docs/agent-communication.md) - worker lifecycle, routing, hooks, runtime events, multi-agent runs.
+- [Review and audit](./docs/review-and-audit.md) - review gates, permission decisions, patch/check review, and session audit records.
 - [Project structure and plan](./docs/project-structure.md) - goals, non-goals, workspace layout, package responsibilities, implementation status.
 - [Visual style](./docs/visual-style.md) - Brutalist technical poster direction for UI and brand surfaces.
 - [References](./docs/references.md) - Amp and Pi reference material used for design decisions.

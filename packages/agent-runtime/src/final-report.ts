@@ -3,6 +3,7 @@ import type { PatchCheckSummary } from "./checks"
 import { hasPatchActivity, type PatchSummary } from "./patch"
 import type { ReviewDecision, ReviewDecisionStatus } from "./review"
 import type { RuntimeMetricsSummary } from "./metrics"
+import type { ExecutionPlanReviewRecord } from "./execution-plan-review"
 
 export type FinalReportStatus = ReviewDecisionStatus | "answered" | "read_only" | "needs_clarification"
 
@@ -35,12 +36,23 @@ export type FinalReport = {
   }>
   patch?: PatchSummary
   checks?: PatchCheckSummary
+  planReview?: FinalReportPlanReview
   review?: ReviewDecision
   clarification?: AgentIntentClarification
   metrics?: RuntimeMetricsSummary
   modelSummary: string
   fixIterations?: number
   warnings: string[]
+}
+
+export type FinalReportPlanReview = {
+  status: ExecutionPlanReviewRecord["status"]
+  approver: ExecutionPlanReviewRecord["approver"]
+  requiredReview: boolean
+  proposedSideEffects: ExecutionPlanReviewRecord["proposedSideEffects"]
+  validationChecks: string[]
+  riskTriggers: string[]
+  residualPreExecutionRisks: string[]
 }
 
 export type FinalReportRuntimePlan = {
@@ -82,6 +94,7 @@ export type BuildFinalReportInput = {
   modelSummary: string
   patch?: PatchSummary
   checks?: PatchCheckSummary
+  planReview?: ExecutionPlanReviewRecord
   review?: ReviewDecision
   clarification?: AgentIntentClarification
   metrics?: RuntimeMetricsSummary
@@ -128,12 +141,25 @@ export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
     })),
     ...(input.patch ? { patch: input.patch } : {}),
     ...(input.checks ? { checks: input.checks } : {}),
+    ...(input.planReview ? { planReview: summarizePlanReview(input.planReview) } : {}),
     ...(input.review ? { review: input.review } : {}),
     ...(input.clarification ? { clarification: input.clarification } : {}),
     ...(input.metrics ? { metrics: input.metrics } : {}),
     modelSummary: input.modelSummary,
     ...(input.fixIterations ? { fixIterations: input.fixIterations } : {}),
     warnings,
+  }
+}
+
+function summarizePlanReview(record: ExecutionPlanReviewRecord): FinalReportPlanReview {
+  return {
+    status: record.status,
+    approver: record.approver,
+    requiredReview: record.requiredReview,
+    proposedSideEffects: record.proposedSideEffects,
+    validationChecks: record.validationPlan.checks,
+    riskTriggers: record.riskTriggers,
+    residualPreExecutionRisks: record.residualPreExecutionRisks,
   }
 }
 

@@ -53,6 +53,15 @@ test("formatRunReport renders runtime-owned final report facts", () => {
         },
       ],
     },
+    planReview: {
+      status: "approved",
+      approver: "runtime_policy",
+      requiredReview: true,
+      proposedSideEffects: [{ kind: "file_edit", target: "project files via edit_file", risk: "medium" }],
+      validationChecks: ["smart package-script selection"],
+      riskTriggers: ["project file mutation exposed"],
+      residualPreExecutionRisks: [],
+    },
     review: {
       decision: "changes_requested",
       confidence: 0.76,
@@ -84,6 +93,7 @@ test("formatRunReport renders runtime-owned final report facts", () => {
   expect(text).toContain("Routing: router-brain -> backend (91%)")
   expect(text).toContain("Patch: 1 file, +8 -2")
   expect(text).toContain("Checks: failed (test failed)")
+  expect(text).toContain("Plan Review: approved by runtime_policy (1 side effect, review required)")
   expect(text).toContain("Review: changes_requested (76%)")
   expect(text).toContain("Usage: 1.5k tokens (by phase: router 245, primary 1.3k); 4 tool calls, 1 failed")
   expect(text).toContain("Session: session-1")

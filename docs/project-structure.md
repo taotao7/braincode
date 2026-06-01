@@ -52,6 +52,7 @@ braincode/
   tsconfig.json
   docs/
     architecture.md
+    review-and-audit.md
     project-structure.md
     references.md
   examples/
@@ -260,6 +261,7 @@ Responsibilities:
 - Connect tools to the underlying agent runtime, including eager/background/lazy MCP loading and dynamic primary-agent tool refresh when MCP becomes ready.
 - Cache repeated read-only tool evidence within a run, reuse identical results, warn on duplicate loops, and reset cached evidence plus duplicate counters after write/execute tools.
 - Broker tool approval callbacks before risky tool execution and keep tool events normalized for UI rendering.
+- Enforce review-gate and audit-trail contracts for side-effectful runs, including pre-execution plan review records as the architecture matures.
 - Apply path-aware and command-aware permission policy before local writes, patches, shell/exec commands, and package scripts; deny matches are not bypassable, ask matches can be approved by the active permission mode, and `review: required` matches add a review worker.
 - Classify patch changes into smart check kinds, select package-script checks according to user/project policy, record why checks ran or were skipped, and force review for smart-check risk kinds.
 - Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
@@ -334,6 +336,7 @@ local tools
 
 Remaining work:
 
+- Extend review/audit coverage with whole-plan human approval where policy requires it and dedicated review-artifact summary records as described in [Review and audit](./review-and-audit.md).
 - Continue focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
 
 ## Initial milestones

@@ -245,6 +245,16 @@ export async function runWorkerFromPlan(
       toolEvidenceCache,
       getApiKey: (provider) => (provider === selection.piModel.provider ? apiKey : undefined),
       onEvent,
+      audit: {
+        sessionId,
+        home,
+        phase,
+        role: worker.role,
+        agentSessionId,
+        taskId: handoff.task.id,
+        parentId: handoff.task.parentId,
+        attempt: attempt + 1,
+      },
       compaction: worker.compaction,
     })
     const unlinkAbort = linkRuntimeAbort(runtime, signal)
