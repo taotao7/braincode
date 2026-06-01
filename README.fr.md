@@ -141,13 +141,13 @@ Braincode propose actuellement deux modes de haut niveau :
 
 ## Rôles d'agent (v0.2.0)
 
-Le harness expose **14 rôles**, structurés comme des spécialistes par rôle plus un petit jeu d'aides fonctionnelles non chevauchantes. Le rôle générique `coding` a été supprimé — le travail de code est découpé par domaine pour que chaque rôle puisse être routé vers un modèle réellement fort sur ce domaine.
+Le harness expose **15 rôles**, structurés comme des spécialistes par rôle plus un petit jeu d'aides fonctionnelles non chevauchantes. Le rôle générique `coding` a été supprimé — le travail de code est découpé par domaine pour que chaque rôle puisse être routé vers un modèle réellement fort sur ce domaine.
 
 **Routage**
 - `routeBrain` — planificateur piloté par LLM. Lit le prompt et émet une décision de routage structurée (rôle principal, workers, todos, dépendances). Le harness n'utilise plus le matching regex pour router.
 
 **Spécialistes de domaine**
-- `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
+- `frontend` · `backend` · `dba` · `devops` · `designer` · `imageMaker` · `security` · `qa` · `rush`
 
 **Aides fonctionnelles (non chevauchantes)**
 - `librarian` — cartographie de code ET recherche factuelle (absorbe l'ancien rôle `research`)

@@ -446,20 +446,14 @@ export function ImagePreviewView({ item }: { item: TranscriptItem }) {
       </Box>
     );
   }
-  // Kitty placeholder cells carry the image id in their fg color (applied via
-  // the color prop so Ink's layout stays intact). Half-block lines embed their
-  // own SGR and must be printed verbatim.
+  // Image lines embed their own SGR. For Kitty this is required because the
+  // placeholder foreground color encodes the image id and must not be stripped
+  // or quantized by Ink/Chalk color handling.
   return (
     <Box flexDirection="column">
-      {item.imageLines.map((line, index) =>
-        item.imageProtocol === "kitty" ? (
-          <Text key={index} color={item.imageFgColor}>
-            {line}
-          </Text>
-        ) : (
-          <Text key={index}>{line}</Text>
-        ),
-      )}
+      {item.imageLines.map((line, index) => (
+        <Text key={index}>{line}</Text>
+      ))}
     </Box>
   );
 }

@@ -135,6 +135,19 @@ export const zh = {
     "当没有其他更合适的专家角色时，用于处理低风险的小杂活和简短的直接回复。",
   role_call_pet:
     "仅用作只读的 TUI 状态汇报器。它观察实时运行快照并输出简短的进度行；它从不进行任务路由。",
+  section_trust_eyebrow: "可被验证",
+  section_trust_title: "可信，是因为可以自己核实。",
+  section_trust_lead:
+    "Braincode 不要求你相信一张截图。每次发布都在 CI 里跑同样的检查，路由与审查行为也由可复现的基准测试覆盖，你可以在本地自己跑一遍。",
+  trust_1_title: "CI 门禁",
+  trust_1_body:
+    "每次 push 和 pull request 都会运行严格类型检查、完整测试套件、覆盖率和基准测试。README 里的徽章直接链到运行历史。",
+  trust_2_title: "可复现基准",
+  trust_2_body:
+    "确定性 fixtures 离线重放路由决策与一个 mock 执行环，无需任何 provider key。CI 会把每次运行的 JSON 报告归档为构建产物。",
+  trust_3_title: "严格且开源",
+  trust_3_body:
+    "整个工作区在严格 TypeScript 下编译，源码以 MIT 许可开放。路由、审查门禁与报告代码都可以自己读。",
   section_cta_title: "准备好体验了吗？",
   section_cta_lead: "提供 macOS、Linux 和 npm 版本。",
   cta_docs: "阅读文档",

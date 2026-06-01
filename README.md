@@ -2,8 +2,7 @@
 
 ![Runtime](https://img.shields.io/badge/runtime-Bun-black?logo=bun)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-222%20passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-92.73%25%20lines-brightgreen)
+[![CI](https://github.com/taotao7/braincode/actions/workflows/ci.yml/badge.svg)](https://github.com/taotao7/braincode/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 A multi-model coding workflow engine.
@@ -174,13 +173,13 @@ Braincode has two top-level modes:
 - `auto` - the main mode, automatically plans by intent and routes work to different agents/models.
 - `radical` - a more aggressive autonomous mode for users who want faster, broader execution. In the TUI it exposes the default local tools and auto-approves tool calls, even when user-level local tool toggles are disabled.
 
-The runtime exposes **14 roles**:
+The runtime exposes **15 roles**:
 
 **Router**
 - `routeBrain` - LLM-driven planner. Reads the prompt and emits a structured routing decision.
 
 **Domain specialists**
-- `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
+- `frontend` · `backend` · `dba` · `devops` · `designer` · `imageMaker` · `security` · `qa` · `rush`
 
 **Function helpers**
 - `librarian` - codebase mapping and external fact-finding

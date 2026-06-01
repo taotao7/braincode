@@ -464,6 +464,40 @@ export function Home() {
         </div>
       </section>
 
+      {/* Trust */}
+      <section className="section" id="trust">
+        <div className="container stack" style={{ gap: 40 }}>
+          <div style={{ maxWidth: "52ch" }}>
+            <p className="eyebrow">{t("section_trust_eyebrow")}</p>
+            <h2>{t("section_trust_title")}</h2>
+            <p className="lead" style={{ border: "none", padding: 0 }}>{t("section_trust_lead")}</p>
+          </div>
+          <div className="grid-3" style={{ gap: 16 }}>
+            <div className="feature">
+              <div className="feature-mark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6L9 17l-5-5"/></svg>
+              </div>
+              <h3>{t("trust_1_title")}</h3>
+              <p>{t("trust_1_body")}</p>
+            </div>
+            <div className="feature">
+              <div className="feature-mark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12a9 9 0 019-9 9 9 0 016.7 3M21 12a9 9 0 01-9 9 9 9 0 01-6.7-3"/><path d="M21 3v6h-6M3 21v-6h6"/></svg>
+              </div>
+              <h3>{t("trust_2_title")}</h3>
+              <p>{t("trust_2_body")}</p>
+            </div>
+            <div className="feature">
+              <div className="feature-mark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg>
+              </div>
+              <h3>{t("trust_3_title")}</h3>
+              <p>{t("trust_3_body")}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Install CTA */}
       <section className="section" id="install" style={{ textAlign: "center", borderTop: "4px solid var(--fg)" }}>
         <div className="container stack" style={{ alignItems: "center", maxWidth: 600 }}>

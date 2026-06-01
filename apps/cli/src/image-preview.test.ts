@@ -100,6 +100,12 @@ describe("buildImagePreview", () => {
     expect((transmit.match(/\x1bPtmux;/g) ?? []).length).toBe(1)
     expect(transmit).toContain("t=t")
     expect(transmit).not.toContain("t=d")
+    const imageId = preview.imageId ?? 0
+    const r = (imageId >> 16) & 0xff
+    const g = (imageId >> 8) & 0xff
+    const b = imageId & 0xff
+    expect(preview.lines[0]).toStartWith(`\x1b[38;2;${r};${g};${b}m`)
+    expect(preview.lines[0]).toEndWith("\x1b[39m")
 
     const unescaped = transmit.replaceAll("\x1b\x1b", "\x1b")
     const match = /t=t,i=\d+,c=\d+,r=\d+;([A-Za-z0-9+/=]+)/.exec(unescaped)

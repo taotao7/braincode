@@ -637,8 +637,6 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
           imageLines: preview.lines,
           imageCols: preview.cols,
           imageRows: preview.rows,
-          imageProtocol: preview.protocol,
-          imageFgColor: preview.fgColor,
           text: imageCaption(path, preview.cols, preview.rows, preview.protocol),
         });
         if (shouldStickToBottom) scrollTranscriptTo("bottom");

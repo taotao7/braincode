@@ -12,7 +12,6 @@ import type {
 } from "@braincode/config";
 import type { BrainModel } from "@braincode/brain";
 import type { EditPreview } from "./tool-edit-preview";
-import type { ImageProtocol } from "./image-preview";
 
 export type TranscriptItem = {
   id: string;
@@ -54,8 +53,6 @@ export type TranscriptItem = {
   imageLines?: string[];
   imageCols?: number;
   imageRows?: number;
-  imageProtocol?: ImageProtocol;
-  imageFgColor?: string;
   imageError?: string;
 };
 

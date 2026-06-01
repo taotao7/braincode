@@ -23,13 +23,9 @@ export type ImagePreview = {
   // For "kitty": the APC upload sequence to write to stdout exactly once.
   transmit?: string
   // The text lines to place in the transcript. For "kitty" these are
-  // glyph-only placeholders (apply `fgColor` via the renderer's color prop);
+  // SGR-colored placeholder glyphs that encode the image id in foreground color;
   // for "halfblock" they are SGR-colored half blocks rendered as-is.
   lines: string[]
-  // For "kitty": the foreground color (hex) the placeholder cells must use —
-  // it encodes the image id. The renderer applies this with its color prop so
-  // Ink's text layout stays intact.
-  fgColor?: string
   imageId?: number
 }
 
@@ -291,30 +287,35 @@ function diacritic(index: number): string {
   return DIACRITICS[index] ?? DIACRITICS[DIACRITICS.length - 1] ?? ""
 }
 
-// Encode the image id into a foreground color hex. Kitty reads the cell's
-// 24-bit fg color as the image id for Unicode placeholders, so a 24-bit color
-// carries ids well beyond 255 without needing a 3rd (high-byte) diacritic.
-function placeholderFgColor(imageId: number): string {
+// Encode the image id into an explicit truecolor SGR foreground. Kitty reads
+// the cell's 24-bit fg color as the image id for Unicode placeholders. This
+// must not go through Ink/Chalk color props: NO_COLOR or color-level detection
+// can strip or quantize the color, leaving invisible placeholders with no image.
+function placeholderColorSgr(imageId: number): string {
   const r = (imageId >> 16) & 0xff
   const g = (imageId >> 8) & 0xff
   const b = imageId & 0xff
-  const hex = (n: number) => n.toString(16).padStart(2, "0")
-  return `#${hex(r)}${hex(g)}${hex(b)}`
+  return `${ESC}[38;2;${r};${g};${b}m`
 }
 
 // Generate the glyph-only placeholder grid. Cell (row, col) carries U+10EEEE
 // plus a row diacritic and a column diacritic, telling the terminal which
-// slice of the virtual image to composite there. The foreground color (which
-// encodes the image id) is applied by the renderer via its color prop so the
-// host TUI's text layout is preserved.
-function buildPlaceholderLines(cols: number, rows: number): string[] {
+// slice of the virtual image to composite there.
+function buildPlaceholderLines(
+  cols: number,
+  rows: number,
+  imageId: number,
+): string[] {
   const lines: string[] = []
+  const color = placeholderColorSgr(imageId)
+  const resetForeground = `${ESC}[39m`
   for (let r = 0; r < rows; r++) {
     const rowMark = diacritic(r)
-    let line = ""
+    let line = color
     for (let c = 0; c < cols; c++) {
       line += PLACEHOLDER + rowMark + diacritic(c)
     }
+    line += resetForeground
     lines.push(line)
   }
   return lines
@@ -396,7 +397,6 @@ export async function buildImagePreview(
         cols,
         rows,
         imageId,
-        fgColor: placeholderFgColor(imageId),
         transmit: await buildKittyTransmit(
           png,
           imageId,
@@ -404,7 +404,7 @@ export async function buildImagePreview(
           rows,
           capability.multiplexed,
         ),
-        lines: buildPlaceholderLines(cols, rows),
+        lines: buildPlaceholderLines(cols, rows, imageId),
       }
     }
   }

@@ -32,8 +32,48 @@ jobs:
       - name: Coverage
         run: bun run coverage
 
+      - name: Coverage summary
+        if: always()
+        run: |
+          env -u BRAINCODE_DEBUG -u BRAINCODE_DEBUG_FILE \
+            bun test --coverage --coverage-reporter=text > coverage-text.log 2>&1 || true
+          {
+            echo "### Coverage"
+            echo '```'
+            grep -E '^(-|[ ]*File|packages/|apps/|All files)' coverage-text.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare report directory
+        run: mkdir -p benchmarks/reports
+
       - name: Planning benchmark
-        run: bun run braincode -- benchmark --heuristic
+        run: |
+          bun run braincode -- benchmark --heuristic --json > benchmarks/reports/planning-benchmark.json
+          {
+            echo "### Planning benchmark (heuristic)"
+            echo '```'
+            bun run braincode -- benchmark --heuristic
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Execution benchmark
-        run: bun run braincode -- benchmark --execute --task login-validation
+        run: |
+          bun run braincode -- benchmark --execute --task login-validation --json > benchmarks/reports/execution-benchmark.json
+          {
+            echo "### Execution benchmark (login-validation)"
+            echo '```'
+            bun run braincode -- benchmark --execute --task login-validation
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-reports
+          path: |
+            benchmarks/reports/*.json
+            coverage/lcov.info
+          if-no-files-found: warn
+          retention-days: 7

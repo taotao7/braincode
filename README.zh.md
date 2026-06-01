@@ -144,13 +144,13 @@ Braincode 目前有两种顶层模式：
 
 ## Agent 角色（v0.2.0）
 
-harness 暴露 **14 个角色**，整体以角色（专业人设）为主，并保留少量不重叠的功能型助手。原来通用的 `coding` 角色已经被移除 —— 代码工作按照领域细分，这样每个角色都能路由到真正擅长该领域的模型。
+harness 暴露 **15 个角色**，整体以角色（专业人设）为主，并保留少量不重叠的功能型助手。原来通用的 `coding` 角色已经被移除 —— 代码工作按照领域细分，这样每个角色都能路由到真正擅长该领域的模型。
 
 **路由**
 - `routeBrain` — 由 LLM 驱动的规划器。读 prompt，输出结构化的路由决定（primary 角色、worker 列表、todo、依赖）。harness 不再依赖正则匹配做路由。
 
 **领域专家**
-- `frontend` · `backend` · `dba` · `devops` · `designer` · `security` · `qa` · `rush`
+- `frontend` · `backend` · `dba` · `devops` · `designer` · `imageMaker` · `security` · `qa` · `rush`
 
 **功能型助手（不重叠）**
 - `librarian` — 代码库地图 + 外部资料检索（合并了原来的 `research` 角色）

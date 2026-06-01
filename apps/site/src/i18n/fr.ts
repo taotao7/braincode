@@ -135,6 +135,19 @@ export const fr = {
     "Utilisez pour les petites tâches à faible risque et les réponses directes et courtes lorsqu'aucun rôle de spécialiste n'est plus adapté.",
   role_call_pet:
     "Utilisez uniquement comme rapporteur de statut TUI en lecture seule. Il observe les instantanés d'exécution en direct et émet de courtes lignes de progression ; il ne route jamais le travail.",
+  section_trust_eyebrow: "CONÇU POUR ÊTRE VÉRIFIÉ",
+  section_trust_title: "Des affirmations que vous pouvez vérifier vous-même.",
+  section_trust_lead:
+    "Braincode ne vous demande pas de croire une capture d'écran. Chaque version exécute les mêmes contrôles en CI, et le comportement de routage et de revue est éprouvé par des benchmarks reproductibles que vous pouvez lancer en local.",
+  trust_1_title: "Vérifié par la CI",
+  trust_1_body:
+    "Chaque push et pull request exécute le typage strict, la suite de tests complète, la couverture et les benchmarks. Le badge du README renvoie directement à l'historique des exécutions.",
+  trust_2_title: "Benchmarks reproductibles",
+  trust_2_body:
+    "Des fixtures déterministes rejouent les décisions de routage et une boucle d'exécution simulée hors ligne — sans clé de fournisseur. La CI archive le rapport JSON de chaque exécution comme artefact.",
+  trust_3_title: "Strict et ouvert",
+  trust_3_body:
+    "Tout l'espace de travail compile en TypeScript strict, et le code source est sous licence MIT. Lisez vous-même le routage, la barrière de revue et le code de reporting.",
   section_cta_title: "Prêt à tester votre cerveau ?",
   section_cta_lead: "Disponible pour macOS, Linux et npm.",
   cta_docs: "Lire la Documentation",

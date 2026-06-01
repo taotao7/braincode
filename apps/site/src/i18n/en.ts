@@ -135,6 +135,19 @@ export const en = {
     "Use for tiny low-risk chores and short direct replies when no specialist role is a better fit.",
   role_call_pet:
     "Use only as a read-only TUI status reporter. It watches live run snapshots and emits short progress lines; it never routes work.",
+  section_trust_eyebrow: "BUILT TO BE CHECKED",
+  section_trust_title: "Claims you can verify yourself.",
+  section_trust_lead:
+    "Braincode does not ask you to trust a screenshot. Every release runs the same checks in CI, and the routing and review behavior is exercised by reproducible benchmarks you can run locally.",
+  trust_1_title: "CI-gated",
+  trust_1_body:
+    "Every push and pull request runs strict type checks, the full test suite, coverage, and the benchmark suite. The badge in the README links straight to the run history.",
+  trust_2_title: "Reproducible benchmarks",
+  trust_2_body:
+    "Deterministic fixtures replay routing decisions and a mock execution loop offline — no provider key required. CI archives each run's JSON report as a build artifact.",
+  trust_3_title: "Strict and open",
+  trust_3_body:
+    "The whole workspace compiles under strict TypeScript, and the source is MIT-licensed. Read the routing, review-gate, and reporting code yourself.",
   section_cta_title: "Ready to pick your brain?",
   section_cta_lead: "Available for macOS, Linux, and npm.",
   cta_docs: "Read Documentation",
