@@ -15,7 +15,7 @@ export type { ToolEvidenceCache, ToolEvidenceCacheOptions } from "./evidence-cac
 import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey, selectRuntimeModelWithApiKey, toPiModelSummary } from "./model-selection"
 export { selectRuntimeModel } from "./model-selection"
 export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSummary } from "./model-selection"
-import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, selectModelPolicy, type AgentIntentClarification, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { generateImage } from "@braincode/llm"
@@ -259,6 +259,39 @@ function setTodoStatus(plan: RuntimePlan, todoIds: string[], status: AgentTodoSt
   return plan.todos.filter((todo) => todoIdSet.has(todo.id))
 }
 
+function formatIntentClarificationSummary(clarification: AgentIntentClarification): string {
+  const chinese = /[\u4e00-\u9fff]/.test(`${clarification.question} ${clarification.reason}`)
+  const optionLines = clarification.options.map((option, index) =>
+    `${index + 1}. ${option.label} (${option.id}): ${option.description}`,
+  )
+  if (chinese) {
+    return [
+      "需要先确认后再交给专业 agent。",
+      "",
+      `问题：${clarification.question}`,
+      clarification.missing.length > 0 ? `缺少信息：${clarification.missing.join("、")}` : "",
+      "",
+      "可选方向：",
+      ...optionLines,
+      "",
+      `原因：${clarification.reason}`,
+      "你可以回复选项编号、选项 id，或直接补充目标/约束/验收标准。",
+    ].filter(Boolean).join("\n")
+  }
+  return [
+    "I need one clarification before handing this to specialist agents.",
+    "",
+    `Question: ${clarification.question}`,
+    clarification.missing.length > 0 ? `Missing: ${clarification.missing.join(", ")}` : "",
+    "",
+    "Options:",
+    ...optionLines,
+    "",
+    `Reason: ${clarification.reason}`,
+    "Reply with an option number, an option id, or the missing target, constraints, and acceptance criteria.",
+  ].filter(Boolean).join("\n")
+}
+
 async function updateTodoStatus(
   plan: RuntimePlan,
   todoIds: string[],
@@ -397,6 +430,39 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     } catch {
       // ignore listener errors
     }
+  }
+  if (plan.agentPlan.clarification?.required) {
+    const clarification = plan.agentPlan.clarification
+    const summary = formatIntentClarificationSummary(clarification)
+    await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: { root: cwd }, attempt: 1 }, home)
+    await appendSessionRecord(sessionId, { type: "clarification_request", clarification, attempt: 1 }, home)
+    await updateTodoStatus(
+      plan,
+      plan.todos.map((todo) => todo.id),
+      "blocked",
+      "planning",
+      sessionId,
+      home,
+      request.onTodoEvent,
+      { role: plan.role, summary: "Waiting for user clarification before specialist handoff." },
+    )
+    const metrics = buildRuntimeMetricsSummary(
+      await readSessionTokenUsageSummary(sessionId, home),
+      { total: 0, failed: 0, byPhase: [] },
+    )
+    const finalReport = buildFinalReport({
+      task: request.prompt,
+      sessionId,
+      plan,
+      workerResults: [],
+      modelSummary: summary,
+      metrics,
+      runtimeToolCount: 0,
+      clarification,
+    })
+    await appendSessionRecord(sessionId, { type: "final_report", finalReport, attempt: 1 }, home)
+    await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults: [], finalReport, attempt: 1 }, home)
+    return { sessionId, summary, finalReport, plan, workerResults: [] }
   }
   const modelDocument = await readModels(home)
   const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]

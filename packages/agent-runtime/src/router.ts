@@ -1,5 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentIntentClarification, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { defaultBrains, defaultModels, readBrains, readModels, readSettings } from "@braincode/config"
 import { createBrainTaskContext, type BrainTaskContext } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
@@ -80,7 +80,7 @@ export function createRuntimeWorkerPlan(worker: AgentWorkerPlan, brain: BrainMod
   }
 }
 
-export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">, allowedRoles?: readonly RoutedAgentRole[]): RouterPlanDecision {
+export function normalizeRouterDecision(value: { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; clarification?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }, fallback: AgentRoutingPlan, limits: Pick<ModeRoutingLimits, "maxWorkerAgents" | "maxTodos">, allowedRoles?: readonly RoutedAgentRole[]): RouterPlanDecision {
   const allowedRoleSet = allowedRoles && allowedRoles.length > 0 ? new Set<RoutedAgentRole>(allowedRoles) : undefined
   const roleIsAllowed = (role: unknown): role is RoutedAgentRole => isRoutedAgentRole(role) && (!allowedRoleSet || allowedRoleSet.has(role))
   const fallbackRole = roleIsAllowed(fallback.primaryRole) ? fallback.primaryRole : allowedRoles?.[0] ?? fallback.primaryRole
@@ -136,6 +136,7 @@ export function normalizeRouterDecision(value: { role?: unknown; workers?: unkno
     dependencies: normalizeRouterDependencies(value.dependencies),
     requiresReview: fallback.requiresReview,
     reason: typeof value.reason === "string" && value.reason.trim() ? value.reason : fallback.reason,
+    clarification: normalizeAgentIntentClarification(value.clarification) ?? fallback.clarification,
   })
 
   return {
@@ -144,6 +145,7 @@ export function normalizeRouterDecision(value: { role?: unknown; workers?: unkno
     todos: normalized.todos,
     dependencies: normalized.dependencies,
     requiresReview: fallback.requiresReview,
+    clarification: normalized.clarification,
     confidence: typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
       : undefined,
@@ -263,6 +265,8 @@ Allowed routed roles:
 ${formatRoutedAgentRoleCatalog()}
 
 Routing principles (read these before deciding):
+- First run an intent-completeness gate. If the request lacks enough target, expected outcome, constraints, or success criteria to hand off safely, set clarification.required=true with one user-facing question and 2-3 mutually exclusive options. The runtime will ask the user and will not run specialist workers until the user clarifies.
+- Do not ask for clarification when the request is actionable with conservative assumptions, the needed context is discoverable from project files, or the user explicitly asks you to investigate before deciding.
 - There is no generic "coding" role. Pick the matching specialist for code work: frontend for UI/CSS/components, backend for APIs/services, dba for schema/SQL, devops for CI/infra, security for auth/vuln, qa for tests, designer for UX without code.
 - Use librarian when the task needs codebase mapping, symbol lookup, or fact finding (it absorbs what would have been a "research" role).
 - Use imageMaker when the user asks to generate, edit, or produce raster image assets, role portraits, illustrations, marketing visuals, or other image files.
@@ -277,13 +281,15 @@ Routing principles (read these before deciding):
 - Runtime order is support workers first, then the primary role, then optional review. Support-worker todos cannot depend on primary-role or review todos.
 
 Return ONLY a single JSON object matching this schema exactly:
-{"role":${roleEnum},"workers":[{"role":${roleEnum},"goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":${roleEnum},"reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"confidence":0.0,"reason":"short reason"}
+{"role":${roleEnum},"workers":[{"role":${roleEnum},"goal":"short worker goal","reason":"short reason"}],"todos":[{"id":"short-stable-id","title":"concrete task to check off","role":${roleEnum},"reason":"short reason"}],"dependencies":[{"from":"todo-id-that-must-finish-first","to":"todo-id-that-depends-on-it","reason":"short reason"}],"clarification":{"required":false,"reason":"","question":"","missing":[],"options":[{"id":"short-id","label":"short label","description":"what happens if chosen"}]},"confidence":0.0,"reason":"short reason"}
 
 Output constraints:
 - "role" MUST be one of the enum values above. Do not invent role names. Do not include "coding", "fastReply", or "research" — they are deprecated.
 - Do not include "modelId" fields. The selected Brain Model's role policies decide execution models.
 - For image inputs, every selected text role must have a configured role execution chain that can receive image input. Omit imageMaker unless the user asks for image generation/editing.
 - Pick exactly one primary role in "role".
+- Set clarification.required=false when the request is actionable. Set clarification.required=true only when user choice is necessary before any specialist role can execute safely.
+- If clarification.required=true, write "question", "missing", and "options" in the user's language. Options must be mutually exclusive, concrete next steps, and no more than 3.
 - Include only workers that would materially improve the task.
 - Do not include rush as a support worker when the primary role is not rush. If a specialist is primary and no extra support is needed, include only the primary specialist worker.
 - Break the work into 1-${routingLimits.maxTodos} concrete todos in execution order.
@@ -323,7 +329,7 @@ ${prompt}`, images.length > 0 ? images : undefined)
       provider: routerSelection.piModel.provider,
       api: routerSelection.configured.api,
     })
-    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }
+    const parsed = extractJsonObject(text) as { role?: unknown; workers?: unknown; todos?: unknown; dependencies?: unknown; clarification?: unknown; confidence?: unknown; reason?: unknown; modelId?: unknown }
 
     const decision = normalizeRouterDecisionModelIds(
       normalizeRouterDecision(parsed, fallback, routingLimits),

@@ -632,6 +632,7 @@ export function finalReportStatusColor(
 ): UiColor {
   if (status === "approved") return "green";
   if (status === "changes_requested") return "yellow";
+  if (status === "needs_clarification") return "yellow";
   if (status === "blocked") return "red";
   return "cyan";
 }

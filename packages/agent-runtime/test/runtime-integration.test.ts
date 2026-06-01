@@ -1642,6 +1642,61 @@ test("planRuntimeFromConfig supports routeBrain previews and heuristic diagnosti
   }
 })
 
+test("executePromptFromConfig pauses before workers when intent needs clarification", async () => {
+  const home = await mkdtemp(join(tmpdir(), "braincode-runtime-clarification-test-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-runtime-clarification-project-"))
+  try {
+    await writeSettings(
+      {
+        version: 1,
+        mode: "auto",
+        configServer: { host: "127.0.0.1", port: 14580 },
+        defaultBrainId: "brain",
+      },
+      home,
+    )
+    await writeModels(
+      {
+        models: [
+          {
+            id: "custom/text",
+            provider: "custom",
+            modelId: "text",
+            name: "Text",
+            api: "openai-responses",
+            baseUrl: "http://localhost:9999/v1",
+            contextWindow: 128000,
+            supportsTools: true,
+          },
+        ],
+      },
+      home,
+    )
+    await writeBrains(createTestBrainDocument("custom/text"), home)
+
+    const result = await executePromptFromConfig({
+      prompt: "优化一下",
+      projectRoot,
+      mcpLoadingStrategy: "eager",
+      mcpStartupBudgetMs: 0,
+    }, home)
+
+    expect(result.finalReport.status).toBe("needs_clarification")
+    expect(result.summary).toContain("需要先确认")
+    expect(result.workerResults).toEqual([])
+    expect(result.plan.agentPlan.clarification?.required).toBe(true)
+    expect(result.plan.todos.every((todo) => todo.status === "blocked")).toBe(true)
+    expect(result.finalReport.clarification?.options.map((option) => option.id)).toEqual([
+      "make-scoped-change",
+      "plan-first",
+      "provide-details",
+    ])
+  } finally {
+    await rm(home, { recursive: true, force: true })
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
 test("planRuntimeFromConfig exposes isolated worker plans and mandatory review", async () => {
   const home = await mkdtemp(join(tmpdir(), "braincode-runtime-workers-test-"))
   try {

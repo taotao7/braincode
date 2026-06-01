@@ -103,6 +103,36 @@ test("resolveFinalReportStatus makes failed checks override review approval", ()
   expect(status).toBe("changes_requested")
 })
 
+test("buildFinalReport marks clarification pauses explicitly", () => {
+  const clarification = {
+    required: true as const,
+    reason: "The target is missing.",
+    question: "Which part should change?",
+    missing: ["target"],
+    options: [
+      { id: "plan-first", label: "Plan first", description: "Return a plan." },
+      { id: "provide-details", label: "Provide details", description: "Wait for details." },
+    ],
+  }
+  const report = buildFinalReport({
+    task: "fix it",
+    sessionId: "session-clarify",
+    plan: testPlan({
+      role: "rush",
+      routing: { source: "heuristic", reason: "clarification needed" },
+      workers: [{ role: "rush", contextId: "ctx-rush" }],
+      todos: [{ id: "clarify", title: "Clarify request", role: "rush", status: "blocked" }],
+    }),
+    workerResults: [],
+    modelSummary: "I need clarification.",
+    clarification,
+  })
+
+  expect(report.status).toBe("needs_clarification")
+  expect(report.clarification).toBe(clarification)
+  expect(report.warnings).toEqual(["Execution paused for user clarification before specialist handoff."])
+})
+
 test("buildFinalReport surfaces fix budget exhaustion when checks still fail", () => {
   const report = buildFinalReport({
     task: "fix failing test",

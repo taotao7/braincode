@@ -218,6 +218,7 @@ Owns execution mode policy, Brain Model definitions, planning, routing, and mode
 Responsibilities:
 
 - Apply the selected top-level mode: `auto` or `radical`.
+- Assess intent completeness before handoff and produce clarification questions/options when a prompt is not actionable enough for specialist execution.
 - Classify tasks.
 - Select agent roles.
 - Maintain role definitions and built-in role prompts for every Braincode agent.
@@ -249,6 +250,7 @@ Responsibilities:
 
 - Start and run agent sessions.
 - Expand routing plans into runtime worker plans with model selections.
+- Short-circuit incomplete-intent plans by returning a user clarification request before loading tools or launching workers.
 - Resolve ordered runtime model candidates, API-key availability, and vision/image-generation requirements from Brain Model policies.
 - Run isolated support workers from compact handoff packets.
 - Give selected support/review roles read-only project tools for evidence gathering without edit/execute capability.

@@ -139,30 +139,32 @@ Failure path: each candidate failure logs `worker_error`, and the loop tries the
      "Conversation so far" summary so follow-ups keep context.
 3. buildRuntimePlan:         heuristic routing, then router-brain refinement.
    - When --team forced roles are supplied, plan.workers is overridden.
-4. runSupportWorkers (parallel when independent, capped by the mode-adjusted routing limit):
+4. If plan.clarification.required, append clarification_request, block planned todos,
+   return a needs_clarification report, and do not launch tools or workers.
+5. runSupportWorkers (parallel when independent, capped by the mode-adjusted routing limit):
    - Each worker is independent. No worker sees another's handoff or transcript.
    - If todo dependencies require one support result before another, Brain runs the upstream worker first and supplies only its normalized summary to the dependent worker.
    - Librarian, QA, security, and review-style support workers receive read-only project tools for evidence gathering.
-5. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
+6. Connect MCP servers via McpToolHub -> primary agent gets MCP tools.
    - A non-imageMaker primary on a write-capable run also gets the generate_image tool.
-6. Try each model candidate for the primary role:
+7. Try each model candidate for the primary role:
      buildPrimaryPrompt(user_request, workerResults, primaryRole, projectSupport)
      (+ dispatch guidance when dynamic dispatch is enabled)
      runtime.agent.prompt(...)
      primarySummary = last assistant text
      - the primary may call dispatch_specialist mid-turn to consult an isolated
        specialist (Brain-mediated, budget-capped); results fold into workerResults
-7. Bounded fix loop (collect patch -> checks -> review -> gate), repeated while a
+8. Bounded fix loop (collect patch -> checks -> review -> gate), repeated while a
    trigger fires, up to the mode budget (auto: 1, radical: 2):
      - trigger = checks failed OR review decision == changes_requested
      - on trigger: re-prompt the SAME primary agent with buildPrimaryFixPrompt(...)
        (it keeps its working context), then re-collect patch, re-run checks, re-review
      - `blocked` is NOT a fix trigger; it is reported as-is for a human
      - skipped for the primary == "review" role and for /team forced-roles runs
-8. If plan.requiresReview && primary !== "review":
+9. If plan.requiresReview && primary !== "review":
      runWorkerFromPlan(reviewWorker, buildReviewPrompt(...), phase="review")
      mergeReviewResult appends review decision, findings, residual risks, and risks to primarySummary.
-9. Run Stop hook. Append run_end. Return { sessionId, summary, plan, workerResults, mcp, fixIterations }.
+10. Run Stop hook. Append run_end. Return { sessionId, summary, plan, workerResults, mcp, fixIterations }.
 ```
 
 Notes worth internalizing before changing this code:
@@ -186,6 +188,14 @@ Two routers cooperate to produce an `AgentRoutingPlan`:
 The two paths normalize into the same shape:
 
 ```ts
+type AgentIntentClarification = {
+  required: true
+  reason: string
+  question: string
+  missing: string[]
+  options: Array<{ id: string; label: string; description: string }>
+}
+
 type AgentRoutingPlan = {
   primaryRole: RoutedAgentRole
   workers: AgentWorkerPlan[]    // { role, goal, reason, todoIds }
@@ -193,8 +203,11 @@ type AgentRoutingPlan = {
   dependencies: AgentTodoDependency[] // fromTodoId -> toTodoId edges
   requiresReview: boolean
   reason: string
+  clarification?: AgentIntentClarification
 }
 ```
+
+Intent clarification is a Brain-mediated pre-handoff gate, not a worker role. routeBrain should set it only when the prompt is not actionable enough for specialist execution: missing target, expected outcome, constraints, or success criteria, with multiple materially different interpretations. The normalized decision carries one question and two or three mutually exclusive options in the user's language. `executePromptFromConfig` records `clarification_request`, marks the plan's todos blocked, returns `FinalReport.status = "needs_clarification"`, and stops before MCP, support workers, primary execution, checks, or review. The next user turn answers the question; session continuity supplies the prior clarification request so routeBrain can produce a normal handoff plan.
 
 `buildRuntimePlan` in `packages/agent-runtime/src/router.ts` then expands every `AgentWorkerPlan` into a `RuntimeWorkerPlan`, assigns each worker a stable agent context id, resolves that role's configured execution policy, and builds the runtime todo list and dependency graph, including policy-added review work. It also applies mode routing limits: auto uses the configured worker/concurrency cap and 6 todos; radical raises the effective worker and support-concurrency budgets to at least 4 and allows 8 todos. The final `RuntimePlan` is what the rest of the orchestrator consumes.
 

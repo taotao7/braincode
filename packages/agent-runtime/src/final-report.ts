@@ -1,10 +1,10 @@
-import type { AgentTodoStatus, BraincodeMode, RoutedAgentRole } from "@braincode/brain"
+import type { AgentIntentClarification, AgentTodoStatus, BraincodeMode, RoutedAgentRole } from "@braincode/brain"
 import type { PatchCheckSummary } from "./checks"
 import { hasPatchActivity, type PatchSummary } from "./patch"
 import type { ReviewDecision, ReviewDecisionStatus } from "./review"
 import type { RuntimeMetricsSummary } from "./metrics"
 
-export type FinalReportStatus = ReviewDecisionStatus | "answered" | "read_only"
+export type FinalReportStatus = ReviewDecisionStatus | "answered" | "read_only" | "needs_clarification"
 
 export type FinalReport = {
   version: 1
@@ -36,6 +36,7 @@ export type FinalReport = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   review?: ReviewDecision
+  clarification?: AgentIntentClarification
   metrics?: RuntimeMetricsSummary
   modelSummary: string
   fixIterations?: number
@@ -82,6 +83,7 @@ export type BuildFinalReportInput = {
   patch?: PatchSummary
   checks?: PatchCheckSummary
   review?: ReviewDecision
+  clarification?: AgentIntentClarification
   metrics?: RuntimeMetricsSummary
   runtimeToolCount?: number
   fixIterations?: number
@@ -127,6 +129,7 @@ export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
     ...(input.patch ? { patch: input.patch } : {}),
     ...(input.checks ? { checks: input.checks } : {}),
     ...(input.review ? { review: input.review } : {}),
+    ...(input.clarification ? { clarification: input.clarification } : {}),
     ...(input.metrics ? { metrics: input.metrics } : {}),
     modelSummary: input.modelSummary,
     ...(input.fixIterations ? { fixIterations: input.fixIterations } : {}),
@@ -134,7 +137,8 @@ export function buildFinalReport(input: BuildFinalReportInput): FinalReport {
   }
 }
 
-export function resolveFinalReportStatus(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review" | "runtimeToolCount">): FinalReportStatus {
+export function resolveFinalReportStatus(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review" | "clarification" | "runtimeToolCount">): FinalReportStatus {
+  if (input.clarification?.required) return "needs_clarification"
   if (input.review?.decision === "blocked") return "blocked"
   if (input.checks?.status === "failed") return "changes_requested"
   if (input.review?.decision) return input.review.decision
@@ -142,9 +146,12 @@ export function resolveFinalReportStatus(input: Pick<BuildFinalReportInput, "pat
   return (input.runtimeToolCount ?? 0) > 0 ? "read_only" : "answered"
 }
 
-function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review" | "fixIterations">): string[] {
+function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "checks" | "review" | "clarification" | "fixIterations">): string[] {
   const warnings: string[] = []
-  if (!hasPatchActivity(input.patch)) {
+  if (input.clarification?.required) {
+    warnings.push("Execution paused for user clarification before specialist handoff.")
+  }
+  if (!input.clarification?.required && !hasPatchActivity(input.patch)) {
     warnings.push("No patch activity detected.")
   }
   if (input.checks?.status === "failed" && input.review?.decision === "approved") {

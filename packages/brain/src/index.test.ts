@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentRoleSystemPrompts, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset } from "./index"
+import { agentRoleSystemPrompts, assessIntentCompleteness, createAgentTodoId, formatAgentRoleCatalog, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentIntentClarification, normalizeAgentRoutingPlan, normalizeAgentTodos, planAgentRouting, routedAgentRoles, selectAgentRole, selectBrain, selectModelPolicy, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset } from "./index"
 
 const brain: BrainModel = {
   id: "brain",
@@ -118,6 +118,40 @@ test("planAgentRouting honors requireReviewForFileEdits=false", () => {
   const looseBrain: BrainModel = { ...brain, routing: { ...brain.routing, requireReviewForFileEdits: false } }
   const plan = planAgentRouting("implement a new feature", looseBrain)
   expect(plan.requiresReview).toBe(false)
+})
+
+test("intent completeness gate asks for clarification on vague standalone requests", () => {
+  const clarification = assessIntentCompleteness("优化一下")
+  expect(clarification?.required).toBe(true)
+  expect(clarification?.question).toContain("哪种方式")
+  expect(clarification?.options.map((option) => option.id)).toEqual([
+    "make-scoped-change",
+    "plan-first",
+    "provide-details",
+  ])
+
+  const plan = planAgentRouting("fix it", brain)
+  expect(plan.clarification?.required).toBe(true)
+  expect(plan.todos[0]?.status).toBe("pending")
+})
+
+test("intent completeness gate does not block actionable implementation requests", () => {
+  expect(assessIntentCompleteness("实现一个登录页，包含邮箱密码校验和提交 loading 状态")).toBeUndefined()
+  expect(planAgentRouting("实现一个登录页，包含邮箱密码校验和提交 loading 状态", brain).clarification).toBeUndefined()
+})
+
+test("normalizeAgentIntentClarification repairs incomplete router clarification options", () => {
+  const clarification = normalizeAgentIntentClarification({
+    required: true,
+    reason: "ambiguous target",
+    question: "What should happen?",
+    missing: ["target", "target", ""],
+    options: [{ id: "1", label: "Plan", description: "Plan only" }],
+  })
+
+  expect(clarification?.missing).toEqual(["target"])
+  expect(clarification?.options.length).toBe(3)
+  expect(clarification?.options[0]?.id).toBe("make-scoped-change")
 })
 
 test("routedAgentRoles contains exactly the 13 routed roles (no coding/fastReply/research)", () => {

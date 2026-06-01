@@ -525,6 +525,20 @@ export type AgentTodoDependency = {
   reason?: string
 }
 
+export type AgentIntentClarificationOption = {
+  id: string
+  label: string
+  description: string
+}
+
+export type AgentIntentClarification = {
+  required: true
+  reason: string
+  question: string
+  missing: string[]
+  options: AgentIntentClarificationOption[]
+}
+
 export type AgentWorkerPlan = {
   role: RoutedAgentRole
   goal: string
@@ -539,6 +553,7 @@ export type AgentRoutingPlan = {
   dependencies: AgentTodoDependency[]
   requiresReview: boolean
   reason: string
+  clarification?: AgentIntentClarification
 }
 
 export type ModePolicy = {
@@ -705,6 +720,8 @@ const securityWorkPattern = /\b(security|secure|permission|permissions|vulnerabi
 const qaWorkPattern = /\b(qa|test|tests|testing|verify|verification|coverage|regression|e2e|unit test|integration test)\b|测试|验证|回归|覆盖率/
 const reviewWorkPattern = /\b(review|code review|inspect|audit)\b|审查|评审|代码审查|复查/
 const summaryWorkPattern = /\b(summary|summarize|report|recap|handoff)\b|总结|汇总|报告|交接/
+const vagueStandaloneEnglishPattern = /^(please\s+)?(fix|improve|update|change|modify|refactor|optimi[sz]e|handle|do|take care of)(\s+(it|this|that))?[\s.!?]*$/i
+const vagueStandaloneChinesePattern = /^(帮我|请|麻烦)?(看一下|看看|处理一下|处理下|改一下|改下|优化一下|优化下|完善一下|完善下|修一下|修下|搞一下|搞定|弄一下|弄下|调整一下|调整下)[。.!？?\s]*$/
 
 export function createAgentTodoId(role: RoutedAgentRole, index: number): string {
   return `todo-${String(index + 1).padStart(2, "0")}-${role}`
@@ -727,6 +744,153 @@ function normalizeTodoId(value: unknown, role: RoutedAgentRole, index: number, u
   }
   used.add(candidate)
   return candidate
+}
+
+function normalizeClarificationId(value: unknown, index: number, used: Set<string>): string {
+  const normalized = typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
+    : ""
+  const base = normalized || `option-${index + 1}`
+  let candidate = base
+  let suffix = 2
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  used.add(candidate)
+  return candidate
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function stringListField(value: unknown, maxItems: number): string[] {
+  if (!Array.isArray(value)) return []
+  const output: string[] = []
+  for (const item of value) {
+    const text = stringField(item)
+    if (!text || output.includes(text)) continue
+    output.push(text)
+    if (output.length >= maxItems) break
+  }
+  return output
+}
+
+export function normalizeAgentIntentClarification(value: unknown): AgentIntentClarification | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (record.required !== true) return undefined
+
+  const optionIds = new Set<string>()
+  const options: AgentIntentClarificationOption[] = Array.isArray(record.options)
+    ? record.options
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      .slice(0, 3)
+      .map((item, index) => ({
+        id: normalizeClarificationId(item.id, index, optionIds),
+        label: stringField(item.label) ?? `Option ${index + 1}`,
+        description: stringField(item.description) ?? "Use this option to clarify the request before specialist handoff.",
+      }))
+    : []
+
+  const fallbackOptions: AgentIntentClarificationOption[] = [
+    {
+      id: "make-scoped-change",
+      label: "Make a scoped change",
+      description: "Proceed with a conservative, project-aware implementation after inspecting context.",
+    },
+    {
+      id: "plan-first",
+      label: "Plan first",
+      description: "Return a concrete plan and tradeoffs before changing files.",
+    },
+    {
+      id: "provide-details",
+      label: "Provide details",
+      description: "Wait for target files, expected behavior, constraints, or acceptance criteria.",
+    },
+  ]
+
+  return {
+    required: true,
+    reason: stringField(record.reason) ?? "The request is not actionable enough to hand off safely.",
+    question: stringField(record.question) ?? "How should Braincode complete this request before routing it to specialist agents?",
+    missing: stringListField(record.missing, 6),
+    options: options.length >= 2 ? options : fallbackOptions,
+  }
+}
+
+export function assessIntentCompleteness(prompt: string): AgentIntentClarification | undefined {
+  const trimmed = prompt.trim()
+  if (!trimmed) return createDefaultIntentClarification("english")
+  if (hasInjectedContinuityContext(trimmed)) return undefined
+
+  const compact = trimmed.replace(/\s+/g, " ")
+  if (vagueStandaloneEnglishPattern.test(compact) || vagueStandaloneChinesePattern.test(compact)) {
+    return createDefaultIntentClarification(hasChineseText(compact) ? "chinese" : "english")
+  }
+  return undefined
+}
+
+function hasInjectedContinuityContext(prompt: string): boolean {
+  return /Conversation so far/i.test(prompt) || /Referenced session context/i.test(prompt)
+}
+
+function hasChineseText(prompt: string): boolean {
+  return /[\u4e00-\u9fff]/.test(prompt)
+}
+
+function createDefaultIntentClarification(language: "english" | "chinese"): AgentIntentClarification {
+  if (language === "chinese") {
+    return {
+      required: true,
+      reason: "请求缺少明确对象、期望结果或成功标准，直接分派给专业 agent 容易误解。",
+      question: "你希望我先按哪种方式补全这条请求？",
+      missing: ["明确目标或文件", "期望行为或验收标准"],
+      options: [
+        {
+          id: "make-scoped-change",
+          label: "直接做最小改动",
+          description: "我会先阅读项目上下文，按最小可验证范围实现，并在高风险动作前再确认。",
+        },
+        {
+          id: "plan-first",
+          label: "先出方案",
+          description: "我只梳理目标、方案和取舍，等你确认后再改代码。",
+        },
+        {
+          id: "provide-details",
+          label: "你补充细节",
+          description: "你提供目标文件、期望效果或限制后，我再路由给对应角色。",
+        },
+      ],
+    }
+  }
+
+  return {
+    required: true,
+    reason: "The request lacks a clear target, expected outcome, or success criteria, so specialist handoff would be guesswork.",
+    question: "How should I complete this request before routing it to specialist agents?",
+    missing: ["Clear target or file", "Expected behavior or acceptance criteria"],
+    options: [
+      {
+        id: "make-scoped-change",
+        label: "Make a scoped change",
+        description: "Inspect project context and implement the smallest verifiable change.",
+      },
+      {
+        id: "plan-first",
+        label: "Plan first",
+        description: "Return a concrete plan and tradeoffs before changing files.",
+      },
+      {
+        id: "provide-details",
+        label: "Provide details",
+        description: "Wait for target files, expected behavior, constraints, or acceptance criteria.",
+      },
+    ],
+  }
 }
 
 export function normalizeAgentTodos(workers: AgentWorkerPlan[], todos: AgentTodoItem[] = []): { workers: AgentWorkerPlan[]; todos: AgentTodoItem[] } {
@@ -833,13 +997,16 @@ function dedupeAgentTodoDependencies(dependencies: AgentTodoDependency[]): Agent
   return deduped
 }
 
-export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" | "dependencies"> & { todos?: AgentTodoItem[]; dependencies?: AgentTodoDependency[] }): AgentRoutingPlan {
+export function normalizeAgentRoutingPlan(plan: Omit<AgentRoutingPlan, "todos" | "dependencies" | "clarification"> & { todos?: AgentTodoItem[]; dependencies?: AgentTodoDependency[]; clarification?: unknown }): AgentRoutingPlan {
   const normalized = normalizeAgentTodos(plan.workers, plan.todos ?? [])
+  const clarification = normalizeAgentIntentClarification(plan.clarification)
+  const { clarification: _rawClarification, ...planWithoutRawClarification } = plan
   return {
-    ...plan,
+    ...planWithoutRawClarification,
     workers: normalized.workers,
     todos: normalized.todos,
     dependencies: normalizeAgentTodoDependencies({ primaryRole: plan.primaryRole, workers: normalized.workers, todos: normalized.todos, dependencies: plan.dependencies }),
+    ...(clarification ? { clarification } : {}),
   }
 }
 
@@ -852,6 +1019,7 @@ export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRouti
   const primaryRole = selectFallbackPrimaryRole(normalized)
   const workers = createFallbackWorkers(normalized, primaryRole)
   const todos = createFallbackTodos(normalized, primaryRole, workers)
+  const clarification = assessIntentCompleteness(prompt)
   return normalizeAgentRoutingPlan({
     primaryRole,
     workers,
@@ -859,6 +1027,7 @@ export function planAgentRouting(prompt: string, brain?: BrainModel): AgentRouti
     dependencies: createFallbackDependencies(todos),
     requiresReview: Boolean(brain?.routing.requireReviewForFileEdits && fileEditRiskPattern.test(normalized)),
     reason: "Deterministic fallback plan (no router decision).",
+    ...(clarification ? { clarification } : {}),
   })
 }
 
