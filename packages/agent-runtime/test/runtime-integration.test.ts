@@ -140,6 +140,57 @@ test("collectMcpToolServers trusts user MCP but skips untrusted project MCP befo
   expect(trustedProject.servers[0]?.env).toEqual({ SECRET: "project-secret" })
 })
 
+test("collectMcpToolServers lets project MCP shadow user MCP with the same server name", () => {
+  const result = collectMcpToolServers({
+    userMcp: {
+      path: "/tmp/user-mcp.json",
+      serverNames: ["filesystem"],
+      config: { mcpServers: { filesystem: { command: "user-filesystem-mcp" } } },
+    },
+    projectMcp: {
+      path: "/tmp/project/.mcp.json",
+      serverNames: ["filesystem"],
+      config: {
+        mcpServers: {
+          filesystem: { command: "project-filesystem-mcp", trusted: true },
+        },
+      },
+    },
+  })
+
+  expect(result.servers.map((server) => `${server.scope}:${server.name}:${server.command}`)).toEqual([
+    "project:filesystem:project-filesystem-mcp",
+  ])
+  expect(result.skipped).toEqual([
+    { scope: "user", name: "filesystem", reason: "shadowed by project MCP server" },
+  ])
+})
+
+test("collectMcpToolServers treats disabled project MCP as an explicit shadow over user MCP", () => {
+  const result = collectMcpToolServers({
+    userMcp: {
+      path: "/tmp/user-mcp.json",
+      serverNames: ["codebase-memory-mcp"],
+      config: { mcpServers: { "codebase-memory-mcp": { command: "user-codebase-memory-mcp" } } },
+    },
+    projectMcp: {
+      path: "/tmp/project/.mcp.json",
+      serverNames: ["codebase-memory-mcp"],
+      config: {
+        mcpServers: {
+          "codebase-memory-mcp": { command: "project-codebase-memory-mcp", disabled: true },
+        },
+      },
+    },
+  })
+
+  expect(result.servers).toEqual([])
+  expect(result.skipped).toEqual([
+    { scope: "project", name: "codebase-memory-mcp", reason: "disabled" },
+    { scope: "user", name: "codebase-memory-mcp", reason: "shadowed by project MCP server" },
+  ])
+})
+
 test("McpToolHub surfaces MCP isError tool calls as failed tool executions", async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-error-test-"))
   const serverScript = join(projectRoot, "server.js")

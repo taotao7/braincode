@@ -169,10 +169,13 @@ test("buildPrimaryPrompt adds capability guidance for connected browser/3D MCP s
   const primaryPrompt = buildPrimaryPrompt("review the homepage", [], "frontend", undefined, [
     "read_file",
     "mcp__chrome-devtools__navigate_page",
+    "mcp__codebase_memory_mcp__search_graph",
     "mcp__chrome-devtools__take_screenshot",
     "mcp__blender__get_scene_info",
   ])
   expect(primaryPrompt).toContain("A real browser is connected via the 'chrome-devtools' MCP server")
+  expect(primaryPrompt).toContain("A codebase knowledge graph is connected via the 'codebase_memory_mcp' MCP server")
+  expect(primaryPrompt).toContain("prefer graph tools such as search_graph")
   expect(primaryPrompt).toContain("A Blender instance is connected via the 'blender' MCP server")
 })
 
@@ -180,11 +183,13 @@ test("formatMcpUsageGuidance keys off server name and emits one line per connect
   const lines = formatMcpUsageGuidance([
     "mcp__chrome-devtools__navigate_page",
     "mcp__chrome-devtools__take_screenshot",
+    "mcp__codebase_memory_mcp__search_graph",
     "mcp__blender__render",
     "mcp__some-other__do_thing",
   ])
-  expect(lines).toHaveLength(3)
+  expect(lines).toHaveLength(4)
   expect(lines.some((line) => line.includes("'chrome-devtools'") && line.includes("real browser"))).toBe(true)
+  expect(lines.some((line) => line.includes("'codebase_memory_mcp'") && line.includes("knowledge graph"))).toBe(true)
   expect(lines.some((line) => line.includes("'blender'") && line.includes("Blender"))).toBe(true)
   expect(lines.some((line) => line.includes("'some-other'") && line.includes("exposes real capabilities"))).toBe(true)
 })

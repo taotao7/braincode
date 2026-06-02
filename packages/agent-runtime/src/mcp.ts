@@ -324,13 +324,15 @@ export function collectMcpToolServers(options: {
 }): { servers: McpToolServerInput[]; skipped: Array<{ scope: "user" | "project"; name: string; reason: string }> } {
   const servers: McpToolServerInput[] = []
   const skipped: Array<{ scope: "user" | "project"; name: string; reason: string }> = []
-  const seen = new Set<string>()
+  const seenServerNames = new Set<string>()
   const collect = (scope: "user" | "project", source?: ProjectMcpConfig) => {
     if (!source) return
     for (const { name, entry } of extractMcpServerEntries(source.config)) {
-      const key = `${scope}:${name}`
-      if (seen.has(key)) continue
-      seen.add(key)
+      if (seenServerNames.has(name)) {
+        skipped.push({ scope, name, reason: "shadowed by project MCP server" })
+        continue
+      }
+      seenServerNames.add(name)
       if (entry.disabled) {
         skipped.push({ scope, name, reason: "disabled" })
         continue

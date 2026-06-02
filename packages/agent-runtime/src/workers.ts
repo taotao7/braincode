@@ -696,6 +696,8 @@ export function formatMcpUsageGuidance(mcpToolNames: string[]): string[] {
     const normalized = server.toLowerCase().replace(/[-_]/g, "")
     if (normalized.includes("chromedevtools") || normalized === "chrome" || normalized.includes("playwright") || normalized.includes("puppeteer")) {
       lines.push(`A real browser is connected via the '${server}' MCP server. To verify or review UI, layout, or visual/runtime behavior, navigate to the running app and take a snapshot or screenshot with these tools instead of reasoning only from source.`)
+    } else if (normalized.includes("codebasememory")) {
+      lines.push(`A codebase knowledge graph is connected via the '${server}' MCP server. For code discovery, architecture mapping, symbol lookup, caller/callee tracing, and repository indexing, prefer graph tools such as search_graph, trace_path, get_code_snippet, query_graph, and get_architecture before local file search.`)
     } else if (normalized.includes("blender")) {
       lines.push(`A Blender instance is connected via the '${server}' MCP server. For 3D modeling, scene, or render tasks, drive Blender with these tools to produce the actual artifact rather than only describing what to build.`)
     } else if (normalized.includes("figma") || normalized.includes("opendesign")) {
