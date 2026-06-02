@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core"
 import type { ImageContent } from "@earendil-works/pi-ai"
 import { getAgentRoleSystemPrompt, type AgentTodoDependency, type AgentTodoStatus, type BraincodeMode, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, type ProjectSupport } from "@braincode/config"
+import { appendSessionRecord, type ProjectSupport, type UserSupport } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createHandoffAgentMessage, createWorkerResultAgentMessage, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
 import { generateImage, type BraincodeModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
@@ -20,6 +20,11 @@ export type WorkerLifecycleEvent =
   | { type: "worker_start"; role: RoutedAgentRole; goal: string; phase: "primary" | "support" | "review"; modelId: string; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; todoIds?: string[] }
   | { type: "worker_end"; role: RoutedAgentRole; phase: "primary" | "support" | "review"; status: "completed" | "blocked" | "failed"; handoffId: string; taskId: string; parentId: string; progress: TaskProgress; summary?: string; error?: string; todoIds?: string[] }
 
+export type WorkerExecutionModel = {
+  modelId: string
+  provider: string
+}
+
 export type ExecutedWorkerResult = WorkerResult & {
   role: RoutedAgentRole
   goal: string
@@ -27,6 +32,8 @@ export type ExecutedWorkerResult = WorkerResult & {
   status: "completed" | "blocked" | "failed"
   error?: string
   reviewDecision?: ReviewDecision
+  modelId?: string
+  provider?: string
 }
 
 export type WorkerTodoStatusHandler = (
@@ -43,7 +50,16 @@ const MAX_INLINE_AGENTS_CHARS = 32_000
 const MAX_INLINE_SKILLS = 12
 const MAX_INLINE_SKILL_CHARS = 8_000
 
-export function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string, phase: "support" | "review", projectSupport?: ProjectSupport): HandoffPacket {
+export type RuntimeSupportContext = ProjectSupport & {
+  user?: UserSupport
+}
+
+export function mergeProjectAndUserSupport(projectSupport: ProjectSupport, userSupport?: UserSupport): RuntimeSupportContext {
+  if (!userSupport || !hasUserSupport(userSupport)) return projectSupport
+  return { ...projectSupport, user: userSupport }
+}
+
+export function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string, phase: "support" | "review", projectSupport?: RuntimeSupportContext): HandoffPacket {
   return {
     ...brainToAgentContextTransfer,
     id: crypto.randomUUID(),
@@ -71,38 +87,63 @@ export function createWorkerHandoff(worker: RuntimeWorkerPlan, parentId: string,
   }
 }
 
-export function formatProjectSupportPromptSection(projectSupport?: ProjectSupport): string {
-  if (!projectSupport || (!projectSupport.agents && !projectSupport.mcp && projectSupport.skills.length === 0)) return ""
+export function formatProjectSupportPromptSection(projectSupport?: RuntimeSupportContext): string {
+  if (!projectSupport || (!hasProjectSupport(projectSupport) && !hasUserSupport(projectSupport.user))) return ""
 
-  const sections = [`Project support context from ${projectSupport.root}:`]
+  const sections = [
+    [
+      "Support context:",
+      `Project root: ${projectSupport.root}`,
+      projectSupport.user ? `User support home: ${projectSupport.user.home}` : "",
+      "Apply user-global support across projects. Apply project-local support as repository-specific guidance; if support files conflict for this project, follow the more specific project-local instruction.",
+    ].filter(Boolean).join("\n"),
+  ]
   if (projectSupport.agents) {
-    sections.push(`AGENTS.md (${projectSupport.agents.path}):\n${clipPromptText(projectSupport.agents.content, "AGENTS.md", MAX_INLINE_AGENTS_CHARS)}`)
+    sections.push(`Project AGENTS.md (${projectSupport.agents.path}):\n${clipPromptText(projectSupport.agents.content, "AGENTS.md", MAX_INLINE_AGENTS_CHARS)}`)
   }
   if (projectSupport.mcp) {
-    const servers = projectSupport.mcp.serverNames.length > 0 ? projectSupport.mcp.serverNames.join(", ") : "(none declared)"
-    sections.push(`MCP config (${projectSupport.mcp.path}):\nAvailable server names: ${servers}\nUse MCP servers only when Braincode exposes them as runtime tools; do not assume access from config metadata alone.`)
+    sections.push(formatMcpSupportSection("Project MCP config", projectSupport.mcp))
   }
-  if (projectSupport.skills.length > 0) {
-    const inlineSkills = projectSupport.skills.slice(0, MAX_INLINE_SKILLS)
-    const omittedCount = projectSupport.skills.length - inlineSkills.length
-    sections.push(
-      [
-        "Local skills (.agents/skills):",
-        ...inlineSkills.map((skill) => `### ${skill.id} (${skill.path})\n${clipPromptText(skill.content, `skill:${skill.id}`, MAX_INLINE_SKILL_CHARS)}`),
-        omittedCount > 0 ? `[${omittedCount} additional local skill file(s) omitted from inline prompt context. Use project files/tools if their full content is needed.]` : "",
-      ].join("\n\n"),
-    )
+  const projectSkills = formatSkillsSupportSection("Project-local skills (.agents/skills):", projectSupport.skills, "project skill")
+  if (projectSkills) sections.push(projectSkills)
+  if (projectSupport.user?.agents) {
+    sections.push(`User-global AGENTS.md (${projectSupport.user.agents.path}):\n${clipPromptText(projectSupport.user.agents.content, "user AGENTS.md", MAX_INLINE_AGENTS_CHARS)}`)
   }
-  return `${clipPromptText(sections.join("\n\n"), "project support context", MAX_INLINE_PROJECT_SUPPORT_CHARS)}\n`
+  if (projectSupport.user?.mcp) {
+    sections.push(formatMcpSupportSection("User-global MCP config", projectSupport.user.mcp))
+  }
+  const userSkills = formatSkillsSupportSection("User-global skills (~/.braincode/skills):", projectSupport.user?.skills ?? [], "user skill")
+  if (userSkills) sections.push(userSkills)
+  return `${clipPromptText(sections.join("\n\n"), "support context", MAX_INLINE_PROJECT_SUPPORT_CHARS)}\n`
 }
 
-export function summarizeProjectSupport(projectSupport: ProjectSupport) {
-  return {
+export function summarizeProjectSupport(projectSupport: RuntimeSupportContext) {
+  const summary: {
+    root: string
+    agents?: string
+    mcp?: { path: string; serverNames: string[] }
+    skills: Array<{ id: string; path: string }>
+    user?: {
+      home: string
+      agents?: string
+      mcp?: { path: string; serverNames: string[] }
+      skills: Array<{ id: string; path: string }>
+    }
+  } = {
     root: projectSupport.root,
     agents: projectSupport.agents?.path,
     mcp: projectSupport.mcp ? { path: projectSupport.mcp.path, serverNames: projectSupport.mcp.serverNames } : undefined,
     skills: projectSupport.skills.map((skill) => ({ id: skill.id, path: skill.path })),
   }
+  if (hasUserSupport(projectSupport.user)) {
+    summary.user = {
+      home: projectSupport.user.home,
+      agents: projectSupport.user.agents?.path,
+      mcp: projectSupport.user.mcp ? { path: projectSupport.user.mcp.path, serverNames: projectSupport.user.mcp.serverNames } : undefined,
+      skills: projectSupport.user.skills.map((skill) => ({ id: skill.id, path: skill.path })),
+    }
+  }
+  return summary
 }
 
 // User-facing response guidance for the primary agent only. Support workers and
@@ -110,7 +151,7 @@ export function summarizeProjectSupport(projectSupport: ProjectSupport) {
 // the shared role prompt where it would conflict with their output contract.
 const PRIMARY_RESPONSE_GUIDANCE = "Response style:\nKeep responses proportional to the task: answer simple questions directly, and reserve headers, bullet lists, and step-by-step breakdowns for genuinely multi-part work. Lead with the result, explain reasoning only where it matters, and do not pad with restatements or filler. Reply in the language the user used.\n"
 
-export function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: ProjectSupport, toolNames: string[] = [], environmentSection = ""): string {
+export function buildPrimaryPrompt(originalPrompt: string, workerResults: ExecutedWorkerResult[], primaryRole: RoutedAgentRole, projectSupport?: RuntimeSupportContext, toolNames: string[] = [], environmentSection = ""): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
   const toolContext = formatPrimaryToolContext(toolNames)
   const header = `${environmentSection}${supportContext}${toolContext}${PRIMARY_RESPONSE_GUIDANCE}`
@@ -130,13 +171,13 @@ Complete the request as the primary ${primaryRole} agent. Treat worker results a
 
 export async function runWorkerFromPlan(
   worker: RuntimeWorkerPlan,
-  buildPrompt: (handoff: HandoffPacket) => string,
+  buildPrompt: (handoff: HandoffPacket, model: WorkerExecutionModel) => string,
   sessionId: string,
   home: string | undefined,
   models: BraincodeModel[],
   mode: BraincodeMode,
   phase: "support" | "review",
-  projectSupport?: ProjectSupport,
+  projectSupport?: RuntimeSupportContext,
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   onTodoStatus?: WorkerTodoStatusHandler,
@@ -260,8 +301,12 @@ export async function runWorkerFromPlan(
     const unlinkAbort = linkRuntimeAbort(runtime, signal)
 
     try {
+      const executionModel: WorkerExecutionModel = {
+        modelId: selection.configured.id,
+        provider: selection.piModel.provider,
+      }
       const workerPrompt = addHookAdditionalContext(
-        applyWorkerMcpToolContext(buildPrompt(handoff), tools),
+        applyWorkerMcpToolContext(buildPrompt(handoff, executionModel), tools),
         [
           ...subagentStartHooks.additionalContext,
           ...(subagentStartHooks.blockedReason ? [subagentStartHooks.blockedReason] : []),
@@ -300,7 +345,7 @@ export async function runWorkerFromPlan(
       const result = normalizeWorkerResultText(text, handoff)
       const reviewDecision = phase === "review" ? normalizeReviewDecisionText(text, result) : undefined
       const status = workerResultStatus(result)
-      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status, reviewDecision }
+      const executed: ExecutedWorkerResult = { ...result, role: worker.role, goal: worker.goal, todoIds: worker.todoIds ?? [], status, reviewDecision, modelId: selection.configured.id, provider: selection.piModel.provider }
       await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(executed, { from: worker.role }), attempt: attempt + 1 }, home)
       await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result: executed, attempt: attempt + 1 }, home)
       await onTodoStatus?.(worker, phase, status, { summary: result.summary })
@@ -417,7 +462,7 @@ export async function runSupportWorkers(
   mode: BraincodeMode,
   toolExecution: RuntimePlan["toolExecution"],
   dependencies: AgentTodoDependency[] = [],
-  projectSupport?: ProjectSupport,
+  projectSupport?: RuntimeSupportContext,
   hookContext?: HookRuntimeContext,
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
   concurrencyCap?: number,
@@ -515,9 +560,18 @@ export async function runSupportWorkers(
   })
 }
 
-function projectSupportContextRefs(projectSupport?: ProjectSupport): ContextRef[] {
+function projectSupportContextRefs(projectSupport?: RuntimeSupportContext): ContextRef[] {
   if (!projectSupport) return []
   const refs: ContextRef[] = []
+  if (projectSupport.user?.agents) {
+    refs.push({ kind: "file", uri: projectSupport.user.agents.path, label: "user AGENTS.md" })
+  }
+  if (projectSupport.user?.mcp) {
+    refs.push({ kind: "file", uri: projectSupport.user.mcp.path, label: "user mcp.json" })
+  }
+  for (const skill of projectSupport.user?.skills ?? []) {
+    refs.push({ kind: "file", uri: skill.path, label: `user-skill:${skill.id}` })
+  }
   if (projectSupport.agents) {
     refs.push({ kind: "file", uri: projectSupport.agents.path, label: "AGENTS.md" })
   }
@@ -530,12 +584,36 @@ function projectSupportContextRefs(projectSupport?: ProjectSupport): ContextRef[
   return refs
 }
 
-function clipPromptText(text: string, label: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
-  return `${text.slice(0, maxChars)}\n\n[${label} truncated at ${maxChars}/${text.length} chars; use project files/tools to inspect the remaining content if needed.]`
+function hasProjectSupport(projectSupport?: ProjectSupport): boolean {
+  return Boolean(projectSupport && (projectSupport.agents || projectSupport.mcp || projectSupport.skills.length > 0))
 }
 
-function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: ProjectSupport, priorResults: ExecutedWorkerResult[] = [], environmentSection = ""): string {
+function hasUserSupport(userSupport?: UserSupport): userSupport is UserSupport {
+  return Boolean(userSupport && (userSupport.agents || userSupport.mcp || userSupport.skills.length > 0))
+}
+
+function formatMcpSupportSection(label: string, mcp: { path: string; serverNames: string[] }): string {
+  const servers = mcp.serverNames.length > 0 ? mcp.serverNames.join(", ") : "(none declared)"
+  return `${label} (${mcp.path}):\nAvailable server names: ${servers}\nUse MCP servers only when Braincode exposes them as runtime tools; do not assume access from config metadata alone.`
+}
+
+function formatSkillsSupportSection(title: string, skills: Array<{ id: string; path: string; content: string }>, labelPrefix: string): string {
+  if (skills.length === 0) return ""
+  const inlineSkills = skills.slice(0, MAX_INLINE_SKILLS)
+  const omittedCount = skills.length - inlineSkills.length
+  return [
+    title,
+    ...inlineSkills.map((skill) => `### ${skill.id} (${skill.path})\n${clipPromptText(skill.content, `${labelPrefix}:${skill.id}`, MAX_INLINE_SKILL_CHARS)}`),
+    omittedCount > 0 ? `[${omittedCount} additional ${labelPrefix} file(s) omitted from inline prompt context.]` : "",
+  ].join("\n\n")
+}
+
+function clipPromptText(text: string, label: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}\n\n[${label} truncated at ${maxChars}/${text.length} chars; use available tools to inspect the remaining content only if needed and allowed.]`
+}
+
+function buildSupportWorkerPrompt(originalPrompt: string, handoff: HandoffPacket, projectSupport?: RuntimeSupportContext, priorResults: ExecutedWorkerResult[] = [], environmentSection = ""): string {
   const supportContext = formatProjectSupportPromptSection(projectSupport)
   const priorResultContext = priorResults.length > 0
     ? `\nBrain-supplied prior worker results for dependencies:\n${formatWorkerResults(priorResults)}\n`
@@ -585,7 +663,7 @@ function formatPrimaryToolContext(toolNames: string[]): string {
   }
   if (hasWebSearch || mcpToolNames.length > 0 || names.includes("mcp__connect")) {
     onlineGuidanceLines.push(
-      "Do not read ~/.braincode config files (mcp.json, auth.json) or other paths outside the project to discover capabilities; the tools listed here are already what you can call.",
+      "Do not read ~/.braincode secret/config files or other paths outside the project to discover capabilities; this prompt already includes safe user-global support context and the tools listed here are already what you can call.",
     )
   }
   return [

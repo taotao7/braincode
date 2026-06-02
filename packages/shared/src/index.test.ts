@@ -23,14 +23,13 @@ test("normalizeModelApi migrates legacy OpenAI chat completions id", () => {
 })
 
 test("debugLog redacts sensitive nested values when debug is enabled", () => {
-  const calls: string[] = []
-  const originalError = console.error
-  console.error = (message?: unknown) => { calls.push(String(message)) }
+  const dir = mkdtempSync(join(tmpdir(), "braincode-debug-redact-"))
+  const debugFile = join(dir, "debug.log")
   try {
     process.env.BRAINCODE_DEBUG = "false"
+    process.env.BRAINCODE_DEBUG_FILE = debugFile
     expect(isDebugEnabled()).toBe(false)
     debugLog("test", "hidden", { apiKey: "secret" })
-    expect(calls).toEqual([])
 
     process.env.BRAINCODE_DEBUG = "true"
     expect(isDebugEnabled()).toBe(true)
@@ -39,18 +38,19 @@ test("debugLog redacts sensitive nested values when debug is enabled", () => {
       nested: { authorization: "bearer", keep: "value" },
       values: [{ token: "token-value" }],
     })
-  } finally {
-    console.error = originalError
-  }
 
-  expect(calls).toHaveLength(1)
-  expect(calls[0]).toContain("[braincode:debug:test] visible")
-  expect(calls[0]).toContain('"apiKey":"[redacted]"')
-  expect(calls[0]).toContain('"authorization":"[redacted]"')
-  expect(calls[0]).toContain('"token":"[redacted]"')
-  expect(calls[0]).toContain('"keep":"value"')
-  expect(calls[0]).not.toContain("secret")
-  expect(calls[0]).not.toContain("bearer")
+    const content = readFileSync(debugFile, "utf8")
+    expect(content).not.toContain("hidden")
+    expect(content).toContain("[braincode:debug:test] visible")
+    expect(content).toContain('"apiKey":"[redacted]"')
+    expect(content).toContain('"authorization":"[redacted]"')
+    expect(content).toContain('"token":"[redacted]"')
+    expect(content).toContain('"keep":"value"')
+    expect(content).not.toContain("secret")
+    expect(content).not.toContain("bearer")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test("debugLog writes to BRAINCODE_DEBUG_FILE instead of stderr", () => {

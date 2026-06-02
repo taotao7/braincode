@@ -128,12 +128,14 @@ export type ProjectChecksConfig = {
 
 export type UserSupportPaths = {
   home: string;
+  agents: string;
   mcp: string;
   skills: string;
 };
 
 export type UserSupport = {
   home: string;
+  agents?: ProjectInstructionFile;
   mcp?: ProjectMcpConfig;
   skills: ProjectSkill[];
 };
@@ -558,6 +560,7 @@ export function getProjectSupportPaths(
 export function getUserSupportPaths(home = getBraincodeHome()): UserSupportPaths {
   return {
     home,
+    agents: join(home, "AGENTS.md"),
     mcp: join(home, "mcp.json"),
     skills: join(home, "skills"),
   };
@@ -953,6 +956,7 @@ export async function readProjectChecks(
 
 export async function readUserSupport(home = getBraincodeHome()): Promise<UserSupport> {
   const paths = getUserSupportPaths(home);
+  const agentsContent = await readOptionalTextFile(paths.agents);
   const mcpFile = Bun.file(paths.mcp);
   const mcpConfig = (await mcpFile.exists())
     ? asRecord(JSON.parse(await mcpFile.text()))
@@ -960,6 +964,12 @@ export async function readUserSupport(home = getBraincodeHome()): Promise<UserSu
 
   return {
     home: paths.home,
+    agents: agentsContent
+      ? {
+          path: paths.agents,
+          content: agentsContent,
+        }
+      : undefined,
     mcp: mcpConfig
       ? {
           path: paths.mcp,

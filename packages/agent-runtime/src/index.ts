@@ -27,15 +27,15 @@ export type { BackgroundExitInfo, BackgroundExitListener } from "@braincode/tool
 import { addHookAdditionalContext, createHookContext, formatStopHookFeedback, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
 export { runConfiguredHooks } from "./hooks"
 export type { HookPermissionMode, HookRunRecord, HookRunResult, HookRuntimeContext } from "./hooks"
-import { runPatchChecksWithApproval, type PatchCheckSummary } from "./checks"
-export { classifyPatchKind, patchKindRequiresReview, runPatchChecks, runPatchChecksWithApproval } from "./checks"
-export type { PatchCheckOptions, PatchCheckResult, PatchCheckStatus, PatchCheckSummary, PatchKind } from "./checks"
+import { classifyPatchKind, classifyPatchRiskTier, patchHasAuthPath, patchHasCiPath, runPatchChecksWithApproval, type PatchCheckSummary } from "./checks"
+export { classifyPatchKind, classifyPatchRiskTier, patchHasAuthPath, patchHasCiPath, patchKindRequiresReview, patchKindRiskTier, runPatchChecks, runPatchChecksWithApproval } from "./checks"
+export type { PatchCheckOptions, PatchCheckResult, PatchCheckStatus, PatchCheckSummary, PatchKind, PatchRiskTier } from "./checks"
 import { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews, hasPatchActivity, type PatchSummary } from "./patch"
 export { collectPatchBaseline, collectPatchDiffSnapshot, collectPatchSummary, collectUntrackedFilePreviews } from "./patch"
 export type { PatchBaseline, PatchDiffSnapshot, PatchFileChange, PatchSummary, UntrackedFilePreview } from "./patch"
-import { applyCheckGateToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, mergeReviewResult, normalizeReviewDecisionText, type PatchReviewArtifacts, type ReviewDecision } from "./review"
-export { applyCheckGateToReviewDecision, applyReviewGatesToReviewDecision, buildReviewPrompt, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText } from "./review"
-export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity, ReviewGateOptions } from "./review"
+import { applyCheckGateToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, evaluateReviewIndependence, fixLoopTrigger, mergeReviewResult, normalizeReviewDecisionText, reviewModeForRiskTier, type PatchReviewArtifacts, type ReviewDecision, type ReviewIndependence } from "./review"
+export { applyCheckGateToReviewDecision, applyReviewGatesToReviewDecision, buildReviewPrompt, evaluateReviewIndependence, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText, reviewModeForRiskTier } from "./review"
+export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewCoverageEntry, ReviewCoverageStatus, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity, ReviewGateOptions, ReviewIndependence, ReviewIndependenceLevel, ReviewIndependenceParticipant, ReviewMode } from "./review"
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
 export type { ExpandedPromptResult, ExpandPromptReferencesOptions, PromptReference } from "./prompt-references"
 import { buildImageMakerPrompt, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
@@ -51,9 +51,9 @@ export type { BraincodeAgentRuntime, BraincodeAgentRuntimeOptions, TokenUsageSco
 import { buildRuntimePlan, createRuntimeWorkerPlan, formatRoleModelCapabilityDirective, normalizeRouterDecision, normalizeRouterModelId, type PlanRuntimeOptions, type RuntimePlan, type RuntimeWorkerPlan } from "./router"
 export { buildRuntimePlan, createRuntimeWorkerPlan, formatInputModalityRoutingDirective, formatRoleModelCapabilityDirective, normalizeRouterDecision, normalizeRouterModelId, routePromptWithBrain } from "./router"
 export type { PlanRuntimeOptions, RouterPlanDecision, RouterWorkerPlan, RuntimePlan, RuntimeWorkerPlan } from "./router"
-import { buildPrimaryPrompt, formatProjectSupportPromptSection, runSupportWorkers, runWorkerFromPlan, summarizeProjectSupport, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
-export { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, readOnlyToolWorkerRoles, runSupportWorkers, runWorkerFromPlan } from "./workers"
-export type { ExecutedWorkerResult, WorkerLifecycleEvent, WorkerTodoStatusHandler } from "./workers"
+import { buildPrimaryPrompt, formatProjectSupportPromptSection, mergeProjectAndUserSupport, runSupportWorkers, runWorkerFromPlan, summarizeProjectSupport, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
+export { buildPrimaryPrompt, createWorkerHandoff, formatProjectSupportPromptSection, mergeProjectAndUserSupport, readOnlyToolWorkerRoles, runSupportWorkers, runWorkerFromPlan } from "./workers"
+export type { ExecutedWorkerResult, RuntimeSupportContext, WorkerExecutionModel, WorkerLifecycleEvent, WorkerTodoStatusHandler } from "./workers"
 import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFAULT_MCP_STARTUP_BUDGET_MS, normalizeRuntimeInteger } from "./mcp-loading"
 import { createDispatchSpecialistTool, formatDispatchToolGuidance, type DispatchSpecialistTool } from "./dynamic-dispatch"
 export { createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchToolGuidance } from "./dynamic-dispatch"
@@ -511,6 +511,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   const environmentContext = await gatherEnvironmentContext({ cwd, modelId: plan.model.id })
   const environmentSection = formatEnvironmentSection(environmentContext)
   const userSupport = await readUserSupport(home)
+  const runtimeSupport = mergeProjectAndUserSupport(projectSupport, userSupport)
   const auth = await readAuth(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
@@ -562,7 +563,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         models,
         home,
         sessionId,
-        projectSupport,
+        projectSupport: runtimeSupport,
         environmentSection,
         hookContext,
         readOnlyTools,
@@ -629,18 +630,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
   try {
     const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, projectSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools(), environmentSection)
+    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, runtimeSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools(), environmentSection)
     if (plan.role === "imageMaker") {
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
       const primaryHandoffId = `primary:${primaryTaskId}`
       const primaryGoal = primaryWorker?.goal ?? request.prompt
-      const imagePrompt = buildImageMakerPrompt({ request: effectivePrompt, workerResults, projectSupport })
+      const imagePrompt = buildImageMakerPrompt({ request: effectivePrompt, workerResults, projectSupport: runtimeSupport })
       let lastError: unknown
       for (const [attempt, { selection, apiKey }] of candidates.entries()) {
         plan.model = selection.configured
         plan.piModel = toPiModelSummary(selection)
-        await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
+        await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(runtimeSupport), attempt: attempt + 1 }, home)
         await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
         await emitWorkerEvent({
           type: "worker_start",
@@ -731,7 +732,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       throw lastError instanceof Error ? lastError : new Error(String(lastError))
     }
 
-    const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, projectSupport, runtimeTools.map((tool) => tool.name), environmentSection)
+    const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, runtimeSupport, runtimeTools.map((tool) => tool.name), environmentSection)
     const dispatchGuidance = dispatchTool ? formatDispatchToolGuidance(plan.mode) : ""
     const primaryPrompt = dispatchGuidance ? `${dispatchGuidance}\n${primaryPromptBase}` : primaryPromptBase
     let lastError: unknown
@@ -747,7 +748,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         workerResultCount: workerResults.length,
         toolCount: runtimeTools.length,
       })
-      await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(projectSupport), attempt: attempt + 1 }, home)
+      await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(runtimeSupport), attempt: attempt + 1 }, home)
       const primaryTodoIds = todoIdsForRole(plan, plan.role)
       await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
       const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
@@ -905,18 +906,94 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
               reason,
             })
           }
+          const riskTier = hasPatchActivity(patchAfterPrimary)
+            ? classifyPatchRiskTier({
+                patchKind: classifyPatchKind(patchAfterPrimary),
+                permissionReviewRequired: permissionPolicyReviewRequired,
+                hasAuthPath: patchHasAuthPath(patchAfterPrimary),
+                hasCiPath: patchHasCiPath(patchAfterPrimary),
+              })
+            : undefined
+          const reviewMode = riskTier ? reviewModeForRiskTier(riskTier) : "normal"
+          const primaryIndependence = {
+            modelId: plan.model.id,
+            provider: plan.piModel.provider,
+          }
+          const plannedReviewer = { modelId: reviewWorker?.model?.id, provider: reviewWorker?.piModel?.provider }
+          const reviewChangedFiles = patchAfterPrimary?.changedFiles.map((change) => change.path) ?? []
           reviewResult =
             plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-              ? await runWorkerFromPlan(reviewWorker, (handoff) => buildReviewPrompt(effectivePrompt, primarySummary, workerResults, handoff, formatProjectSupportPromptSection(projectSupport), reviewArtifacts, environmentSection), sessionId, home, models, plan.mode, "review", projectSupport, hookContext, request.onWorkerEvent, onWorkerTodoStatus, promptImages, [...readOnlyTools, ...mcpHub.getTools()], toolEvidenceCache, createPhaseEventHandler("review", toolCallMetrics, request.onEvent), request.signal)
+              ? await runWorkerFromPlan(
+                  reviewWorker,
+                  (handoff, reviewer) => buildReviewPrompt(
+                    effectivePrompt,
+                    primarySummary,
+                    workerResults,
+                    handoff,
+                    formatProjectSupportPromptSection(runtimeSupport),
+                    reviewArtifacts,
+                    environmentSection,
+                    {
+                      mode: reviewMode,
+                      riskTier,
+                      independence: evaluateReviewIndependence(primaryIndependence, reviewer),
+                    },
+                  ),
+                  sessionId,
+                  home,
+                  models,
+                  plan.mode,
+                  "review",
+                  runtimeSupport,
+                  hookContext,
+                  request.onWorkerEvent,
+                  onWorkerTodoStatus,
+                  promptImages,
+                  [...readOnlyTools, ...mcpHub.getTools()],
+                  toolEvidenceCache,
+                  createPhaseEventHandler("review", toolCallMetrics, request.onEvent),
+                  request.signal,
+                )
               : undefined
+          const actualReviewer = reviewResult?.modelId
+            ? { modelId: reviewResult.modelId, provider: reviewResult.provider }
+            : plannedReviewer
+          const reviewIndependence: ReviewIndependence = evaluateReviewIndependence(primaryIndependence, actualReviewer)
+          if (reviewArtifacts && plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review") {
+            await appendSessionRecord(sessionId, {
+              type: "review_artifacts_summary",
+              attempt: attempt + 1,
+              fixIteration: fixIterations,
+              changedFiles: reviewChangedFiles,
+              diffTruncated: Boolean(reviewArtifacts.diff?.truncated),
+              checksStatus: checks?.status,
+              riskTier,
+              reviewMode,
+              independence: {
+                primary: primaryIndependence,
+                reviewer: actualReviewer,
+                level: reviewIndependence.level,
+                sameModel: reviewIndependence.sameModel,
+                sameProvider: reviewIndependence.sameProvider,
+              },
+            }, home)
+          }
           reviewDecision = reviewResult
             ? applyCheckGateToReviewDecision(
                 reviewResult.reviewDecision ?? normalizeReviewDecisionText(reviewResult.summary, reviewResult),
                 checks,
                 reviewArtifacts,
-                { missingArtifacts: "changes_requested" },
+                {
+                  missingArtifacts: "changes_requested",
+                  ...(riskTier ? { riskTier } : {}),
+                  ...(reviewChangedFiles.length > 0 ? { changedFiles: reviewChangedFiles } : {}),
+                  independence: reviewIndependence,
+                },
               )
             : undefined
+          if (reviewDecision) {
+            reviewDecision = { ...reviewDecision, mode: reviewMode }
+          }
           if (reviewResult) {
             reviewResult.reviewDecision = reviewDecision
           }

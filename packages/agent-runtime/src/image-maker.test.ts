@@ -108,13 +108,18 @@ test("buildImageMakerPrompt includes worker guidance and project visual constrai
       root: "/project",
       agents: { path: "/project/AGENTS.md", content: "Visual style applies." },
       skills: [],
+      user: {
+        home: "/home/.braincode",
+        agents: { path: "/home/.braincode/AGENTS.md", content: "Global visual style applies." },
+        skills: [],
+      },
     } as ProjectSupport,
   })
 
   expect(prompt).toContain("make a product screenshot style hero image")
   expect(prompt).toContain("Brain-supplied worker guidance")
   expect(prompt).toContain("Use a clean app UI")
-  expect(prompt).toContain("Project visual constraints from AGENTS.md")
+  expect(prompt).toContain("Visual constraints from AGENTS.md")
 })
 
 test("imageMakerWorkerResult records artifact metadata and revised prompt risk", () => {

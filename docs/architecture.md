@@ -241,7 +241,7 @@ Braincode owns:
 - context isolation and handoff protocol;
 - local configuration server;
 - project/user configuration storage;
-- project support discovery for `AGENTS.md`, `.mcp.json`, `.agents/skills`, and `.agents/hooks.json`;
+- user-global and project support discovery for `AGENTS.md`, MCP metadata, skills, and hooks;
 - coding workflow product behavior.
 
 The adapter boundary is:
@@ -250,16 +250,25 @@ The adapter boundary is:
 - `packages/agent-runtime` creates Pi-backed agent runtime instances from Braincode mode, selected model policy, and system prompt.
 - Higher-level orchestration should depend on Braincode package interfaces, not Pi package internals directly.
 
-## Project support context
+## Support context
 
-Braincode reads project-local support files from the active project root:
+Braincode reads user-global support files from `~/.braincode/` and project-local support files from the active project root. User-global support applies across projects; project-local support is repository-specific and takes precedence for project work when instructions conflict.
+
+User-global support files:
+
+- `~/.braincode/AGENTS.md` provides durable user-level instructions and conventions.
+- `~/.braincode/mcp.json` declares user-installed MCP servers. Prompt context receives safe metadata such as server names and the config path; runtime tool exposure still determines what the model can call.
+- `~/.braincode/skills` contains user-global skills.
+- `~/.braincode/hooks.json` contains user-level lifecycle hooks.
+
+Project-local support files:
 
 - `AGENTS.md` provides durable project instructions and conventions.
 - `.mcp.json` declares project MCP servers. The runtime may use trusted project entries to configure MCP tools, but model prompts should only receive safe metadata such as server names and the config path, not raw secrets or full command configuration. User-level MCP config is treated as user-installed/trusted; project entries must set `trusted: true` before Braincode starts their commands.
 - `.agents/skills` contains project-local skills. A skill can live at `.agents/skills/<skill-id>/SKILL.md` or as a Markdown file directly under `.agents/skills`.
 - `.agents/hooks.json` contains project-local lifecycle hooks.
 
-`packages/config` owns discovery and parsing for these project support files. `packages/agent-runtime` injects discovered `AGENTS.md` and skill content into primary, worker, and review prompts, and records support metadata in the Brain task session log. Worker handoff packets carry support file references, but each worker still receives its own isolated task context.
+`packages/config` owns discovery and parsing for these support files. `packages/agent-runtime` injects discovered `AGENTS.md` and skill content into primary, worker, dispatch, and review prompts, and records safe support metadata in the Brain task session log. Worker handoff packets carry support file references, but each worker still receives its own isolated task context.
 
 ## Hooks
 

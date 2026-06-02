@@ -54,7 +54,7 @@ packages/
   shared/          极少量工具函数（debugLog、基础类型）。不要往这里堆代码。
   protocol/        线协议形状：ApiResult、ContextRef、AgentMessage。
   config/          ~/.braincode/* schema、原子写、会话 JSONL、
-                   项目支持文件发现（AGENTS.md、.mcp.json、.agents/*）。
+                   用户/项目支持文件发现（AGENTS.md、MCP、skills、hooks）。
   server/          127.0.0.1 上的 Bun.serve；给配置 UI 的类型化 API。
   llm/             BraincodeModel -> Pi Model 映射、API key 解析。
   brain/           BrainModel、角色目录 + 提示词、planAgentRouting。
@@ -120,12 +120,15 @@ v0.2.0 移除：`coding`（被 frontend/backend 吸收）、`fastReply`（被 `r
 
 ```
 ~/.braincode/
+  AGENTS.md         注入到 prompt 的长期用户级指令
   settings.json      执行模式、默认 brain id、feature flag
   auth.json          provider key（不会进模型 prompt）
   brains.json        Brain Model 列表
   models.json        BraincodeModel 目录（文本、视觉和图片生成模型）
   tools.json         工具开关
+  mcp.json           用户级 MCP server 声明（prompt 中只露元数据）
   hooks.json         用户级生命周期 hook
+  skills/<id>/SKILL.md   用户级 skill
   sessions/          每个 session 一份 JSONL，记录编排事件
   logs/、cache/      运行时副产物
 ```

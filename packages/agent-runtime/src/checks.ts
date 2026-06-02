@@ -15,6 +15,45 @@ export type PatchKind = CheckPatchKind
 
 export type PatchCheckStatus = "passed" | "failed" | "skipped"
 
+/**
+ * Coarse risk tier derived from the patch kind (and, where available,
+ * permission-policy signals). The tier drives review mode, required
+ * independence, and coverage requirements. Critical tier is only reached when
+ * the caller has external evidence (auth+ci overlap, or a permission policy
+ * critical signal); the path-only heuristic never returns `critical` on its
+ * own to avoid silent escalation surprises.
+ */
+export type PatchRiskTier = "low" | "medium" | "high" | "critical"
+
+export function patchKindRiskTier(kind: PatchKind): PatchRiskTier {
+  switch (kind) {
+    case "docs-only":
+    case "test-only":
+      return "low"
+    case "frontend":
+    case "backend":
+    case "unknown-code":
+    case "package-change":
+      return "medium"
+    case "auth-risk":
+    case "db-risk":
+    case "ci-risk":
+      return "high"
+  }
+}
+
+export function classifyPatchRiskTier(input: {
+  patchKind: PatchKind
+  permissionReviewRequired?: boolean
+  hasAuthPath?: boolean
+  hasCiPath?: boolean
+}): PatchRiskTier {
+  if (input.hasAuthPath && input.hasCiPath) return "critical"
+  const base = patchKindRiskTier(input.patchKind)
+  if (input.permissionReviewRequired && (base === "low" || base === "medium")) return "high"
+  return base
+}
+
 export type PatchCheckResult = {
   name: string
   command: string
@@ -173,6 +212,20 @@ export function classifyPatchKind(input?: PatchSummary | readonly PatchFileChang
   if (paths.some(isFrontendPath)) return "frontend"
   if (paths.some(isBackendPath)) return "backend"
   return "unknown-code"
+}
+
+export function patchHasAuthPath(input?: PatchSummary | readonly PatchFileChange[]): boolean {
+  const changes: readonly PatchFileChange[] = input
+    ? isPatchSummaryInput(input) ? input.changedFiles : input
+    : []
+  return changes.some((change) => isAuthPath(change.path))
+}
+
+export function patchHasCiPath(input?: PatchSummary | readonly PatchFileChange[]): boolean {
+  const changes: readonly PatchFileChange[] = input
+    ? isPatchSummaryInput(input) ? input.changedFiles : input
+    : []
+  return changes.some((change) => isCiPath(change.path))
 }
 
 function isPatchSummaryInput(input: PatchSummary | readonly PatchFileChange[]): input is PatchSummary {

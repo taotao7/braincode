@@ -247,7 +247,7 @@ export const fr = {
 
   docs_agents_title: "7. AGENTS.md",
   docs_agents_intro:
-    "AGENTS.md à la racine du dépôt est le contexte de projet durable. Braincode le lit dans l'agent principal et dans chaque agent de support. Utilisez-le pour les règles d'ingénierie, les conventions de codage et les liens vers la documentation approfondie — pas pour des notes de tâches temporaires.",
+    "AGENTS.md peut vivre dans ~/.braincode/AGENTS.md pour les instructions utilisateur globales et à la racine du dépôt pour le contexte projet. Braincode lit les deux dans l'agent principal et chaque worker ; les instructions projet priment pour le travail dans ce dépôt.",
 
   docs_hooks_title: "8. Hooks",
   docs_hooks_intro:
@@ -322,7 +322,7 @@ export const fr = {
   docs_tui_cmd_team_test:
     "Diagnostic : force chaque rôle à exécuter le prompt en parallèle. Utile pour vérifier le comportement des rôles et la disponibilité des modèles.",
   docs_tui_cmd_skill: "Liste les compétences (skills) du projet et utilisateur chargées depuis .agents/skills et ~/.braincode/skills.",
-  docs_tui_cmd_agents: "Affiche le chemin, la taille du fichier AGENTS.md et indique s'il a été chargé.",
+  docs_tui_cmd_agents: "Affiche les chemins, tailles et états de chargement des AGENTS.md utilisateur global et projet local.",
   docs_tui_cmd_files: "Rafraîchit l'index @file utilisé pour l'autocomplétion des noms de fichiers.",
   docs_tui_cmd_clear: "Efface la transcription affichée. Ceci ne démarre pas une nouvelle session.",
   docs_tui_cmd_exit: "Quitter le TUI.",

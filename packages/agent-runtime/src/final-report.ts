@@ -189,6 +189,15 @@ function finalReportWarnings(input: Pick<BuildFinalReportInput, "patch" | "check
   if (input.review?.decision === "blocked") {
     warnings.push("Review blocked final approval.")
   }
+  if (input.review?.independence) {
+    const ind = input.review.independence
+    const tier = input.review.riskTier
+    if (ind.sameModel) {
+      warnings.push(`Self-review bias risk: primary and reviewer share the same model (${ind.primary.modelId ?? "unknown"}); independence level ${ind.level}.`)
+    } else if (ind.sameProvider && (tier === "high" || tier === "critical")) {
+      warnings.push(`Reviewer shares provider with primary (${ind.primary.provider ?? "unknown"}); independence level ${ind.level} for ${tier}-risk patch.`)
+    }
+  }
   if ((input.fixIterations ?? 0) > 0) {
     if (input.checks?.status === "failed") {
       warnings.push(`Fix budget exhausted after ${input.fixIterations} iteration(s); checks still failing.`)

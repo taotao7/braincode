@@ -247,7 +247,7 @@ export const zh = {
 
   docs_agents_title: "7. AGENTS.md",
   docs_agents_intro:
-    "代码库根目录的 AGENTS.md 是持久化的项目上下文。Braincode 会将其读取给主要 agent 和所有 worker。请在其中记录工程规则、编码规范及深入文档的链接 —— 不要用于暂时的任务笔记。",
+    "~/.braincode/AGENTS.md 可作为用户全局指令，代码库根目录的 AGENTS.md 作为项目上下文。Braincode 会把两者读取给主要 agent 和所有 worker；处理项目任务时，项目指令优先。",
 
   docs_hooks_title: "8. 钩子 (Hooks)",
   docs_hooks_intro:
@@ -322,7 +322,7 @@ export const zh = {
   docs_tui_cmd_team_test:
     "诊断命令：强制每个角色并行处理该提示词。用于验证各角色行为及模型可用性。",
   docs_tui_cmd_skill: "列出从 .agents/skills 及 ~/.braincode/skills 加载的项目技能与用户技能。",
-  docs_tui_cmd_agents: "显示 AGENTS.md 文件的路径、大小及其是否已被加载。",
+  docs_tui_cmd_agents: "显示用户全局和项目本地 AGENTS.md 的路径、大小及其是否已被加载。",
   docs_tui_cmd_files: "刷新用于文件路径自动补全的 @file 索引。",
   docs_tui_cmd_clear: "清空日志输出。这不会开启一个新会话。",
   docs_tui_cmd_exit: "退出 TUI。",

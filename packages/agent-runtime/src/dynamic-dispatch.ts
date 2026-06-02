@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
 import { Type } from "typebox"
 import { getModePolicy, routedAgentRoles, selectBrain, type BrainModel, type BrainPreset, type BraincodeMode, type RoutedAgentRole } from "@braincode/brain"
-import { appendSessionRecord, defaultBrains, readBrains, type ProjectSupport } from "@braincode/config"
+import { appendSessionRecord, defaultBrains, readBrains } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
 import type { ToolEvidenceCache } from "./evidence-cache"
@@ -10,7 +10,7 @@ import { formatWorkerResults } from "./review"
 import { createRuntimeWorkerPlan, type RuntimePlan } from "./router"
 import { throwIfRunAborted } from "./runtime-agent"
 import { formatReadOnlyToolAccess } from "./tool-discipline"
-import { readOnlyToolWorkerRoles, runWorkerFromPlan, type ExecutedWorkerResult, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
+import { formatProjectSupportPromptSection, readOnlyToolWorkerRoles, runWorkerFromPlan, type ExecutedWorkerResult, type RuntimeSupportContext, type WorkerLifecycleEvent, type WorkerTodoStatusHandler } from "./workers"
 
 // Roles the primary agent may request mid-run through the dispatch tool. This is
 // intentionally narrower than the full routed-role set: it excludes `review`
@@ -27,7 +27,7 @@ export type DispatchSpecialistToolOptions = {
   models: BraincodeModel[]
   home: string | undefined
   sessionId: string
-  projectSupport: ProjectSupport
+  projectSupport: RuntimeSupportContext
   // Run-global environment facts prepended to the dispatched specialist's
   // prompt so it has the same cwd/platform/date/git context as the primary.
   environmentSection?: string
@@ -214,7 +214,7 @@ async function resolveBrain(home: string | undefined, brainId: string): Promise<
 // Exported for direct unit testing: the prompt builders only run deep inside a
 // successful worker execution, so they are verified in isolation rather than
 // through a full dispatched run.
-export function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: ProjectSupport, environmentSection = ""): string {
+export function buildDispatchWorkerPrompt(originalRequest: string, goal: string, handoff: { task: { id: string; parentId: string } }, projectSupport: RuntimeSupportContext, environmentSection = ""): string {
   const support = formatDispatchProjectSupport(projectSupport)
   return `Run this isolated Braincode specialist consultation requested mid-run by the primary agent.
 
@@ -232,9 +232,8 @@ Return only JSON in this shape:
 {"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"summary":"concise actionable findings","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["risk or caveat"],"nextQuestions":["question only if blocked"]}`
 }
 
-export function formatDispatchProjectSupport(projectSupport: ProjectSupport): string {
-  if (!projectSupport.agents) return ""
-  return `Project instructions (${projectSupport.agents.path}):\n${projectSupport.agents.content}\n\n`
+export function formatDispatchProjectSupport(projectSupport: RuntimeSupportContext): string {
+  return formatProjectSupportPromptSection(projectSupport)
 }
 
 function dispatchToolError(message: string): AgentToolResult<{ tool: string; ok: false; error: string }> {
@@ -254,7 +253,6 @@ function dispatchToolResult(
     details: { tool: DISPATCH_TOOL_NAME, ok: true, role: result.role, status: result.status, budget },
   }
 }
-
 
 
 

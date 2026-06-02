@@ -223,33 +223,46 @@ test("buildDispatchWorkerPrompt embeds the request, goal, and handoff ids", () =
   // Dispatched specialists are read-only/advisory and reuse the shared discipline.
   expect(prompt).toContain("Tool access:")
   expect(prompt).toContain("search before reading")
-  // No project instructions means no project-support preamble.
-  expect(prompt).not.toContain("Project instructions")
+  // No support files means no support-context preamble.
+  expect(prompt).not.toContain("Support context")
 })
 
-test("buildDispatchWorkerPrompt prepends project instructions when present", () => {
+test("buildDispatchWorkerPrompt prepends support context when present", () => {
   const prompt = buildDispatchWorkerPrompt(
     "Build the login API.",
     "Review the schema.",
     { task: { id: "task-1", parentId: "brain-ctx" } },
-    { root: "/repo", agents: { path: "AGENTS.md", content: "House rules apply." }, mcp: undefined, skills: [] } as never,
+    {
+      root: "/repo",
+      agents: { path: "AGENTS.md", content: "House rules apply." },
+      mcp: undefined,
+      skills: [],
+      user: {
+        home: "/home/.braincode",
+        agents: { path: "/home/.braincode/AGENTS.md", content: "Global rules apply." },
+        mcp: undefined,
+        skills: [],
+      },
+    } as never,
   )
-  expect(prompt).toContain("Project instructions (AGENTS.md):")
+  expect(prompt).toContain("User-global AGENTS.md (/home/.braincode/AGENTS.md):")
+  expect(prompt).toContain("Global rules apply.")
+  expect(prompt).toContain("Project AGENTS.md (AGENTS.md):")
   expect(prompt).toContain("House rules apply.")
 })
 
-test("formatDispatchProjectSupport returns empty string without project instructions", () => {
+test("formatDispatchProjectSupport returns empty string without support files", () => {
   expect(formatDispatchProjectSupport({ root: "/repo", agents: undefined, mcp: undefined, skills: [] } as never)).toBe("")
 })
 
-test("formatDispatchProjectSupport renders the instruction file path and content", () => {
+test("formatDispatchProjectSupport renders support instruction path and content", () => {
   const text = formatDispatchProjectSupport({
     root: "/repo",
     agents: { path: "AGENTS.md", content: "Be careful." },
     mcp: undefined,
     skills: [],
   } as never)
-  expect(text).toContain("Project instructions (AGENTS.md):")
+  expect(text).toContain("Project AGENTS.md (AGENTS.md):")
   expect(text).toContain("Be careful.")
 })
 

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "bun:test"
-import { classifyPatchKind, runPatchChecks, runPatchChecksWithApproval } from "./checks"
+import { classifyPatchKind, classifyPatchRiskTier, patchHasAuthPath, patchHasCiPath, patchKindRiskTier, runPatchChecks, runPatchChecksWithApproval } from "./checks"
 
 function patchFor(paths: string[]) {
   return {
@@ -28,6 +28,39 @@ test("classifyPatchKind categorizes representative patch paths", () => {
   expect(classifyPatchKind(patchFor(["package.json"]))).toBe("package-change")
   expect(classifyPatchKind(patchFor([".github/workflows/ci.yml"]))).toBe("ci-risk")
   expect(classifyPatchKind(patchFor(["src/user.test.ts"]))).toBe("test-only")
+})
+
+test("patchKindRiskTier maps kinds to coarse risk tiers", () => {
+  expect(patchKindRiskTier("docs-only")).toBe("low")
+  expect(patchKindRiskTier("test-only")).toBe("low")
+  expect(patchKindRiskTier("frontend")).toBe("medium")
+  expect(patchKindRiskTier("backend")).toBe("medium")
+  expect(patchKindRiskTier("package-change")).toBe("medium")
+  expect(patchKindRiskTier("auth-risk")).toBe("high")
+  expect(patchKindRiskTier("db-risk")).toBe("high")
+  expect(patchKindRiskTier("ci-risk")).toBe("high")
+})
+
+test("classifyPatchRiskTier escalates auth+ci overlap to critical and permission-review to high", () => {
+  const auth = patchFor(["src/auth/login.ts"])
+  const ci = patchFor([".github/workflows/ci.yml"])
+  const both = patchFor(["src/auth/login.ts", ".github/workflows/ci.yml"])
+
+  expect(patchHasAuthPath(auth)).toBe(true)
+  expect(patchHasCiPath(ci)).toBe(true)
+
+  expect(classifyPatchRiskTier({
+    patchKind: classifyPatchKind(both),
+    hasAuthPath: patchHasAuthPath(both),
+    hasCiPath: patchHasCiPath(both),
+  })).toBe("critical")
+
+  expect(classifyPatchRiskTier({
+    patchKind: "backend",
+    permissionReviewRequired: true,
+  })).toBe("high")
+
+  expect(classifyPatchRiskTier({ patchKind: "docs-only" })).toBe("low")
 })
 
 test("runPatchChecks reports configured missing scripts without executing unrelated scripts", async () => {

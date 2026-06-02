@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import type { ModelPolicy, RoutedAgentRole } from "@braincode/brain"
-import { getBraincodeHome, type ProjectSupport } from "@braincode/config"
+import { getBraincodeHome, type ProjectSupport, type UserSupport } from "@braincode/config"
 import { agentToBrainContextTransfer, type HandoffPacket, type WorkerResult } from "@braincode/context"
 import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
 import { selectRuntimeModelCandidatesWithApiKey, type RuntimeModelCandidate } from "./model-selection"
@@ -19,6 +19,10 @@ export type ImageMakerWorkerResult = WorkerResult & {
   goal: string
   todoIds: string[]
   status: "completed"
+}
+
+type ImageMakerSupportContext = ProjectSupport & {
+  user?: UserSupport
 }
 
 export async function selectImageMakerModelCandidates(
@@ -46,7 +50,7 @@ export async function saveGeneratedImageArtifact(sessionId: string, result: Imag
 export function buildImageMakerPrompt(input: {
   request: string
   workerResults?: PromptWorkerResult[]
-  projectSupport?: ProjectSupport
+  projectSupport?: ImageMakerSupportContext
 }): string {
   const sections = [
     "Create a raster image asset for this Braincode request.",
@@ -58,8 +62,8 @@ export function buildImageMakerPrompt(input: {
   if (input.workerResults && input.workerResults.length > 0) {
     sections.push("", "Brain-supplied worker guidance:", formatWorkerResults(input.workerResults))
   }
-  if (input.projectSupport?.agents) {
-    sections.push("", "Project visual constraints from AGENTS.md may apply; honor explicit brand or safety constraints when they are relevant.")
+  if (input.projectSupport?.agents || input.projectSupport?.user?.agents) {
+    sections.push("", "Visual constraints from AGENTS.md may apply; honor explicit brand or safety constraints when they are relevant.")
   }
   return sections.join("\n")
 }

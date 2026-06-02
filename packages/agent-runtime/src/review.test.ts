@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { applyReviewGatesToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, fixLoopTrigger, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText, type PromptWorkerResult, type ReviewDecision } from "./review"
+import { applyReviewGatesToReviewDecision, buildPrimaryFixPrompt, buildReviewPrompt, evaluateReviewIndependence, fixLoopTrigger, formatWorkerResults, mergeReviewResult, normalizeReviewDecisionText, type PromptWorkerResult, type ReviewDecision } from "./review"
 import type { PatchCheckSummary } from "./checks"
 
 const failedChecks: PatchCheckSummary = {
@@ -227,6 +227,169 @@ test("applyReviewGatesToReviewDecision can block missing review artifacts by pol
   expect(decision.decision).toBe("blocked")
   expect(decision.blockingIssues[0]).toContain("Review artifacts were not collected")
   expect(decision.residualRisks[0]).toContain("Review artifacts were not collected")
+})
+
+test("applyReviewGatesToReviewDecision downgrades same-model reviewer on high-risk patch", () => {
+  const decision = applyReviewGatesToReviewDecision({
+    decision: "approved",
+    rationale: "No defect found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+  }, passedChecks, undefined, {
+    riskTier: "high",
+    independence: {
+      primary: { modelId: "anthropic/sonnet", provider: "anthropic" },
+      reviewer: { modelId: "anthropic/sonnet", provider: "anthropic" },
+      sameModel: true,
+      sameProvider: true,
+      level: "weak",
+    },
+  })
+
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.requiredChanges.join("\n")).toContain("same model")
+  expect(decision.independence?.level).toBe("weak")
+  expect(decision.riskTier).toBe("high")
+  expect(decision.confidence).toBeLessThanOrEqual(0.5)
+})
+
+test("applyReviewGatesToReviewDecision blocks same-provider reviewer on critical-risk patch", () => {
+  const decision = applyReviewGatesToReviewDecision({
+    decision: "approved",
+    rationale: "No defect found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+  }, passedChecks, undefined, {
+    riskTier: "critical",
+    independence: {
+      primary: { modelId: "anthropic/sonnet", provider: "anthropic" },
+      reviewer: { modelId: "anthropic/opus", provider: "anthropic" },
+      sameModel: false,
+      sameProvider: true,
+      level: "moderate",
+    },
+  })
+
+  expect(decision.decision).toBe("blocked")
+  expect(decision.blockingIssues.join("\n")).toContain("different provider")
+})
+
+test("applyReviewGatesToReviewDecision flags missing coverage on high-risk patch", () => {
+  const decision = applyReviewGatesToReviewDecision({
+    decision: "approved",
+    rationale: "No defect found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+    coverage: [{ file: "src/auth/login.ts", status: "inspected" }],
+  }, passedChecks, undefined, {
+    riskTier: "high",
+    changedFiles: ["src/auth/login.ts", "src/auth/session.ts"],
+    independence: {
+      primary: { modelId: "anthropic/sonnet", provider: "anthropic" },
+      reviewer: { modelId: "openai/gpt-5", provider: "openai" },
+      sameModel: false,
+      sameProvider: false,
+      level: "strong",
+    },
+  })
+
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.requiredChanges.join("\n")).toContain("src/auth/session.ts")
+})
+
+test("normalizeReviewDecisionText treats malformed coverage status as missing coverage", () => {
+  const review = {
+    fromLayer: "agent",
+    toLayer: "brain",
+    handoffId: "h1",
+    taskId: "review-task",
+    parentId: "brain-task",
+    progress: { status: "completed", summary: "reviewed" },
+    summary: "No issue found.",
+    artifacts: [],
+    risks: [],
+    nextQuestions: [],
+  } as never
+  const decision = normalizeReviewDecisionText(JSON.stringify({
+    decision: "approved",
+    confidence: 0.9,
+    rationale: "No issue found.",
+    findings: [],
+    requiredChanges: [],
+    blockingIssues: [],
+    residualRisks: [],
+    coverage: [
+      { file: "src/auth/login.ts", status: "inspectd" },
+      { file: "src/auth/session.ts" },
+    ],
+    summary: "No issue found.",
+  }), review, passedChecks, undefined, {
+    riskTier: "high",
+    changedFiles: ["src/auth/login.ts"],
+    independence: {
+      primary: { modelId: "anthropic/sonnet", provider: "anthropic" },
+      reviewer: { modelId: "openai/gpt-5", provider: "openai" },
+      sameModel: false,
+      sameProvider: false,
+      level: "strong",
+    },
+  })
+
+  expect(decision.coverage).toBeUndefined()
+  expect(decision.decision).toBe("changes_requested")
+  expect(decision.requiredChanges.join("\n")).toContain("src/auth/login.ts")
+})
+
+test("buildReviewPrompt injects hostile mode framing and coverage requirement for critical tier", () => {
+  const prompt = buildReviewPrompt(
+    "add a payment endpoint",
+    "Added endpoint.",
+    [],
+    {
+      id: "h",
+      task: { id: "t", parentId: "p" },
+    } as never,
+    "",
+    {
+      patch: {
+        changedFiles: [{ path: "src/payment/charge.ts", status: "M" }],
+        preExistingChangedFiles: [],
+        diffStats: { filesChanged: 1, insertions: 1, deletions: 0, untrackedFiles: 0, raw: "", unstagedRaw: "", stagedRaw: "" },
+      },
+    },
+    "",
+    {
+      mode: "hostile",
+      riskTier: "critical",
+      independence: {
+        primary: { modelId: "anthropic/sonnet", provider: "anthropic" },
+        reviewer: { modelId: "openai/gpt-5", provider: "openai" },
+        sameModel: false,
+        sameProvider: false,
+        level: "strong",
+      },
+    },
+  )
+
+  expect(prompt).toContain("Review mode: hostile")
+  expect(prompt).toContain("attack vectors")
+  expect(prompt).toContain("Patch risk tier: critical")
+  expect(prompt).toContain("Coverage requirement")
+  expect(prompt).toContain("src/payment/charge.ts")
+  expect(prompt).toContain("Review independence: strong")
+})
+
+test("evaluateReviewIndependence classifies model/provider overlap", () => {
+  expect(evaluateReviewIndependence({ modelId: "a/1", provider: "a" }, { modelId: "a/1", provider: "a" }).level).toBe("weak")
+  expect(evaluateReviewIndependence({ modelId: "a/1", provider: "a" }, { modelId: "a/2", provider: "a" }).level).toBe("moderate")
+  expect(evaluateReviewIndependence({ modelId: "a/1", provider: "a" }, { modelId: "b/1", provider: "b" }).level).toBe("strong")
+  expect(evaluateReviewIndependence({ modelId: "a/1", provider: "a" }, {}).level).toBe("none")
 })
 
 test("formatWorkerResults lists artifact uris on their own lines", () => {

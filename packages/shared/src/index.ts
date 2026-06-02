@@ -41,7 +41,7 @@ export function debugLog(scope: string, message: string, details?: Record<string
       // Fall back to stderr so debug output is not silently lost.
     }
   }
-  console.error(line)
+  process.stderr.write(`${line}\n`)
 }
 
 function redactDebugDetails(value: unknown): unknown {

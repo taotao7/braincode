@@ -54,7 +54,7 @@ packages/
   shared/          Petits utilitaires (debugLog, primitives). Ne pas y entasser de code.
   protocol/        Formes filaires : ApiResult, ContextRef, AgentMessage.
   config/          Schémas ~/.braincode/*, écritures atomiques, JSONL de session,
-                   découverte du support projet (AGENTS.md, .mcp.json, .agents/*).
+                   découverte du support user/projet (AGENTS.md, MCP, skills, hooks).
   server/          Bun.serve sur 127.0.0.1 ; API typée pour l'UI de configuration.
   llm/             Mapping BraincodeModel -> Pi Model, résolution des clés d'API.
   brain/           BrainModel, catalogue de rôles + prompts, planAgentRouting.
@@ -120,12 +120,15 @@ Tout ce qui est spécifique à l'utilisateur vit sous `~/.braincode/` :
 
 ```
 ~/.braincode/
+  AGENTS.md         instructions utilisateur durables injectées dans les prompts
   settings.json      mode d'exécution, id du brain par défaut, feature flags
   auth.json          clés provider (gardées hors des prompts de modèle)
   brains.json        Brain Models
   models.json        catalogue BraincodeModel pour modèles texte, vision et génération d'images
   tools.json         interrupteurs d'outils
+  mcp.json           déclarations de serveurs MCP utilisateur (métadonnées seulement dans les prompts)
   hooks.json         hooks de cycle de vie utilisateur
+  skills/<id>/SKILL.md   skills utilisateur
   sessions/          JSONL par session des événements d'orchestration
   logs/, cache/      sous-produits runtime
 ```

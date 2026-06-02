@@ -65,6 +65,16 @@ test("createWorkerHandoff includes project support context refs", () => {
         config: { mcpServers: {} },
       },
       skills: [{ id: "local-skill", path: "/repo/.agents/skills/local/SKILL.md", content: "skill rules" }],
+      user: {
+        home: "/home/.braincode",
+        agents: { path: "/home/.braincode/AGENTS.md", content: "user rules" },
+        mcp: {
+          path: "/home/.braincode/mcp.json",
+          serverNames: ["browser"],
+          config: { mcpServers: {} },
+        },
+        skills: [{ id: "global-skill", path: "/home/.braincode/skills/global/SKILL.md", content: "global rules" }],
+      },
     } as never,
   )
 
@@ -73,28 +83,65 @@ test("createWorkerHandoff includes project support context refs", () => {
   expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/AGENTS.md", label: "AGENTS.md" })
   expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/.mcp.json", label: ".mcp.json" })
   expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/repo/.agents/skills/local/SKILL.md", label: "skill:local-skill" })
+  expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/home/.braincode/AGENTS.md", label: "user AGENTS.md" })
+  expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/home/.braincode/mcp.json", label: "user mcp.json" })
+  expect(handoff.task.contextRefs).toContainEqual({ kind: "file", uri: "/home/.braincode/skills/global/SKILL.md", label: "user-skill:global-skill" })
 })
 
-test("worker prompt helpers expose project support and primary tool guidance", () => {
+test("worker prompt helpers expose project and user support plus primary tool guidance", () => {
   const support = formatProjectSupportPromptSection({
     root: "/repo",
     agents: { path: "/repo/AGENTS.md", content: "Use Bun." },
-    mcp: undefined,
-    skills: [],
+    mcp: { path: "/repo/.mcp.json", serverNames: ["docs"], config: {} },
+    skills: [{ id: "project-docs", path: "/repo/.agents/skills/docs/SKILL.md", content: "Project docs skill." }],
+    user: {
+      home: "/home/.braincode",
+      agents: { path: "/home/.braincode/AGENTS.md", content: "Prefer concise replies." },
+      mcp: { path: "/home/.braincode/mcp.json", serverNames: ["browser"], config: {} },
+      skills: [{ id: "global-review", path: "/home/.braincode/skills/review.md", content: "Global review skill." }],
+    },
   } as never)
   const primaryPrompt = buildPrimaryPrompt("fix the failing test", [], "backend", undefined, ["read_file", "exec_command"])
 
-  expect(support).toContain("AGENTS.md (/repo/AGENTS.md):")
+  expect(support).toContain("User-global AGENTS.md (/home/.braincode/AGENTS.md):")
+  expect(support).toContain("Prefer concise replies.")
+  expect(support).toContain("Project AGENTS.md (/repo/AGENTS.md):")
   expect(support).toContain("Use Bun.")
+  expect(support).toContain("User-global MCP config (/home/.braincode/mcp.json):")
+  expect(support).toContain("Project MCP config (/repo/.mcp.json):")
+  expect(support).toContain("User-global skills (~/.braincode/skills):")
+  expect(support).toContain("Global review skill.")
+  expect(support).toContain("Project-local skills (.agents/skills):")
+  expect(support).toContain("Project docs skill.")
   expect(primaryPrompt).toContain("Available tools: exec_command, read_file")
   expect(primaryPrompt).toContain("Shell/command execution is available")
+})
+
+test("formatProjectSupportPromptSection preserves project support before large user-global support", () => {
+  const support = formatProjectSupportPromptSection({
+    root: "/repo",
+    agents: { path: "/repo/AGENTS.md", content: "Project rule: use Bun." },
+    mcp: undefined,
+    skills: [{ id: "project-docs", path: "/repo/.agents/skills/docs/SKILL.md", content: "Project docs skill." }],
+    user: {
+      home: "/home/.braincode",
+      agents: { path: "/home/.braincode/AGENTS.md", content: "User rule.\n".repeat(10_000) },
+      mcp: undefined,
+      skills: [],
+    },
+  } as never)
+
+  expect(support).toContain("Project AGENTS.md (/repo/AGENTS.md):")
+  expect(support).toContain("Project rule: use Bun.")
+  expect(support).toContain("Project-local skills (.agents/skills):")
+  expect(support.indexOf("Project AGENTS.md")).toBeLessThan(support.indexOf("User-global AGENTS.md"))
 })
 
 test("buildPrimaryPrompt surfaces web_search for live info and steers away from config files", () => {
   const primaryPrompt = buildPrimaryPrompt("明天成都天气", [], "librarian", undefined, ["read_file", "web_search", "mcp__tavily__tavily_search"])
   expect(primaryPrompt).toContain("Web search is available through web_search")
   expect(primaryPrompt).toContain("Connected MCP tools usable directly: mcp__tavily__tavily_search")
-  expect(primaryPrompt).toContain("Do not read ~/.braincode config files")
+  expect(primaryPrompt).toContain("Do not read ~/.braincode secret/config files")
 })
 
 test("buildPrimaryPrompt prepends the environment section when provided", () => {

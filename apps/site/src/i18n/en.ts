@@ -247,7 +247,7 @@ export const en = {
 
   docs_agents_title: "7. AGENTS.md",
   docs_agents_intro:
-    "AGENTS.md at the repo root is durable project context. Braincode reads it into the primary agent and every worker. Use it for engineering rules, coding conventions, and links to deeper docs — not for transient task notes.",
+    "AGENTS.md can live at ~/.braincode/AGENTS.md for user-global instructions and at the repo root for project-specific context. Braincode reads both into the primary agent and every worker, with project instructions taking precedence for project work.",
 
   docs_hooks_title: "8. Hooks",
   docs_hooks_intro:
@@ -322,7 +322,7 @@ export const en = {
   docs_tui_cmd_team_test:
     "Diagnostic: force every role to run the prompt in parallel. Useful for verifying role behavior and model availability.",
   docs_tui_cmd_skill: "List project and user skills loaded from .agents/skills and ~/.braincode/skills.",
-  docs_tui_cmd_agents: "Show the AGENTS.md file path, size, and whether it was loaded.",
+  docs_tui_cmd_agents: "Show user-global and project-local AGENTS.md paths, sizes, and whether they were loaded.",
   docs_tui_cmd_files: "Refresh the @file index used for file name autocompletion.",
   docs_tui_cmd_clear: "Clear the transcript. This does not start a new session.",
   docs_tui_cmd_exit: "Quit the TUI.",

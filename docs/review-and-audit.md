@@ -190,4 +190,13 @@ Do not put private chain-of-thought, full worker transcripts, or raw command out
 
 The current implementation already has intent clarification, runtime todo plans, pre-execution `execution_plan_review` records for side-effectful runs, plan-review rendering in CLI/TUI final reports, permission policy, durable `tool_approval_decision` records, durable `tool_execution_summary` records, tool approval callbacks, smart checks, review workers, review-gate enforcement, patch summaries, final reports, and session JSONL records.
 
-The remaining gaps are explicit human approval for the whole execution plan where policy requires it, a dedicated `review_artifacts_summary` record, and focused tests for more mode-specific combinations such as radical MCP runs and `--yes` command execution.
+Review Gate v3 (this milestone) additionally enforces:
+
+- Patch risk tier classification (`low`/`medium`/`high`/`critical`) derived from patch kind, permission-policy review signals, and auth+ci overlap.
+- Review-mode framing per tier: `normal` (low/medium), `strict` (high), `hostile` (critical).
+- Review independence metadata: primary and reviewer model+provider are evaluated to `strong`/`moderate`/`weak`/`none`, recorded in the review decision and surfaced as final-report warnings.
+- Independence gate: same-model reviewer cannot auto-approve high-tier patches; same-provider reviewer blocks critical-tier patches; self-review caps confidence at 0.5 on medium+.
+- Review coverage map: the reviewer must list each changed file with `inspected`/`partially_inspected`/`skipped`; missing coverage on high/critical tiers forces `changes_requested`.
+- `review_artifacts_summary` session record so the trail captures exactly which diff/check evidence and independence configuration was passed to review.
+
+The remaining gaps are explicit human approval for the whole execution plan where policy requires it, two-reviewer disagreement resolution for critical patches, a public review benchmark comparing self-review vs isolated review vs cross-provider review, PR-style line comments in the review decision, and team-level policy templates.

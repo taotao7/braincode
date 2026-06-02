@@ -1,6 +1,6 @@
 import type { HandoffPacket, WorkerResult } from "@braincode/context"
 import type { ContextRef } from "@braincode/protocol"
-import type { PatchCheckSummary } from "./checks"
+import type { PatchCheckSummary, PatchRiskTier } from "./checks"
 import type { PatchDiffSnapshot, PatchSummary, UntrackedFilePreview } from "./patch"
 import { formatReadOnlyToolAccess } from "./tool-discipline"
 
@@ -13,8 +13,48 @@ export type PatchReviewArtifacts = {
 
 export type MissingReviewArtifactsPolicy = "changes_requested" | "blocked"
 
+export type ReviewMode = "normal" | "strict" | "hostile"
+
+export function reviewModeForRiskTier(tier: PatchRiskTier): ReviewMode {
+  if (tier === "critical") return "hostile"
+  if (tier === "high") return "strict"
+  return "normal"
+}
+
+export type ReviewIndependenceLevel = "strong" | "moderate" | "weak" | "none"
+
+export type ReviewIndependenceParticipant = {
+  modelId?: string
+  provider?: string
+}
+
+export type ReviewIndependence = {
+  primary: ReviewIndependenceParticipant
+  reviewer: ReviewIndependenceParticipant
+  sameModel: boolean
+  sameProvider: boolean
+  level: ReviewIndependenceLevel
+}
+
+export function evaluateReviewIndependence(
+  primary: ReviewIndependenceParticipant,
+  reviewer: ReviewIndependenceParticipant,
+): ReviewIndependence {
+  const sameModel = Boolean(primary.modelId && reviewer.modelId && primary.modelId === reviewer.modelId)
+  const sameProvider = Boolean(primary.provider && reviewer.provider && primary.provider === reviewer.provider)
+  let level: ReviewIndependenceLevel
+  if (!reviewer.modelId) level = "none"
+  else if (sameModel) level = "weak"
+  else if (sameProvider) level = "moderate"
+  else level = "strong"
+  return { primary, reviewer, sameModel, sameProvider, level }
+}
+
 export type ReviewGateOptions = {
   missingArtifacts?: MissingReviewArtifactsPolicy
+  riskTier?: PatchRiskTier
+  independence?: ReviewIndependence
+  changedFiles?: string[]
 }
 
 export type ReviewDecisionStatus = "approved" | "changes_requested" | "blocked"
@@ -30,6 +70,14 @@ export type ReviewFinding = {
   suggestion?: string
 }
 
+export type ReviewCoverageStatus = "inspected" | "partially_inspected" | "skipped"
+
+export type ReviewCoverageEntry = {
+  file: string
+  status: ReviewCoverageStatus
+  reason?: string
+}
+
 export type ReviewDecision = {
   decision: ReviewDecisionStatus
   confidence?: number
@@ -38,6 +86,10 @@ export type ReviewDecision = {
   requiredChanges: string[]
   blockingIssues: string[]
   residualRisks: string[]
+  coverage?: ReviewCoverageEntry[]
+  mode?: ReviewMode
+  independence?: ReviewIndependence
+  riskTier?: PatchRiskTier
 }
 
 export type PromptWorkerResult = {
@@ -62,6 +114,24 @@ export type ReviewMergeResult = {
   reviewDecision?: ReviewDecision
 }
 
+export type ReviewPacket = {
+  intent: {
+    userGoal: string
+    primaryClaim: string
+  }
+  changeSet: {
+    filesChanged: string[]
+    patchKind?: string
+    diffStats: string
+  }
+  verification: {
+    checksRun: string[]
+    checksPassed: boolean
+    checkFailures: string[]
+  }
+  risks: string[]
+}
+
 export function buildReviewPrompt(
   originalPrompt: string,
   primarySummary: string,
@@ -70,18 +140,48 @@ export function buildReviewPrompt(
   projectSupportContext = "",
   artifacts?: PatchReviewArtifacts,
   environmentSection = "",
+  options: {
+    mode?: ReviewMode
+    riskTier?: PatchRiskTier
+    independence?: ReviewIndependence
+  } = {},
 ): string {
   const patchArtifacts = formatPatchReviewArtifacts(artifacts)
+  const mode = options.mode ?? "normal"
+  const tier = options.riskTier
+  const independence = options.independence
+  const changedFiles = artifacts?.patch?.changedFiles.map((change) => change.path) ?? []
+  const modeFraming = formatReviewModeFraming(mode)
+  const independenceFraming = formatReviewIndependenceFraming(independence)
+  const coverageRequirement = formatReviewCoverageRequirement(changedFiles, mode, tier)
+  
+  const reviewPacket: ReviewPacket = {
+    intent: {
+      userGoal: originalPrompt,
+      primaryClaim: primarySummary,
+    },
+    changeSet: {
+      filesChanged: changedFiles,
+      patchKind: artifacts?.checks?.patchKind,
+      diffStats: artifacts?.patch?.diffStats.raw ?? "no diff stats",
+    },
+    verification: {
+      checksRun: artifacts?.checks?.results.map((r) => r.name) ?? [],
+      checksPassed: artifacts?.checks?.status === "passed",
+      checkFailures: artifacts?.checks?.results.filter((r) => r.status === "failed").map((r) => r.name) ?? [],
+    },
+    risks: workerResults.flatMap((w) => w.risks),
+  }
+
   return `Review this Braincode run as an isolated review agent.
 
 ${environmentSection}${projectSupportContext}
 ${formatReadOnlyToolAccess()}
 
-Original user request:
-${originalPrompt}
+${modeFraming}${independenceFraming}${tier ? `Patch risk tier: ${tier}\n` : ""}
 
-Primary agent result:
-${primarySummary}
+Review packet (structured intent and verification context):
+${JSON.stringify(reviewPacket, null, 2)}
 
 Supporting worker results:
 ${workerResults.length > 0 ? formatWorkerResults(workerResults) : "No supporting worker results."}
@@ -92,7 +192,7 @@ ${patchArtifacts}
 Handoff packet:
 ${JSON.stringify(handoff, null, 2)}
 
-Review output rules:
+${coverageRequirement}Review output rules:
 - Put concrete findings first; do not lead with a generic summary.
 - If no concrete defect is found, return an empty findings array and a precise approval rationale.
 - If the git diff is marked truncated, include that as a residual risk.
@@ -100,9 +200,53 @@ Review output rules:
 - If checks failed, request changes and name the failing checks.
 - If required patch/check/diff artifacts are missing, block or request changes instead of approving.
 - Set confidence as a number from 0 to 1 based on the evidence quality available to you.
+- You see the primary agent's final summary, not its private chain-of-thought; do not rely on reasoning that is not evidenced by artifacts.
 
 Return only JSON in this shape:
-{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","confidence":0.0,"rationale":"brief reason for the decision","findings":[{"severity":"low|medium|high","file":"optional project-relative path","line":1,"evidence":"short evidence","issue":"specific issue","suggestion":"specific fix"}],"requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"residualRisks":["risk that remains after review"],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+{"taskId":"${handoff.task.id}","parentId":"${handoff.task.parentId}","progress":{"status":"completed|blocked","summary":"brief progress"},"decision":"approved|changes_requested|blocked","confidence":0.0,"rationale":"brief reason for the decision","findings":[{"severity":"low|medium|high","file":"optional project-relative path","line":1,"evidence":"short evidence","issue":"specific issue","suggestion":"specific fix"}],"requiredChanges":["specific change required before approval"],"blockingIssues":["issue that prevents review completion"],"residualRisks":["risk that remains after review"],"coverage":[{"file":"project-relative path","status":"inspected|partially_inspected|skipped","reason":"why this status"}],"summary":"review findings or clear statement that no concrete issue was found","artifacts":[{"kind":"file|thread|summary|artifact","uri":"reference uri","label":"optional label"}],"risks":["confirmed risk"],"nextQuestions":["question only if blocked"]}`
+}
+
+function formatReviewModeFraming(mode: ReviewMode): string {
+  if (mode === "hostile") {
+    return [
+      "Review mode: hostile (adversarial).",
+      "You are not here to validate the primary agent. Find concrete reasons this patch should NOT be approved.",
+      "Enumerate plausible attack vectors that apply to the changed code (auth bypass, injection, secret exfiltration, supply-chain, privilege escalation, SSRF, CSRF). For each, state whether the patch artifacts rule it out and cite the file:line evidence; if you cannot rule it out, request changes.",
+      "",
+    ].join("\n")
+  }
+  if (mode === "strict") {
+    return [
+      "Review mode: strict.",
+      "Enumerate approval blockers explicitly. Do not rely on the primary agent's claims unless the patch/diff/checks evidence supports them. If any blocker fires, return changes_requested with required changes.",
+      "",
+    ].join("\n")
+  }
+  return "Review mode: normal.\n\n"
+}
+
+function formatReviewIndependenceFraming(independence: ReviewIndependence | undefined): string {
+  if (!independence) return ""
+  const lines = [
+    `Review independence: ${independence.level}`,
+    `- primary model: ${independence.primary.modelId ?? "unknown"} (provider: ${independence.primary.provider ?? "unknown"})`,
+    `- review model: ${independence.reviewer.modelId ?? "unknown"} (provider: ${independence.reviewer.provider ?? "unknown"})`,
+    `- same model: ${independence.sameModel ? "yes" : "no"}, same provider: ${independence.sameProvider ? "yes" : "no"}`,
+  ]
+  if (independence.sameModel) {
+    lines.push("Because the same model wrote and is reviewing this patch, be especially skeptical of self-consistent reasoning; require artifact evidence for each claim.")
+  }
+  lines.push("")
+  return lines.join("\n")
+}
+
+function formatReviewCoverageRequirement(changedFiles: string[], mode: ReviewMode, tier: PatchRiskTier | undefined): string {
+  if (changedFiles.length === 0) return ""
+  const requireAll = mode !== "normal" || tier === "high" || tier === "critical"
+  const lead = requireAll
+    ? "Coverage requirement: every changed file MUST appear in `coverage` with status inspected, partially_inspected (with reason), or skipped (with reason). Missing files will force changes_requested."
+    : "Coverage: list each changed file in `coverage` with inspected/partially_inspected/skipped and a short reason."
+  return `${lead}\nChanged files:\n${changedFiles.map((file) => `- ${file}`).join("\n")}\n\n`
 }
 
 export function formatPatchReviewArtifacts(artifacts: PatchReviewArtifacts | undefined): string {
@@ -227,6 +371,7 @@ export function normalizeReviewDecisionText(
   const requiredChanges = normalizeStringArray(parsedRecord?.requiredChanges)
   const blockingIssues = normalizeStringArray(parsedRecord?.blockingIssues)
   const residualRisks = uniqueStrings([...normalizeStringArray(parsedRecord?.residualRisks), ...review.risks])
+  const coverage = normalizeReviewCoverage(parsedRecord?.coverage)
   const missingDecisionChange = explicitDecision
     ? undefined
     : "Review did not provide an explicit structured decision; rerun or inspect review output before treating this as approved."
@@ -241,6 +386,7 @@ export function normalizeReviewDecisionText(
     requiredChanges: missingDecisionChange ? uniqueStrings([...requiredChanges, missingDecisionChange]) : requiredChanges,
     blockingIssues,
     residualRisks,
+    ...(coverage.length > 0 ? { coverage } : {}),
   }, checks, artifacts, gateOptions)
 }
 
@@ -260,6 +406,7 @@ export function applyReviewGatesToReviewDecision(
   gateOptions: ReviewGateOptions = {},
 ): ReviewDecision {
   let gated = decision
+  const tier = gateOptions.riskTier
 
   if (checks?.status === "failed" && gated.decision !== "blocked") {
     const failedChecks = checks.results.filter((result) => result.status === "failed").map((result) => result.name)
@@ -285,6 +432,14 @@ export function applyReviewGatesToReviewDecision(
   const residualRisks = [...gated.residualRisks]
   if (checks?.status === "skipped") {
     residualRisks.push(checks.reason ? `Checks were skipped: ${checks.reason}` : "Checks were skipped.")
+    if ((tier === "high" || tier === "critical") && gated.decision !== "blocked") {
+      const issue = "Checks were skipped on high/critical risk patch; cannot approve without verification."
+      gated = {
+        ...gated,
+        decision: "changes_requested",
+        requiredChanges: uniqueStrings([...gated.requiredChanges, issue]),
+      }
+    }
   }
   if (artifacts?.diff?.truncated) {
     residualRisks.push("Git diff was truncated; review may not cover omitted changes.")
@@ -311,9 +466,62 @@ export function applyReviewGatesToReviewDecision(
     }
   }
 
+  // Coverage gate: for high/critical tiers (or any strict/hostile review with
+  // changed files known), every changed file must appear in the coverage map.
+  const requireFullCoverage = tier === "high" || tier === "critical"
+  const changedFiles = gateOptions.changedFiles ?? []
+  if (requireFullCoverage && changedFiles.length > 0) {
+    const covered = new Set((gated.coverage ?? []).map((entry) => entry.file))
+    const missingCoverage = changedFiles.filter((file) => !covered.has(file))
+    if (missingCoverage.length > 0) {
+      const issue = `Review coverage missing for ${missingCoverage.length} changed file(s): ${missingCoverage.slice(0, 5).join(", ")}${missingCoverage.length > 5 ? ", ..." : ""}.`
+      if (gated.decision !== "blocked") {
+        gated = {
+          ...gated,
+          decision: "changes_requested",
+          requiredChanges: uniqueStrings([...gated.requiredChanges, issue]),
+        }
+      }
+      residualRisks.push(issue)
+    }
+  }
+
+  // Independence gate: for high/critical tier same-model reviewer is insufficient;
+  // for critical tier same-provider reviewer is insufficient.
+  const independence = gateOptions.independence
+  if (independence) {
+    if ((tier === "high" || tier === "critical") && independence.sameModel && gated.decision === "approved") {
+      const issue = `Reviewer used the same model as the primary; ${tier}-risk patches require a different model for approval.`
+      gated = {
+        ...gated,
+        decision: "changes_requested",
+        requiredChanges: uniqueStrings([...gated.requiredChanges, issue]),
+      }
+      residualRisks.push(issue)
+    }
+    if (tier === "critical" && independence.sameProvider && gated.decision !== "blocked") {
+      const issue = "Reviewer used the same provider as the primary; critical-risk patches require a different provider."
+      gated = {
+        ...gated,
+        decision: "blocked",
+        blockingIssues: uniqueStrings([...gated.blockingIssues, issue]),
+      }
+      residualRisks.push(issue)
+    }
+    // Self-review (same model) on medium+ caps confidence at 0.5 to discourage
+    // silent trust in self-consistent reasoning.
+    if (independence.sameModel && (tier === "medium" || tier === "high" || tier === "critical")) {
+      const cappedConfidence = gated.confidence === undefined ? 0.5 : Math.min(gated.confidence, 0.5)
+      gated = { ...gated, confidence: cappedConfidence }
+      residualRisks.push("Self-review bias risk: primary and reviewer share the same model; confidence capped.")
+    }
+  }
+
   return {
     ...gated,
     residualRisks: uniqueStrings(residualRisks),
+    ...(independence ? { independence } : {}),
+    ...(tier ? { riskTier: tier } : {}),
   }
 }
 
@@ -389,6 +597,28 @@ function normalizeReviewFindings(value: unknown): ReviewFinding[] {
 
 function normalizeReviewFindingSeverity(value: unknown): ReviewFindingSeverity {
   return value === "low" || value === "medium" || value === "high" ? value : "medium"
+}
+
+function normalizeReviewCoverage(value: unknown): ReviewCoverageEntry[] {
+  if (!Array.isArray(value)) return []
+  const entries: ReviewCoverageEntry[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    const file = stringValue(record.file)
+    if (!file || seen.has(file)) continue
+    const statusRaw = stringValue(record.status)
+    if (!isReviewCoverageStatus(statusRaw)) continue
+    const reason = stringValue(record.reason)
+    seen.add(file)
+    entries.push({ file, status: statusRaw, ...(reason ? { reason } : {}) })
+  }
+  return entries
+}
+
+function isReviewCoverageStatus(value: string | undefined): value is ReviewCoverageStatus {
+  return value === "inspected" || value === "partially_inspected" || value === "skipped"
 }
 
 function normalizeReviewDecisionStatus(value: unknown): ReviewDecisionStatus | undefined {

@@ -145,7 +145,7 @@ See [RELEASES.md](./RELEASES.md).
 - Isolated support workers, primary executor, and policy-triggered review worker using structured handoff/result packets.
 - Read-only project tools for `librarian`, `qa`, `security`, and `review` workers, so support agents can inspect files, search code, read diffs, and report evidence without edit/execute capability.
 - Session JSONL persistence for runs, todo events, worker lifecycle, hooks, prompt references, handoff, summaries, and errors.
-- Project support discovery for `AGENTS.md`, `.mcp.json`, `.braincode/checks.json`, `.agents/skills`, and `.agents/hooks.json`.
+- User-global and project-local support discovery for `~/.braincode/AGENTS.md`, `~/.braincode/mcp.json`, `~/.braincode/skills`, `~/.braincode/hooks.json`, plus project `AGENTS.md`, `.mcp.json`, `.braincode/checks.json`, `.agents/skills`, and `.agents/hooks.json`.
 - MCP stdio bridge that connects project/user MCP servers and exposes listed tools to the agent runtime.
 - First-party local coding tools for zero-config file listing, file reads, content/path search, file edits, patch application, shell commands, long-running exec sessions with stdin polling, git diffs, changed-file inspection, and package scripts.
 - Non-interactive run permission modes: read-only default, `--allow-edits` for local read/file-edit approval, and `--yes` for full auto-approval.

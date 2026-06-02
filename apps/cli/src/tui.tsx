@@ -999,22 +999,42 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
   }
 
   function showAgentsPanel() {
-    if (!projectSupport) {
-      appendItem({ kind: "status", text: "Project support is still loading." });
+    if (!projectSupport || !userSupport) {
+      appendItem({ kind: "status", text: "Support config is still loading." });
       return;
     }
-    if (!projectSupport.agents) {
+    const lines: string[] = [];
+    if (userSupport.agents) {
+      const { path, content } = userSupport.agents;
+      const lineCount = content.split(/\r?\n/).length;
+      lines.push(
+        "User-global AGENTS.md",
+        `• path: ${path}`,
+        `• lines: ${lineCount}`,
+        `• bytes: ${content.length}`,
+        "",
+      );
+    }
+    if (projectSupport.agents) {
+      const { path, content } = projectSupport.agents;
+      const lineCount = content.split(/\r?\n/).length;
+      lines.push(
+        "Project-local AGENTS.md",
+        `• path: ${path}`,
+        `• lines: ${lineCount}`,
+        `• bytes: ${content.length}`,
+      );
+    }
+    if (lines.length === 0) {
       appendItem({
         kind: "panel",
-        text: "AGENTS.md not found in this project.",
+        text: "AGENTS.md not found.\n• User-global: ~/.braincode/AGENTS.md\n• Project-local: AGENTS.md",
       });
       return;
     }
-    const { path, content } = projectSupport.agents;
-    const lines = content.split(/\r?\n/).length;
     appendItem({
       kind: "panel",
-      text: `AGENTS.md\n• path: ${path}\n• lines: ${lines}\n• bytes: ${content.length}`,
+      text: lines.join("\n"),
     });
   }
 
@@ -3575,7 +3595,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     ? `AGENTS ${projectSupport.agents ? "✓" : "·"} · mcp ${projectMcpCount} · skills ${projectSkillCount}`
     : "loading…";
   const userSummary = userSupport
-    ? `mcp ${userMcpCount} · skills ${userSkillCount}`
+    ? `AGENTS ${userSupport.agents ? "✓" : "·"} · mcp ${userMcpCount} · skills ${userSkillCount}`
     : "loading…";
   const tuiTheme = TUI_THEMES[themeName];
   const colors = tuiTheme.colors;

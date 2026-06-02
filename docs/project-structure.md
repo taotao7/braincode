@@ -171,12 +171,15 @@ Planned files under the user directory:
 
 ```text
 ~/.braincode/
+  AGENTS.md
   settings.json
   auth.json
   brains.json
   models.json
   tools.json
+  mcp.json
   hooks.json
+  skills/
   sessions/
   logs/
   cache/
@@ -191,10 +194,11 @@ Responsibilities:
 - Write settings atomically where practical.
 - Keep secrets separate from normal settings.
 - Apply future config migrations.
+- Discover user-global support files from `~/.braincode/AGENTS.md`, `~/.braincode/mcp.json`, `~/.braincode/skills`, and `~/.braincode/hooks.json`.
 - Discover project support files from the active project root: `AGENTS.md`, `.mcp.json`, `.agents/skills`, `.agents/hooks.json`, and optional `.braincode/checks.json`.
-- Parse `.mcp.json` for project MCP server metadata without copying secrets into model context.
+- Parse user and project MCP server metadata without copying secrets into model context.
 - Treat user MCP config as user-installed/trusted, but require project `.mcp.json` server entries to opt in with `trusted: true` before Braincode starts their commands.
-- Load local skill Markdown from `.agents/skills/<skill-id>/SKILL.md` or top-level `.agents/skills/*.md`.
+- Load skill Markdown from `~/.braincode/skills/<skill-id>/SKILL.md`, `~/.braincode/skills/*.md`, `.agents/skills/<skill-id>/SKILL.md`, or top-level `.agents/skills/*.md`.
 - Load user hooks from `~/.braincode/hooks.json` and project hooks from `.agents/hooks.json`.
 - Normalize hook definitions and require explicit `trusted: true` before command hooks can run.
 - Load optional project check policy from `.braincode/checks.json` and normalize it as a non-secret project support file.
@@ -264,8 +268,8 @@ Responsibilities:
 - Enforce review-gate and audit-trail contracts for side-effectful runs, including pre-execution plan review records as the architecture matures.
 - Apply path-aware and command-aware permission policy before local writes, patches, shell/exec commands, and package scripts; deny matches are not bypassable, ask matches can be approved by the active permission mode, and `review: required` matches add a review worker.
 - Classify patch changes into smart check kinds, select package-script checks according to user/project policy, record why checks ran or were skipped, and force review for smart-check risk kinds.
-- Load project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, and review prompts.
-- Carry project support references in worker handoff packets.
+- Load user-global and project support context from `packages/config` and pass relevant `AGENTS.md`/skill content into primary, worker, dispatch, and review prompts.
+- Carry user-global and project support references in worker handoff packets.
 - Record provider token usage per routeBrain, support, primary, and review model call into session JSONL.
 - Run trusted lifecycle hooks at supported runtime points and record hook outcomes in the session log.
 - Emit normalized Braincode events.
@@ -391,9 +395,9 @@ MVP-2 starts by establishing the adapter boundary:
 
 ### MVP-5: coding workflow - done, ongoing focused tests
 
-- Done: `AGENTS.md` durable project instruction context.
+- Done: user-global and project-local `AGENTS.md` durable instruction context.
 - Done: project MCP server declarations from `.mcp.json`, gated by per-server `trusted: true` before command execution.
-- Done: project-local skills from `.agents/skills`.
+- Done: user-global and project-local skills from `~/.braincode/skills` and `.agents/skills`.
 - Done: trusted command hooks from `~/.braincode/hooks.json` and `.agents/hooks.json`.
 - Done: review worker execution for risky tasks.
 - Done: user confirmation flows for risky tool calls in the TUI.

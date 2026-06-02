@@ -63,6 +63,7 @@ test("path helpers derive user and project support locations", async () => {
     expect(projectPaths.agents).toBe(join(root, "AGENTS.md"))
     expect(projectPaths.skills).toBe(join(root, ".agents", "skills"))
     expect(projectPaths.checks).toBe(join(root, ".braincode", "checks.json"))
+    expect(userPaths.agents).toBe(join(home, "AGENTS.md"))
     expect(userPaths.mcp).toBe(join(home, "mcp.json"))
     expect(userPaths.skills).toBe(join(home, "skills"))
   } finally {
@@ -298,8 +299,9 @@ test("setHookHandlerEnabled toggles handlers and validates indexes", async () =>
   expect(parsed.hooks.Stop[0].hooks[0].enabled).toBe(true)
 })
 
-test("readUserSupport discovers user MCP config and skills", async () => {
+test("readUserSupport discovers user AGENTS, MCP config, and skills", async () => {
   const home = await makeTempHome()
+  await Bun.write(join(home, "AGENTS.md"), "Always prefer Bun.\n")
   await Bun.write(
     join(home, "mcp.json"),
     JSON.stringify({
@@ -313,6 +315,7 @@ test("readUserSupport discovers user MCP config and skills", async () => {
 
   const support = await readUserSupport(home)
 
+  expect(support.agents?.content).toContain("Always prefer Bun")
   expect(support.mcp?.serverNames).toEqual(["browser"])
   expect(support.skills.map((skill) => skill.id)).toEqual(["review"])
 })
