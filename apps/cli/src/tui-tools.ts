@@ -135,6 +135,47 @@ export function formatToolStartText(toolName: string): string {
   return `${toolName} · running`;
 }
 
+// The model usually narrates its next step in a short sentence just before it
+// emits a tool call. We surface that as the tool row's "intent" so the call is
+// not context-free. Returns undefined when the lead-in is empty, a code block,
+// or too long to be a quick rationale (long prose stays its own block).
+const TOOL_INTENT_MAX_CHARS = 160;
+export function deriveToolIntent(assistantText: string): string | undefined {
+  const text = assistantText.trim();
+  if (text.length === 0) return undefined;
+  // Skip when the tail is inside or ends a fenced code block.
+  if ((text.match(/```/g)?.length ?? 0) % 2 === 1) return undefined;
+  const lastLine = text.split(/\r?\n/).filter((line) => line.trim()).at(-1);
+  if (!lastLine) return undefined;
+  // Take the final sentence of the last non-empty line.
+  const sentences = lastLine.trim().split(/(?<=[.!?。！？])\s+/);
+  const candidate = (sentences.at(-1) ?? lastLine).trim();
+  const cleaned = cleanInlineIntent(candidate);
+  if (cleaned.length === 0 || cleaned.length > TOOL_INTENT_MAX_CHARS)
+    return undefined;
+  return cleaned;
+}
+
+function cleanInlineIntent(text: string): string {
+  return text
+    .replace(/^[#>\-*\s]+/, "")
+    .replace(/`+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// True when the derived intent accounts for the entire assistant message, so the
+// standalone prose block can be folded into the tool row without losing content.
+// Compares the CLEANED whole message against the intent (both run through the same
+// normalization), so a one-line lead-in that only differed by markdown markers or
+// backticks — e.g. "`read the config`" vs intent "read the config" — still dedups.
+export function intentIsWholeMessage(
+  assistantText: string,
+  intent: string,
+): boolean {
+  return cleanInlineIntent(assistantText.trim()) === intent;
+}
+
 export function formatToolEndText(
   toolName: string,
   isError: boolean,
@@ -149,6 +190,24 @@ export function formatRepeatedReadToolText(
   duplicateCount: number,
 ): string {
   return `${toolName} · cached duplicate x${duplicateCount}`;
+}
+
+export function formatBlockedToolText(
+  toolName: string,
+  consecutiveCount: number,
+): string {
+  return `${toolName} · blocked repeat x${consecutiveCount}`;
+}
+
+export function formatBlockedToolDetail(
+  consecutiveCount: number,
+  evidence: ToolEvidenceCacheInfo,
+): string {
+  const age =
+    evidence.cacheAgeMs === undefined
+      ? ""
+      : ` · cache ${formatElapsed(evidence.cacheAgeMs)} old`;
+  return `intercepted after ${consecutiveCount} identical calls · forced cached evidence reuse, must change direction${age}`;
 }
 
 export function formatRepeatedReadToolDetail(
@@ -242,6 +301,7 @@ export function getToolEvidenceCacheInfo(
   const record = evidence as Record<string, unknown>;
   return {
     reused: typeof record.reused === "boolean" ? record.reused : undefined,
+    blocked: typeof record.blocked === "boolean" ? record.blocked : undefined,
     callCount:
       typeof record.callCount === "number" ? record.callCount : undefined,
     consecutiveCount:

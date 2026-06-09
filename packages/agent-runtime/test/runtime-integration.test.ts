@@ -745,9 +745,13 @@ test("createBraincodeAgentRuntime reuses duplicate read-only tool evidence", asy
   for (let index = 3; index <= 8; index++) {
     repeated = await tool.execute(`read-${index}`, { path: "README.md" } as never)
   }
+  // Past the hard-block threshold the repeated call is intercepted (tool never
+  // re-runs, content suppressed once the streak is long) and flagged blocked.
   const repeatedText = repeated.content[0]?.type === "text" ? repeated.content[0].text : ""
+  expect(repeatedText).toContain("Blocked")
   expect(repeatedText).toContain("No new tool output is included")
   expect(repeatedText).not.toContain("read call 1")
+  expect((repeated.details as { evidenceCache?: { blocked?: boolean } }).evidenceCache).toMatchObject({ blocked: true })
 })
 
 test("createBraincodeAgentRuntime invalidates evidence cache after shell calls", async () => {

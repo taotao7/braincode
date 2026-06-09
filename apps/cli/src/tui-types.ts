@@ -282,6 +282,7 @@ export type RunStatusTextChar = {
 
 export type ToolEvidenceCacheInfo = {
   reused?: boolean;
+  blocked?: boolean;
   callCount?: number;
   consecutiveCount?: number;
   cacheAgeMs?: number;

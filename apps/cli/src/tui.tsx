@@ -121,6 +121,9 @@ import {
 } from "./tui-text";
 import {
   classifyToolCall,
+  deriveToolIntent,
+  formatBlockedToolDetail,
+  formatBlockedToolText,
   formatPermissionPolicySummary,
   formatRepeatedReadToolDetail,
   formatRepeatedReadToolText,
@@ -128,6 +131,7 @@ import {
   formatToolResultDetail,
   formatToolStartText,
   getToolEvidenceCacheInfo,
+  intentIsWholeMessage,
   requiresToolDecision,
   summarizeToolArgs,
   toolApprovalAllowedByConfig,
@@ -2175,6 +2179,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
 
     let approvalMode: BraincodeMode = mode;
     const currentAssistant = { id: null as string | null, text: "" };
+    const currentThinking = { id: null as string | null, text: "" };
     let thinkingShown = false;
     let activeStreamPhase: "primary" | "support" | "review" | null = null;
     const toolItems = new Map<
@@ -2262,6 +2267,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     };
     const finalizeStreamingBuffers = () => {
       flushStream();
+      flushThinking();
       if (currentAssistant.id && currentAssistant.text.length === 0) {
         const id = currentAssistant.id;
         setItems((previous) => previous.filter((item) => item.id !== id));
@@ -2276,8 +2282,26 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
           ),
         );
       }
+      // Finalize the reasoning block: drop it if empty, otherwise mark it
+      // non-streaming so it auto-collapses through the normal transcript path.
+      if (currentThinking.id && currentThinking.text.trim().length === 0) {
+        const id = currentThinking.id;
+        setItems((previous) => previous.filter((item) => item.id !== id));
+      } else if (currentThinking.id) {
+        const id = currentThinking.id;
+        setItems((previous) =>
+          previous.map((item) =>
+            item.id === id
+              ? normalizeTranscriptItem({ ...item, streaming: false })
+              : item,
+          ),
+        );
+      }
       currentAssistant.id = null;
       currentAssistant.text = "";
+      currentThinking.id = null;
+      currentThinking.text = "";
+      thinkingRenderedLength = 0;
       streamRenderedLength = 0;
       streamLastFlushAt = Date.now();
       thinkingShown = false;
@@ -2289,6 +2313,41 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
       currentAssistant.text = "";
       appendItemRaw({ id, kind: "assistant", text: "", streaming: true });
       return id;
+    };
+    const ensureThinkingItem = () => {
+      if (currentThinking.id) return currentThinking.id;
+      const id = crypto.randomUUID();
+      currentThinking.id = id;
+      currentThinking.text = "";
+      appendItemRaw({ id, kind: "thinking", text: "", streaming: true });
+      return id;
+    };
+    // Reasoning streams less densely than text, so a single timer-coalesced
+    // flush (mirroring the assistant stream) keeps Ink repaints bounded.
+    let thinkingFlushHandle: ReturnType<typeof setTimeout> | null = null;
+    let thinkingPendingId: string | null = null;
+    let thinkingRenderedLength = 0;
+    const flushThinking = (): boolean => {
+      if (thinkingFlushHandle) {
+        clearTimeout(thinkingFlushHandle);
+        thinkingFlushHandle = null;
+      }
+      if (!thinkingPendingId) return false;
+      if (currentThinking.text.length === thinkingRenderedLength) return false;
+      const id = thinkingPendingId;
+      const text = currentThinking.text;
+      thinkingPendingId = null;
+      thinkingRenderedLength = text.length;
+      updateItem(id, { text, streaming: true });
+      return true;
+    };
+    const scheduleThinkingFlush = (id: string) => {
+      thinkingPendingId = id;
+      if (thinkingFlushHandle) return;
+      thinkingFlushHandle = setTimeout(() => {
+        thinkingFlushHandle = null;
+        flushThinking();
+      }, STREAM_FLUSH_MS);
     };
     const showThinkingStatus = () => {
       if (thinkingShown) return;
@@ -2322,6 +2381,13 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
             scheduleStreamFlush(id);
           } else if (update.type === "thinking_delta") {
             showThinkingStatus();
+            // Surface the model's reasoning inline as a collapsible block, but
+            // only for the primary stream (workers return JSON, not prose).
+            if (activeStreamPhase === "primary") {
+              const id = ensureThinkingItem();
+              currentThinking.text += update.delta;
+              scheduleThinkingFlush(id);
+            }
           } else if (update.type === "toolcall_start") {
             updateStatus("Tool Call · preparing arguments…");
           } else if (update.type === "toolcall_end") {
@@ -2342,7 +2408,24 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
           registerTokenUsage(event.message);
           return;
         case "tool_execution_start": {
+          // Capture the model's lead-in prose (its stated intent) before the
+          // streaming buffers are finalized, so the tool row carries the reason
+          // it was called instead of appearing context-free.
+          const intent = deriveToolIntent(currentAssistant.text);
+          const intentAssistantId =
+            intent !== undefined &&
+            currentAssistant.id !== null &&
+            intentIsWholeMessage(currentAssistant.text, intent)
+              ? currentAssistant.id
+              : null;
           finalizeStreamingBuffers();
+          // When the entire assistant message was just that short lead-in, fold
+          // it into the tool row rather than leaving a duplicate prose block.
+          if (intentAssistantId) {
+            setItems((previous) =>
+              previous.filter((item) => item.id !== intentAssistantId),
+            );
+          }
           const itemId = crypto.randomUUID();
           const argsObject = toolArgsObject(event.args);
           const argsCount = toolArgsCount(argsObject);
@@ -2379,6 +2462,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
             startedAt: Date.now(),
             text: formatToolStartText(event.toolName),
             toolArgs: argsObject,
+            toolDetail: intent ? `intent: ${intent}` : undefined,
             collapsed: true,
           });
           updateStatus(
@@ -2400,6 +2484,24 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
           toolItems.delete(event.toolCallId);
           const elapsed = Date.now() - tracked.startedAt;
           const evidence = getToolEvidenceCacheInfo(event.result);
+          // A hard-blocked repeat call: the runtime intercepted the loop and
+          // returned cached evidence flagged as an error. Surface it as a
+          // distinct state so the user sees the agent was redirected.
+          if (evidence?.blocked) {
+            const consecutiveCount = evidence.consecutiveCount ?? 2;
+            updateItem(tracked.itemId, {
+              toolStatus: "failed",
+              toolCategory: tracked.toolCategory,
+              finishedAt: Date.now(),
+              text: formatBlockedToolText(event.toolName, consecutiveCount),
+              toolDetail: formatBlockedToolDetail(consecutiveCount, evidence),
+              collapsed: true,
+            });
+            updateStatus(
+              `Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · blocked repeated ${event.toolName} (${consecutiveCount}x) · forcing new direction`,
+            );
+            return;
+          }
           if (
             tracked.toolCategory === "read" &&
             evidence?.reused &&

@@ -264,6 +264,7 @@ export function samePetSnapshot(
 export function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
+  if (item.kind === "thinking") return true;
   if (item.kind === "report") return false;
   return isTranscriptItemAutoCollapsed({
     ...item,
@@ -277,6 +278,8 @@ export function isTranscriptItemCollapsible(item: TranscriptItem): boolean {
 export function isTranscriptItemAutoCollapsed(item: TranscriptItem): boolean {
   if (item.streaming) return false;
   if (item.kind === "tool") return true;
+  // Reasoning is verbose and secondary; default it to collapsed once finalized.
+  if (item.kind === "thinking") return true;
   if (item.kind === "report") return false;
   if (!["assistant", "panel", "help", "error"].includes(item.kind))
     return false;
@@ -522,6 +525,18 @@ export function estimateTranscriptItemRows(
     return countWrappedRows(item.text || " ", Math.max(10, width));
   }
   if (isMarkdownTranscriptItem(item)) {
+    const line = transcriptPlainLine(
+      { ...item, text: renderTranscriptMarkdownPlain(item.text, width) },
+      continuation,
+      collapsible,
+    );
+    return wrapByVisualWidth(line, Math.max(20, width)).length;
+  }
+  if (item.kind === "thinking") {
+    // Finalized reasoning renders through the plain-markdown path (see
+    // ThinkingTranscriptLine); a streaming, still-empty block is a single
+    // "working…" line.
+    if (item.streaming && item.text.trim().length === 0) return 1;
     const line = transcriptPlainLine(
       { ...item, text: renderTranscriptMarkdownPlain(item.text, width) },
       continuation,

@@ -49,6 +49,7 @@ import {
   isMarkdownTranscriptItem,
   layoutTranscriptItems,
   renderTranscriptMarkdown,
+  renderTranscriptMarkdownPlain,
   transcriptScrollAnchors,
   viewportTranscriptLayout,
 } from "./tui-transcript";
@@ -286,7 +287,7 @@ export function TranscriptLine({
     );
   }
   if (item.kind === "thinking") {
-    return <ThinkingTranscriptLine />;
+    return <ThinkingTranscriptLine item={item} width={width} foldGlyph={foldGlyph} />;
   }
   if (item.kind === "tool") {
     const category = item.toolCategory ?? "tool";
@@ -359,13 +360,32 @@ export function TranscriptLine({
   );
 }
 
-export function ThinkingTranscriptLine() {
+export function ThinkingTranscriptLine({
+  item,
+  width,
+  foldGlyph,
+}: {
+  item: TranscriptItem;
+  width: number;
+  foldGlyph: string;
+}) {
   const theme = useTuiTheme();
+  // While streaming with no text yet, keep the lightweight "working…" hint.
+  const text = item.text.trim();
+  if (item.streaming && text.length === 0) {
+    return (
+      <Text>
+        <Badge label="THINKING" backgroundColor="yellow" />
+        <Text color={theme.colors.gray}> working</Text>
+        <Text color={theme.colors.yellow}> ...</Text>
+      </Text>
+    );
+  }
   return (
     <Text>
+      {foldGlyph ? <Text color={theme.colors.gray}>{foldGlyph}</Text> : null}
       <Badge label="THINKING" backgroundColor="yellow" />
-      <Text color={theme.colors.gray}> working</Text>
-      <Text color={theme.colors.yellow}> ...</Text>
+      <Text color={theme.colors.gray}> {renderTranscriptMarkdownPlain(item.text, width)}</Text>
     </Text>
   );
 }
