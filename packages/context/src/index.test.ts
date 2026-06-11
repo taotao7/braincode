@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, type HandoffPacket, type WorkerResult } from "./index"
+import { agentToBrainContextTransfer, brainToAgentContextTransfer, createBrainTaskContext, createHandoffAgentMessage, createWorkerResultAgentMessage, nextDevelopmentPhaseStep, validateDevelopmentPhaseGate, type DevelopmentPhaseContract, type HandoffPacket, type WorkerResult } from "./index"
 
 test("context packets keep Brain parent context separate from agent task context", () => {
   const handoff: HandoffPacket = {
@@ -87,4 +87,52 @@ test("context helpers create Brain context and AgentMessage envelopes", () => {
     to: "orchestrator",
     kind: "result",
   })
+})
+
+test("development phase gates require durable artifacts before execution steps", () => {
+  const contract: DevelopmentPhaseContract = {
+    id: "phase-01",
+    title: "Add runtime workflow contracts",
+    goal: "Represent project-level phase progress independently from one agent transcript.",
+    currentStep: "execute",
+    acceptanceCriteria: ["Execution never starts without a reviewed plan artifact."],
+    artifacts: [{ kind: "decision_context", uri: "docs/development-workflow.md" }],
+  }
+
+  expect(validateDevelopmentPhaseGate(contract, "plan")).toMatchObject({
+    ok: true,
+    missing: [],
+    nextStep: "execute",
+  })
+  expect(validateDevelopmentPhaseGate(contract, "execute")).toMatchObject({
+    ok: false,
+    missing: ["execution_plan"],
+  })
+  expect(validateDevelopmentPhaseGate({
+    ...contract,
+    artifacts: [...contract.artifacts, { kind: "execution_plan", uri: "docs/project-structure.md#remaining-work" }],
+  }, "execute")).toMatchObject({
+    ok: true,
+    missing: [],
+    nextStep: "verify",
+  })
+})
+
+test("development phase gates surface blockers and terminal next-step state", () => {
+  const contract: DevelopmentPhaseContract = {
+    id: "phase-02",
+    title: "Ship review gate improvements",
+    goal: "Close the review workflow gap.",
+    currentStep: "ship",
+    acceptanceCriteria: ["Verification passed."],
+    artifacts: [{ kind: "verification", uri: "docs/review-and-audit.md" }],
+    blockers: ["Waiting for human approval policy."],
+  }
+
+  expect(validateDevelopmentPhaseGate(contract)).toMatchObject({
+    ok: false,
+    targetStep: "ship",
+    blockers: ["Waiting for human approval policy."],
+  })
+  expect(nextDevelopmentPhaseStep("ship")).toBeUndefined()
 })

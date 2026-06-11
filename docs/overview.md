@@ -8,6 +8,7 @@ This is the high-level map of the Braincode codebase. Read this first; the deepe
 - [Context management](./context-management.md) — how Brain and worker contexts are isolated and what crosses the boundary.
 - [Agent communication](./agent-communication.md) — handoff/result protocol, worker lifecycle, runtime events.
 - [Review and audit](./review-and-audit.md) — review gates before and after execution, permission decisions, and session audit records.
+- [Development workflow](./development-workflow.md) — project-level phase contracts and the artifact-driven development loop.
 - [Project structure and plan](./project-structure.md) — workspace layout, package responsibilities, implementation status.
 - [Visual style](./visual-style.md) — UI/brand direction.
 
@@ -58,7 +59,8 @@ packages/
   server/          Bun.serve on 127.0.0.1; typed API for the config UI.
   llm/             BraincodeModel -> Pi Model mapping, API key resolution.
   brain/           BrainModel, role catalog + prompts, planAgentRouting.
-  context/         BrainTaskContext, AgentTaskContext, HandoffPacket, WorkerResult.
+  context/         BrainTaskContext, AgentTaskContext, HandoffPacket, WorkerResult,
+                   project phase workflow contracts.
   agent-runtime/   Orchestrator: builds RuntimePlan, runs workers, hooks, MCP, sessions.
   tools/           Coding tool definitions + permissions.
 ```
@@ -148,6 +150,8 @@ Project-local support files live next to code:
 ```
 
 `packages/config` owns discovery and parsing. `agent-runtime` decides what becomes prompt text vs. a `ContextRef`.
+
+Project-level planning should use [Development workflow](./development-workflow.md) for non-trivial changes that span multiple runs. Runtime `AgentRoutingPlan` records are for one prompt; phase contracts are for durable project progress and should remain readable by future sessions without copying private worker transcripts.
 
 ## Hooks and MCP
 

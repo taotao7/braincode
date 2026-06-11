@@ -18,6 +18,11 @@ Use this document for external references and design notes that inform Braincode
   - Short, focused threads produce better results and lower cost than one large thread.
   - Treat threads as task units; a feature or bugfix can be a cluster of small contexts.
   - For Braincode, this maps to Brain owning the orchestration context while each subagent owns one task context.
+- GSD Core repository: `https://github.com/open-gsd/gsd-core`
+  - The original `https://github.com/gsd-build/get-shit-done` repository has moved to `open-gsd/gsd-core`.
+  - GSD's useful transferable idea is an artifact-driven phase loop: Discuss, Plan, Execute, Verify, Ship.
+  - GSD uses durable project files such as state, context, plan, summary, and verification artifacts so agents can resume without relying on one long transcript.
+  - For Braincode, this maps to [Development workflow](./development-workflow.md): project-level phase contracts complement runtime worker handoffs and session JSONL rather than replacing them.
 
 ## Pi infrastructure
 

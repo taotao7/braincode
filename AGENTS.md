@@ -7,6 +7,7 @@ Use this file for durable engineering rules. Use the documents under [`docs/`](.
 ## Project references
 
 - Main architecture: [`docs/architecture.md`](./docs/architecture.md)
+- Development workflow: [`docs/development-workflow.md`](./docs/development-workflow.md)
 - Project goals and non-goals: [`docs/project-structure.md#goals`](./docs/project-structure.md#goals) and [`docs/project-structure.md#non-goals-for-the-first-phase`](./docs/project-structure.md#non-goals-for-the-first-phase)
 - Runtime and infrastructure: [`docs/project-structure.md#runtime-and-infrastructure`](./docs/project-structure.md#runtime-and-infrastructure)
 - Planned repository layout: [`docs/project-structure.md#planned-repository-layout`](./docs/project-structure.md#planned-repository-layout)

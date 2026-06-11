@@ -7,6 +7,7 @@ For contributors, companion docs go deeper on the trickiest parts:
 - [Context management](./context-management.md) — how Brain and worker contexts stay isolated, packet shapes, prompt references, session JSONL.
 - [Agent communication](./agent-communication.md) — worker lifecycle, routing, hooks, runtime events, multi-agent runs.
 - [Review and audit](./review-and-audit.md) — pre-execution review gates, permission decisions, patch/check review, and the session audit trail.
+- [Development workflow](./development-workflow.md) — project-level phase contracts, durable planning artifacts, and when to use the Discuss/Plan/Execute/Verify/Ship loop.
 
 If you are new to the codebase, start with [Overview](./overview.md).
 
@@ -61,6 +62,20 @@ User task
     -> merge selected summaries/artifacts/facts
   -> final answer or code change
 ```
+
+## Project workflow
+
+Runtime planning is scoped to one prompt or continuation. Project workflow planning is scoped to a feature, architecture change, or safety-policy change that may span several runs.
+
+Braincode uses a GSD-inspired phase loop for non-trivial project work:
+
+```text
+Discuss -> optional Design -> Plan -> Execute -> Verify -> Ship
+```
+
+The loop is artifact-driven rather than transcript-driven. Decisions, plans, execution summaries, verification evidence, and release notes must be durable enough for a later session to resume without reconstructing a long conversation. Today the Braincode repository keeps those project-level truths in `docs/`; future product work can expose first-class project workflow artifacts through Braincode-owned schemas and commands.
+
+`packages/context` owns the pure phase-contract vocabulary (`DevelopmentPhaseStep`, `DevelopmentPhaseContract`, `DevelopmentPhaseArtifact`, and `validateDevelopmentPhaseGate`). `packages/brain` and `packages/agent-runtime` still own per-run routing, worker execution, review, checks, and session JSONL. Do not collapse these layers: a runtime `AgentRoutingPlan` is not the long-term roadmap, and project workflow artifacts must not contain private worker transcripts.
 
 ## Execution modes
 

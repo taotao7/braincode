@@ -69,6 +69,95 @@ export type WorkerResult = AgentToBrainContextTransfer & {
   nextQuestions: string[]
 }
 
+export type DevelopmentPhaseStep = "discuss" | "design" | "plan" | "execute" | "verify" | "ship"
+
+export const developmentPhaseSteps = [
+  "discuss",
+  "design",
+  "plan",
+  "execute",
+  "verify",
+  "ship",
+] as const satisfies readonly DevelopmentPhaseStep[]
+
+export type DevelopmentPhaseArtifactKind =
+  | "decision_context"
+  | "ui_spec"
+  | "research"
+  | "execution_plan"
+  | "execution_summary"
+  | "verification"
+  | "release_record"
+
+export type DevelopmentPhaseArtifact = {
+  kind: DevelopmentPhaseArtifactKind
+  uri: string
+  label?: string
+  phaseId?: string
+  planId?: string
+}
+
+export type DevelopmentPhaseContract = {
+  id: string
+  title: string
+  goal: string
+  currentStep: DevelopmentPhaseStep
+  requirements?: string[]
+  decisions?: string[]
+  acceptanceCriteria: string[]
+  artifacts: DevelopmentPhaseArtifact[]
+  blockers?: string[]
+}
+
+export type DevelopmentPhaseGateResult = {
+  ok: boolean
+  targetStep: DevelopmentPhaseStep
+  missing: string[]
+  blockers: string[]
+  nextStep?: DevelopmentPhaseStep
+}
+
+export const requiredDevelopmentPhaseArtifacts: Record<DevelopmentPhaseStep, readonly DevelopmentPhaseArtifactKind[]> = {
+  discuss: [],
+  design: ["decision_context"],
+  plan: ["decision_context"],
+  execute: ["execution_plan"],
+  verify: ["execution_summary"],
+  ship: ["verification"],
+}
+
+export function nextDevelopmentPhaseStep(step: DevelopmentPhaseStep): DevelopmentPhaseStep | undefined {
+  const index = developmentPhaseSteps.indexOf(step)
+  return index >= 0 ? developmentPhaseSteps[index + 1] : undefined
+}
+
+export function validateDevelopmentPhaseGate(
+  contract: DevelopmentPhaseContract,
+  targetStep: DevelopmentPhaseStep = contract.currentStep,
+): DevelopmentPhaseGateResult {
+  const missing = new Set<string>()
+  const phaseId = contract.id.trim()
+  const goal = contract.goal.trim()
+  if (!phaseId) missing.add("phase id")
+  if (!goal) missing.add("phase goal")
+  if (targetStep !== "discuss" && contract.acceptanceCriteria.length === 0) {
+    missing.add("acceptance criteria")
+  }
+  for (const artifactKind of requiredDevelopmentPhaseArtifacts[targetStep]) {
+    if (!contract.artifacts.some((artifact) => artifact.kind === artifactKind && artifact.uri.trim())) {
+      missing.add(artifactKind)
+    }
+  }
+  const blockers = [...(contract.blockers ?? [])].filter((blocker) => blocker.trim())
+  return {
+    ok: missing.size === 0 && blockers.length === 0,
+    targetStep,
+    missing: [...missing],
+    blockers,
+    nextStep: nextDevelopmentPhaseStep(targetStep),
+  }
+}
+
 export type CreateBrainTaskContextInput = {
   id: string
   goal: string

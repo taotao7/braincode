@@ -52,6 +52,7 @@ braincode/
   tsconfig.json
   docs/
     architecture.md
+    development-workflow.md
     review-and-audit.md
     project-structure.md
     references.md
@@ -279,9 +280,11 @@ Responsibilities:
 
 ### `packages/context`
 
-Owns context isolation, compaction policy, and handoff/result packets.
+Owns context isolation, compaction policy, handoff/result packets, and pure project-phase workflow contracts.
 
 Workers should not share full conversation history. Brain owns the root orchestration context and gives it a stable task id for recording and recovery. Each worker owns a separate task context with its own id and a `parentId` pointing back to the Brain task. Brain sends the worker a compact handoff packet, and the worker returns a structured result for Brain to merge.
+
+Project-level development workflow is a separate contract from runtime worker context. Braincode uses the phase vocabulary in [Development workflow](./development-workflow.md) to represent long-running work that may span several agent runs. The contract lives here because it is context-shape logic only; it must not read files, call providers, or own CLI/UI policy.
 
 Responsibilities:
 
@@ -289,6 +292,7 @@ Responsibilities:
 - Define isolated subagent task context metadata.
 - Define typed Brain-to-agent handoff packets.
 - Define typed agent-to-Brain result packets.
+- Define project-level phase steps, artifacts, and gate validation helpers.
 - Track child task progress through structured worker results rather than shared transcripts.
 - Keep context references selective, so file/thread/history references pull only task-relevant information.
 - Preserve the invariant that worker private transcripts and unrelated tool output do not become shared context.
@@ -341,6 +345,7 @@ local tools
 Remaining work:
 
 - Extend review/audit coverage with whole-plan human approval where policy requires it and dedicated review-artifact summary records as described in [Review and audit](./review-and-audit.md).
+- Productize the project-level phase workflow from [Development workflow](./development-workflow.md) into CLI/TUI surfaces after artifact storage and schema ownership are settled.
 - Continue focused tests for routing, context isolation, hooks, tools, permissions, review gates, and failure recovery.
 
 ## Initial milestones
