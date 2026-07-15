@@ -417,15 +417,21 @@ export async function runWorkerPool(options: {
   const results = new Array<ExecutedWorkerResult | undefined>(count)
   const pending = new Set<number>()
   for (let index = 0; index < count; index++) pending.add(index)
-  const inflight = new Map<number, Promise<number>>()
+  // Each in-flight promise settles to { index, error? } instead of rejecting,
+  // so when several workers fail at once (e.g. a shared abort) every rejection
+  // is observed and only the first error propagates — no unhandled rejections.
+  const inflight = new Map<number, Promise<{ index: number; error?: unknown }>>()
 
   const launch = (index: number) => {
     pending.delete(index)
     const priorResults = results.filter((result): result is ExecutedWorkerResult => Boolean(result))
-    const settled = runWorker(index, priorResults).then((result) => {
-      results[index] = result
-      return index
-    })
+    const settled = runWorker(index, priorResults).then(
+      (result) => {
+        results[index] = result
+        return { index }
+      },
+      (error: unknown) => ({ index, error: error ?? new Error("worker failed") }),
+    )
     inflight.set(index, settled)
   }
 
@@ -447,7 +453,8 @@ export async function runWorkerPool(options: {
       break
     }
     const finished = await Promise.race(inflight.values())
-    inflight.delete(finished)
+    inflight.delete(finished.index)
+    if ("error" in finished && finished.error !== undefined) throw finished.error
   }
 
   return results.filter((result): result is ExecutedWorkerResult => Boolean(result))
@@ -504,13 +511,20 @@ export async function runSupportWorkers(
     })
   }
 
+  // Context isolation: a worker may only see the results of its declared
+  // dependency upstreams (Brain-mediated edges). Passing every settled result
+  // would leak "independent" specialists' output into each other's prompts and
+  // make prompts race-timing dependent.
+  const upstreamContextIds = computeDependencyUpstreamContextIds(workers, dependencies)
+
   const runWorker = (index: number, priorResults: ExecutedWorkerResult[]): Promise<ExecutedWorkerResult> => {
     const worker = workers[index]!
     const localSet = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
     const workerTools = [...localSet, ...getMcpTools()]
+    const dependencyResults = priorResults.filter((result) => upstreamContextIds[index]!.has(result.taskId))
     return runWorkerFromPlan(
       worker,
-      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, priorResults, environmentSection),
+      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, dependencyResults, environmentSection),
       sessionId,
       home,
       models,
@@ -557,6 +571,33 @@ export async function runSupportWorkers(
     runWorker,
     onBlocked,
     throwIfAborted: () => throwIfRunAborted(signal),
+  })
+}
+
+/**
+ * For each worker, the set of worker context ids (= result taskIds) whose
+ * results it is allowed to receive: exactly its declared dependency upstreams.
+ * Workers without inbound dependency edges receive no prior results.
+ */
+export function computeDependencyUpstreamContextIds(
+  workers: RuntimeWorkerPlan[],
+  dependencies: AgentTodoDependency[],
+): Array<Set<string>> {
+  const todoOwnerById = new Map<string, number>()
+  for (const [index, worker] of workers.entries()) {
+    for (const todoId of worker.todoIds ?? []) {
+      todoOwnerById.set(todoId, index)
+    }
+  }
+  return workers.map((worker, index) => {
+    const workerTodoIds = new Set(worker.todoIds ?? [])
+    const upstream = new Set<string>()
+    for (const dependency of dependencies) {
+      if (!workerTodoIds.has(dependency.toTodoId)) continue
+      const owner = todoOwnerById.get(dependency.fromTodoId)
+      if (owner !== undefined && owner !== index) upstream.add(workers[owner]!.contextId)
+    }
+    return upstream
   })
 }
 

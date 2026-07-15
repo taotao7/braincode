@@ -495,11 +495,19 @@ function summarizeToolResultForDebug(result: unknown): Record<string, unknown> {
   }
 }
 
-function toolCallRequiresApproval(toolName: string, args: unknown, policyEvaluation?: PermissionPolicyEvaluation): boolean {
+export function toolCallRequiresApproval(toolName: string, args: unknown, policyEvaluation?: PermissionPolicyEvaluation): boolean {
   if (policyEvaluation?.action === "ask") return true
   if (policyEvaluation?.action === "allow") return false
   const name = toolName.toLowerCase()
-  if (name === "web_search" || name.startsWith("mcp__")) return false
+  if (name === "web_search") return false
+  if (name.startsWith("mcp__")) {
+    // Read-only MCP tools run freely, but a mutating MCP tool (browser click,
+    // file write, deploy, ...) is as risky as a local write/exec tool and must
+    // go through the same approval gate instead of bypassing it by prefix.
+    if (name === "mcp__connect") return false
+    const bare = name.split("__").at(-1) ?? name
+    return /(edit|write|patch|delete|remove|rm_|rename|move|create|update|insert|put|post|exec|execute|run|command|terminal|bash|zsh|cmd|powershell|shell|spawn|subprocess|kill|navigate|click|fill|upload|drag|press|publish|deploy|commit|push|reset)/.test(bare)
+  }
   if (/(shell|exec|execute|run_command|run-command|terminal|bash|zsh|cmd|powershell|spawn|subprocess|run_script|kill_background)/.test(name)) return true
   if (/(apply_patch|edit|write|patch|delete|remove|rm_|rename|move|create_file|create-file|filesystem__write)/.test(name)) return true
   const serialized = safeStringify(args).toLowerCase()

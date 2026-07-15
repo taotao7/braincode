@@ -220,6 +220,9 @@ function checkStdioMcpHealth(command: string, args: string[], env: Record<string
     }, timeoutMs)
 
     child.on("error", (err) => settle({ status: "error", error: err.message }))
+    // A server that exits before reading stdin raises EPIPE on the stream; keep
+    // it from becoming an uncaught exception (the close handler reports the exit).
+    child.stdin?.on("error", () => {})
     child.stderr?.on("data", (chunk: Buffer) => {
       stderrTail += chunk.toString()
       if (stderrTail.length > 4000) stderrTail = stderrTail.slice(-2000)

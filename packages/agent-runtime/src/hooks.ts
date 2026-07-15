@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { appendSessionRecord, readHookSources, readSettings, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource } from "@braincode/config"
 
 export type HookPermissionMode = "default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions"
@@ -132,6 +132,9 @@ async function runCommandHook(
       cwd,
       shell: true,
       stdio: ["pipe", "pipe", "pipe"],
+      // Own process group (POSIX) so a timeout can reclaim shell grandchildren,
+      // not just the shell itself.
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         BRAINCODE_HOOK_SOURCE: source.path,
@@ -140,9 +143,15 @@ async function runCommandHook(
     let stdout = ""
     let stderr = ""
     let timedOut = false
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    // A hook that exits without reading stdin raises EPIPE on the stdin stream;
+    // without a listener that becomes an uncaught exception for the whole process.
+    child.stdin?.on("error", () => {})
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill("SIGTERM")
+      terminateHookProcessTree(child, "SIGTERM")
+      // Escalate: a hook that ignores SIGTERM must not outlive its timeout.
+      killTimer = setTimeout(() => terminateHookProcessTree(child, "SIGKILL"), 1_000)
     }, timeoutMs)
 
     child.stdout?.on("data", (chunk) => {
@@ -153,10 +162,12 @@ async function runCommandHook(
     })
     child.on("error", (error) => {
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       resolve({ record: { ...baseRecord, status: "failed", reason: error.message, stdout, stderr } })
     })
     child.on("close", (exitCode) => {
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       if (timedOut) {
         resolve({ record: { ...baseRecord, status: "failed", reason: `timed out after ${handler.timeout ?? 600}s`, stdout, stderr, exitCode } })
         return
@@ -179,6 +190,27 @@ async function runCommandHook(
     })
     child.stdin?.end(`${JSON.stringify(hookInput)}\n`)
   })
+}
+
+function terminateHookProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (pid && process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal)
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  if (pid && process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" }).on("error", () => {})
+      return
+    } catch {
+      // Fall through to direct child termination.
+    }
+  }
+  try { child.kill(signal) } catch { /* ignore */ }
 }
 
 export async function runConfiguredHooks(

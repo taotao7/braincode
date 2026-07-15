@@ -52,6 +52,9 @@ class McpConnection {
       env: { ...process.env, ...(info.env ?? {}) },
       detached: process.platform !== "win32",
     })
+    // An MCP server that dies before reading stdin raises EPIPE on the stream;
+    // without a listener that becomes an uncaught exception for the whole process.
+    this.child.stdin?.on("error", () => {})
     this.child.stdout?.on("data", (chunk: Buffer) => this.onStdout(chunk))
     this.child.stderr?.on("data", (chunk: Buffer) => {
       this.stderrTail += chunk.toString()
@@ -150,6 +153,15 @@ class McpConnection {
     this.closed = true
     try { this.child.stdin?.end() } catch { /* ignore */ }
     terminateProcessTree(this.child, "SIGTERM")
+    // Escalate: a server that ignores SIGTERM must not outlive run teardown.
+    // unref() so the pending kill timer never keeps the CLI process alive.
+    const killTimer = setTimeout(() => {
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        terminateProcessTree(this.child, "SIGKILL")
+      }
+    }, 1_000)
+    killTimer.unref?.()
+    this.child.once("close", () => clearTimeout(killTimer))
   }
 }
 

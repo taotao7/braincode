@@ -325,3 +325,49 @@ test("runWorkerPool blocks dependents when their upstream fails", async () => {
   expect(blocked.has(1)).toBe(true)
   expect(results.map((result) => result.status)).toEqual(["failed", "blocked"])
 })
+
+test("runWorkerPool surfaces one rejection and observes concurrent failures without unhandled rejections", async () => {
+  // Two workers fail almost simultaneously (e.g. a shared abort). The pool must
+  // reject with one of the errors and must not leave the other rejection
+  // unobserved (which would crash the process via unhandledRejection).
+  const unhandled: unknown[] = []
+  const onUnhandled = (reason: unknown) => {
+    unhandled.push(reason)
+  }
+  process.on("unhandledRejection", onUnhandled)
+  try {
+    await expect(runWorkerPool({
+      count: 2,
+      limit: 2,
+      isReady: () => true,
+      runWorker: async (index) => {
+        await new Promise((resolve) => setTimeout(resolve, index === 0 ? 1 : 2))
+        throw new Error(`worker ${index} exploded`)
+      },
+      onBlocked: async (index) => executedResult(index, "blocked"),
+    })).rejects.toThrow("exploded")
+    // Give the second rejection a tick to surface if it were unobserved.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(unhandled).toEqual([])
+  } finally {
+    process.off("unhandledRejection", onUnhandled)
+  }
+})
+
+test("computeDependencyUpstreamContextIds shares results only along declared dependency edges", async () => {
+  const { computeDependencyUpstreamContextIds } = await import("./workers")
+  const workers = [
+    testWorker({ role: "security", contextId: "ctx-security", todoIds: ["todo-security"] }),
+    testWorker({ role: "frontend", contextId: "ctx-frontend", todoIds: ["todo-frontend"] }),
+    testWorker({ role: "qa", contextId: "ctx-qa", todoIds: ["todo-qa"] }),
+  ]
+  const upstreams = computeDependencyUpstreamContextIds(workers, [
+    { fromTodoId: "todo-security", toTodoId: "todo-qa" },
+  ])
+
+  // Independent workers receive nothing, regardless of completion order.
+  expect(upstreams[0]!.size).toBe(0)
+  expect(upstreams[1]!.size).toBe(0)
+  // The dependent worker receives only its declared upstream.
+  expect([...upstreams[2]!]).toEqual(["ctx-security"])
+})
