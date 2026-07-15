@@ -298,7 +298,12 @@ function commandPolicyMatch(command: string, pattern: string): boolean {
   const normalizedPattern = normalizeCommandText(pattern)
   if (!normalizedCommand || !normalizedPattern) return false
   if (normalizedPattern.includes("*")) return globMatch(normalizedCommand, normalizedPattern)
-  return normalizedCommand === normalizedPattern || normalizedCommand.startsWith(`${normalizedPattern} `) || normalizedCommand.includes(` ${normalizedPattern} `)
+  return normalizedCommand === normalizedPattern
+    || normalizedCommand.startsWith(`${normalizedPattern} `)
+    || normalizedCommand.includes(` ${normalizedPattern} `)
+    // Also match when the pattern ends the command ("cd x && git push"), so
+    // chained commands cannot slip past deny rules like "git push".
+    || normalizedCommand.endsWith(` ${normalizedPattern}`)
 }
 
 function globMatch(value: string, glob: string): boolean {

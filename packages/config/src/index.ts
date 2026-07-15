@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, chmod, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { agentRoleSystemPrompts, type AgentRole } from "@braincode/brain";
@@ -569,10 +569,13 @@ export function getUserSupportPaths(home = getBraincodeHome()): UserSupportPaths
 async function writeJsonFile(path: string, value: unknown, mode?: number) {
   const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await Bun.write(tempPath, `${JSON.stringify(value, null, 2)}\n`);
-    if (mode !== undefined) {
-      await chmod(tempPath, mode);
-    }
+    // Create the temp file with the restrictive mode up front (instead of
+    // chmod after write) so secret files like auth.json are never readable by
+    // other users, even briefly.
+    await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      ...(mode !== undefined ? { mode } : {}),
+    });
     await rename(tempPath, path);
     if (mode !== undefined) {
       await chmod(path, mode);
@@ -605,6 +608,20 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value))
     return undefined;
   return value as Record<string, unknown>;
+}
+
+// Parse a support-file JSON document (mcp.json / .mcp.json) without letting a
+// syntax error abort the whole run; a malformed file degrades to "no config"
+// and surfaces through doctor rather than crashing every prompt.
+function parseJsonRecordSafe(path: string, text: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(JSON.parse(text));
+  } catch (error) {
+    console.error(
+      `[braincode] Ignoring malformed JSON in ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
 }
 
 function extractMcpServerNames(config: Record<string, unknown>): string[] {
@@ -690,7 +707,7 @@ export async function readUserMcpConfig(
   const paths = getUserSupportPaths(home);
   const mcpFile = Bun.file(paths.mcp);
   const mcpConfig = (await mcpFile.exists())
-    ? asRecord(JSON.parse(await mcpFile.text())) ?? { mcpServers: {} }
+    ? parseJsonRecordSafe(paths.mcp, await mcpFile.text()) ?? { mcpServers: {} }
     : { mcpServers: {} };
 
   return {
@@ -919,7 +936,7 @@ export async function readProjectSupport(
   const agentsContent = await readOptionalTextFile(paths.agents);
   const mcpFile = Bun.file(paths.mcp);
   const mcpConfig = (await mcpFile.exists())
-    ? asRecord(JSON.parse(await mcpFile.text()))
+    ? parseJsonRecordSafe(paths.mcp, await mcpFile.text())
     : undefined;
 
   return {
@@ -959,7 +976,7 @@ export async function readUserSupport(home = getBraincodeHome()): Promise<UserSu
   const agentsContent = await readOptionalTextFile(paths.agents);
   const mcpFile = Bun.file(paths.mcp);
   const mcpConfig = (await mcpFile.exists())
-    ? asRecord(JSON.parse(await mcpFile.text()))
+    ? parseJsonRecordSafe(paths.mcp, await mcpFile.text())
     : undefined;
 
   return {

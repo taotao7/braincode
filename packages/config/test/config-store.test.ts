@@ -920,3 +920,33 @@ test("readSessionContext handles failure, fallback, handoff, and truncation entr
   expect(truncated?.truncated).toBe(true)
   expect(truncated?.entries).toHaveLength(2)
 })
+
+test("auth.json is written with owner-only permissions from the start", async () => {
+  const home = await makeTempHome()
+  await writeProviderApiKey("openai", "sk-test", home)
+  const paths = getBraincodePaths(home)
+  const mode = (await stat(paths.auth)).mode & 0o777
+  expect(mode).toBe(0o600)
+})
+
+test("malformed user mcp.json degrades to an empty config instead of throwing", async () => {
+  const home = await makeTempHome()
+  await ensureBraincodeHome(home)
+  await Bun.write(join(home, "mcp.json"), "{ not json")
+  const mcp = await readUserMcpConfig(home)
+  expect(mcp.serverNames).toEqual([])
+
+  const support = await readUserSupport(home)
+  expect(support.mcp).toBeUndefined()
+})
+
+test("malformed project .mcp.json degrades to no MCP config instead of throwing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "braincode-config-badmcp-project-"))
+  try {
+    await Bun.write(join(root, ".mcp.json"), "not json at all")
+    const support = await readProjectSupport(root)
+    expect(support.mcp).toBeUndefined()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

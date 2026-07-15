@@ -409,7 +409,9 @@ function createEditFileTool(context: LocalToolContext): AgentTool {
           nextContent = current.split(input.oldString).join(newString)
         } else {
           replacements = 1
-          nextContent = current.replace(input.oldString, newString)
+          // Replace via a callback so `$&`/`$'`-style tokens in newString are
+          // inserted literally instead of being expanded as replacement patterns.
+          nextContent = current.replace(input.oldString, () => newString)
         }
       } else if (input.content !== undefined) {
         operation = "write"
@@ -1280,7 +1282,8 @@ export class ExecSessionManager {
       session.timedOut = true
       this.terminate(session)
     }
-    request.signal?.addEventListener("abort", abort, { once: true })
+    if (request.signal?.aborted) abort()
+    else request.signal?.addEventListener("abort", abort, { once: true })
     await this.waitForSession(session, request.yieldTimeMs)
     request.signal?.removeEventListener("abort", abort)
 
@@ -1498,7 +1501,8 @@ async function runProcess(
       timedOut = true
       abort()
     }, options.timeoutMs)
-    options.signal?.addEventListener("abort", abort, { once: true })
+    if (options.signal?.aborted) abort()
+    else options.signal?.addEventListener("abort", abort, { once: true })
     child.stdout?.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk) })
     child.stderr?.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk) })
     child.on("error", (error: NodeJS.ErrnoException) => {

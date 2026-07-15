@@ -798,3 +798,31 @@ test("git_diff and get_changed_files report git working tree state", async () =>
     await rm(projectRoot, { recursive: true, force: true })
   }
 })
+
+test("edit_file inserts replacement-pattern tokens like $& literally", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-tools-dollar-test-"))
+  try {
+    await Bun.write(join(projectRoot, "money.txt"), "price = COST\n")
+
+    const editFile = getTool("edit_file", projectRoot)
+    await editFile.execute("edit-dollar", {
+      path: "money.txt",
+      oldString: "COST",
+      newString: "$&100 and $' tail",
+    } as never)
+
+    const readFile = getTool("read_file", projectRoot)
+    const result = await readFile.execute("read-dollar", { path: "money.txt" } as never)
+    expect(textContent(result)).toContain("price = $&100 and $' tail")
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("command deny rules match commands chained after && or ;", () => {
+  const chained = evaluateToolPermissionPolicy("exec_command", { cmd: "cd repo && git push" }, undefined)
+  expect(chained.action).toBe("deny")
+
+  const trailing = evaluateToolPermissionPolicy("shell", { command: "echo ok; npm publish" }, undefined)
+  expect(trailing.action).toBe("deny")
+})

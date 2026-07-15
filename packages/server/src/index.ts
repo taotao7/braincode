@@ -68,6 +68,19 @@ type PublicOAuthLoginSession = Omit<OAuthLoginSession, "abortController" | "manu
 
 const oauthLoginSessions = new Map<string, OAuthLoginSession>()
 
+// Finished login sessions are kept briefly so the UI can poll their final
+// state, then pruned so a long-lived config server does not accumulate them.
+const OAUTH_LOGIN_SESSION_TTL_MS = 30 * 60_000
+
+function pruneOAuthLoginSessions(now = Date.now()): void {
+  for (const [id, session] of oauthLoginSessions) {
+    const finished = session.status === "completed" || session.status === "failed" || session.status === "cancelled"
+    if (finished && now - session.updatedAt > OAUTH_LOGIN_SESSION_TTL_MS) {
+      oauthLoginSessions.delete(id)
+    }
+  }
+}
+
 function json<T>(value: T, status = 200): Response {
   return Response.json(value, { status })
 }
@@ -147,6 +160,7 @@ async function startOAuthLoginSession(input: { provider?: string; oauthProviderI
   const oauthProvider = getBraincodeOAuthProvider(oauthProviderId)
   if (!oauthProvider) throw new Error(`Unknown OAuth provider: ${oauthProviderId}`)
 
+  pruneOAuthLoginSessions()
   const provider = input.provider?.trim() || oauthProviderId
   const session: OAuthLoginSession = {
     id: crypto.randomUUID(),
