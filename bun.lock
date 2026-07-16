@@ -33,6 +33,9 @@
     },
     "apps/config-web": {
       "name": "@braincode/config-web",
+      "dependencies": {
+        "@braincode/brain": "workspace:*",
+      },
     },
     "apps/site": {
       "name": "@braincode/site",
@@ -61,8 +64,8 @@
         "@braincode/protocol": "workspace:*",
         "@braincode/shared": "workspace:*",
         "@braincode/tools": "workspace:*",
-        "@earendil-works/pi-agent-core": "^0.77.0",
-        "@earendil-works/pi-ai": "^0.77.0",
+        "@earendil-works/pi-agent-core": "^0.80.7",
+        "@earendil-works/pi-ai": "^0.80.7",
         "typebox": "1.1.39",
       },
     },
@@ -86,9 +89,10 @@
     "packages/llm": {
       "name": "@braincode/llm",
       "dependencies": {
+        "@braincode/brain": "workspace:*",
         "@braincode/config": "workspace:*",
         "@braincode/shared": "workspace:*",
-        "@earendil-works/pi-ai": "^0.77.0",
+        "@earendil-works/pi-ai": "^0.80.7",
       },
     },
     "packages/protocol": {
@@ -98,6 +102,7 @@
       "name": "@braincode/server",
       "dependencies": {
         "@braincode/agent-runtime": "workspace:*",
+        "@braincode/brain": "workspace:*",
         "@braincode/config": "workspace:*",
         "@braincode/config-web": "workspace:*",
         "@braincode/llm": "workspace:*",
@@ -112,7 +117,7 @@
     "packages/tools": {
       "name": "@braincode/tools",
       "dependencies": {
-        "@earendil-works/pi-agent-core": "^0.77.0",
+        "@earendil-works/pi-agent-core": "^0.80.7",
         "typebox": "1.1.39",
       },
     },
@@ -198,9 +203,9 @@
 
     "@braincode/tools": ["@braincode/tools@workspace:packages/tools"],
 
-    "@earendil-works/pi-agent-core": ["@earendil-works/pi-agent-core@0.77.0", "", { "dependencies": { "@earendil-works/pi-ai": "^0.77.0", "ignore": "7.0.5", "typebox": "1.1.38", "yaml": "2.9.0" } }, "sha512-l/mYLJPjpgiPDmcfnFIGdOBqICkWaf8IawCdAbae5guBrPXg+Z0o84l9OuHyRJPOb8RfedeGg8DtSnq8t7grOg=="],
+    "@earendil-works/pi-agent-core": ["@earendil-works/pi-agent-core@0.80.7", "", { "dependencies": { "@earendil-works/pi-ai": "^0.80.7", "ignore": "7.0.5", "typebox": "1.1.38", "yaml": "2.9.0" } }, "sha512-EFjyAuoz2kn24sR9Q5A86sZCG6mD+nz58DCsA2I2wxgmS50cF1tSLCBOZaHKI5U9Y3pJs4BefeK3LRkB5TdJag=="],
 
-    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.77.0", "", { "dependencies": { "@anthropic-ai/sdk": "0.91.1", "@aws-sdk/client-bedrock-runtime": "3.1048.0", "@google/genai": "1.52.0", "@mistralai/mistralai": "2.2.1", "@smithy/node-http-handler": "4.7.3", "http-proxy-agent": "7.0.2", "https-proxy-agent": "7.0.6", "openai": "6.26.0", "partial-json": "0.1.7", "typebox": "1.1.38" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-H21BrQDPf3ydaeBmS5maNDHxUGFMiKBF/n3WnE+OTWloIZSayeL+/NVEgG3aKQw8fZL6HAMYAGpUIVJgFuKtnw=="],
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.80.7", "", { "dependencies": { "@anthropic-ai/sdk": "0.91.1", "@aws-sdk/client-bedrock-runtime": "3.1048.0", "@google/genai": "1.52.0", "@mistralai/mistralai": "2.2.6", "@opentelemetry/api": "1.9.0", "@smithy/node-http-handler": "4.7.3", "http-proxy-agent": "7.0.2", "https-proxy-agent": "7.0.6", "openai": "6.26.0", "partial-json": "0.1.7", "typebox": "1.1.38" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-8RLKLwe5TFM9kKFMNu/lTzveduq4GxZbnlG6ba8FAhLeb5wJP4zbj1eBumKBRvggpFQnW5R/Vo2a8zTlHsV9SQ=="],
 
     "@emnapi/core": ["@emnapi/core@1.10.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw=="],
 
@@ -212,11 +217,15 @@
 
     "@gsap/react": ["@gsap/react@2.1.2", "", { "peerDependencies": { "gsap": "^3.12.5", "react": ">=17" } }, "sha512-JqliybO1837UcgH2hVOM4VO+38APk3ECNrsuSM4MuXp+rbf+/2IG2K1YJiqfTcXQHH7XlA0m3ykniFYstfq0Iw=="],
 
-    "@mistralai/mistralai": ["@mistralai/mistralai@2.2.1", "", { "dependencies": { "ws": "^8.18.0", "zod": "^3.25.0 || ^4.0.0", "zod-to-json-schema": "^3.25.0" } }, "sha512-uKU8CZmL2RzYKmplsU01hii4p3pe4HqJefpWNRWXm1Tcm0Sm4xXfwSLIy4k7ZCPlbETCGcp69E7hZs+WOJ5itQ=="],
+    "@mistralai/mistralai": ["@mistralai/mistralai@2.2.6", "", { "dependencies": { "@opentelemetry/semantic-conventions": "^1.40.0", "ws": "^8.18.0", "zod": "^3.25.0 || ^4.0.0", "zod-to-json-schema": "^3.25.0" }, "peerDependencies": { "@opentelemetry/api": "^1.9.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-W8pX7zHxjJvMIpw8JMxeJEleapXX0Q9NPszdNzqkM3MIEoIGPObdodujj+WHteXEvGfaP/AMwlNyRfEzSY6dQQ=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
     "@nodable/entities": ["@nodable/entities@2.1.0", "", {}, "sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA=="],
+
+    "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
+
+    "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.43.0", "", {}, "sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.132.0", "", {}, "sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ=="],
 

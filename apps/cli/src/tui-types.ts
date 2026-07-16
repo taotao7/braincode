@@ -1,6 +1,7 @@
 import type {
   ExecSessionManager,
   FinalReport,
+  McpToolHub,
   RuntimePlan,
 } from "@braincode/agent-runtime";
 import type {
@@ -236,6 +237,7 @@ export type DecisionPanelState = {
 export type BraincodeTuiProps = {
   initialPrompt?: string;
   execSessions: ExecSessionManager;
+  mcpHub: McpToolHub;
 };
 
 export type UiColor =

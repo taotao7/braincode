@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@braincode/agent-runtime": "workspace:*",
+    "@braincode/brain": "workspace:*",
     "@braincode/config": "workspace:*",
     "@braincode/config-web": "workspace:*",
     "@braincode/llm": "workspace:*",

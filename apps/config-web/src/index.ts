@@ -1,3 +1,5 @@
+import { modelThinkingLevels } from "@braincode/brain"
+
 export const configWebHtml = `<!doctype html>
 <html lang="en">
   <head>
@@ -275,6 +277,12 @@ export const configWebHtml = `<!doctype html>
       .role-card-title { margin: 0; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; }
       .role-note { flex-grow: 1; color: var(--muted); font-size: 12px; }
       .role-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+      .role-prompt { display: none; flex-direction: column; gap: 8px; }
+      .role-prompt.open { display: flex; }
+      .role-prompt textarea { width: 100%; min-height: 180px; resize: vertical; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+      .role-prompt-hint { color: var(--muted); font-size: 11px; }
+      .role-prompt-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-lg); color: var(--muted); align-self: flex-start; }
+      .role-prompt-badge.custom { color: var(--accent); border-color: var(--accent); }
       select.enhanced-select { display: none; }
       .combo { position: relative; width: 100%; }
       .combo-input { width: 100%; padding-right: 28px; cursor: pointer; }
@@ -369,7 +377,7 @@ export const configWebHtml = `<!doctype html>
                 <div class="field"><label for="manual-model-id" data-i18n="modelId">Model ID</label><input id="manual-model-id" autocomplete="off" placeholder="anthropic/claude-sonnet-4.5" required /></div>
                 <div class="field"><label for="manual-name" data-i18n="modelName">Name</label><input id="manual-name" autocomplete="off" placeholder="Claude Sonnet 4.5" /></div>
                 <div class="field"><label for="manual-context-window" data-i18n="contextWindow">Context window</label><input id="manual-context-window" type="number" min="1" value="128000" /></div>
-                <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></div>
+                <div class="field"><label for="manual-thinking" data-i18n="thinkingLevel">Thinking level</label><select id="manual-thinking"></select></div>
                 <div class="field checkbox-field"><label for="manual-vision"><input id="manual-vision" type="checkbox" /> <span data-i18n="supportsVision">Vision (image input)</span></label></div>
               </div>
               <div class="row-between">
@@ -519,6 +527,7 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "Tools and auth", tools: "Tools", toolsHint: "Enabled tools are allowed by default; only extremely dangerous operations should require confirmation.", authStatus: "Auth status", authHint: "Secrets are not shown here. They belong in ~/.braincode/auth.json or a future secure store.", tavilyQuickConfig: "Tavily web search", tavilyQuickConfigHint: "Configure Tavily MCP for web search. The API key is saved in ~/.braincode/auth.json; ~/.braincode/mcp.json only stores a Braincode auth reference.", tavilyApiKey: "Tavily API key", configureTavily: "Configure Tavily", tavilyGetApiKey: "Get API key", tavilyConfigured: "Tavily MCP configured", tavilyNotConfigured: "Tavily MCP is not configured", tavilyNeedsApiKey: "Add a Tavily API key to finish setup", tavilyServerReady: "MCP server ready", tavilyAuthReady: "API key saved", tavilyApiKeyRequired: "Tavily API key is required", tavilyRestartHint: "Start a new agent run or use /mcp to recheck the server.", subscriptionAuth: "Subscription OAuth", subscriptionAuthHint: "Connect Claude Pro/Max, ChatGPT Plus/Pro Codex, and GitHub Copilot through Pi OAuth. ChatGPT subscription OAuth is not recommended for reliable calls; if you want to use subscription models, try ClIProxy API or another compatible proxy.", oauthProvider: "OAuth provider", useGithubEnterprise: "Use GitHub Enterprise", githubCopilotDefaultHint: "GitHub Copilot uses github.com by default; no domain is needed.", githubEnterpriseDomain: "GitHub Enterprise domain", githubEnterpriseDomainRequired: "GitHub Enterprise domain is required when that option is enabled.", startOAuthLogin: "Start login", cancelOAuthLogin: "Cancel", authorizationCode: "Authorization code or redirect URL", submitOAuthCode: "Submit code", oauthState: "OAuth", openAuthPage: "Open authorization page", oauthPending: "Waiting for browser/device authorization", oauthCompleted: "OAuth login saved", oauthFailed: "OAuth login failed",
           loading: "Loading...", loaded: "Loaded", loadingCatalog: "Loading model catalog...", catalogFailed: "Model catalog failed to load", saving: "Saving", saved: "Saved", failed: "Failed", none: "None configured", edit: "Edit", save: "Save", cancel: "Cancel", duplicateModel: "A configured model with this ID already exists.", remove: "Remove", testConnection: "Test connection", testing: "Testing", testOk: "Connection ok", testFailure_missingApiKey: "Missing API key for this provider.", testFailure_unsupportedLocation: "The provider rejected this request because the API account or request location is not supported. Use a provider or base URL available in your region, or route this provider through a supported OpenAI-compatible proxy.", testFailure_unsupportedClient: "The provider rejected this request because this model endpoint only accepts specific coding-agent clients. Choose another model/provider for Braincode, or remove this model from Brain role fallbacks.", testFailure_subscriptionBlocked: "The ChatGPT subscription endpoint was blocked by a browser or Cloudflare challenge. OAuth is saved, but ChatGPT subscription OAuth is not recommended for reliable local calls; try ClIProxy API, an OpenAI API key, or another compatible proxy/provider.", testFailure_auth: "The provider rejected the request. Check the API key, account permissions, and model access.", testFailure_rateLimit: "The provider rejected the request due to rate limit or quota. Try again later or use a different key/model.", testFailure_invalidResponse: "The provider responded, but the test response was empty or malformed.", testFailure_network: "The provider could not be reached. Check the base URL, network, and local proxy settings.", enabled: "Enabled", disabled: "Disabled", allowedByDefault: "Allowed by default", confirmDangerous: "Confirm extremely dangerous operations", allowWithoutPrompt: "Allow without prompt", askForDangerous: "Ask for dangerous ops",
           thinking: "Thinking", fallbackModel: "Fallback model",
+          rolePromptEdit: "Edit prompt", rolePromptHide: "Hide prompt", rolePromptCustomBadge: "custom prompt", rolePromptDefaultBadge: "default prompt", rolePromptReset: "Reset to default", rolePromptHint: "System prompt sent to this role's model. Leave unchanged to follow Braincode's built-in default (which updates with new releases); edited prompts are saved to this Brain and pinned until reset.",
           healthTitle: "Health check", healthHint: "One place to see whether providers, models, the package manager, MCP servers, and permission rules are actually usable.", healthRefresh: "Refresh health", healthProviders: "Provider key status", healthProvidersHint: "Which providers have a saved credential. Models from a provider without a key cannot run.", healthModels: "Model capabilities", healthModelsHint: "Tools, vision, and image generation per configured model. An image prompt needs a model with image generation; a screenshot prompt needs vision.", healthPackageManager: "Package manager", healthPackageManagerHint: "Detected from lockfiles in the current project. Checks and run_script use this.", healthMcp: "MCP connection status", healthMcpHint: "Live connection attempt against configured MCP servers. Shows which connected, which failed, and which were skipped (blocked).", healthRunMcp: "Run MCP check", healthMcpRunning: "Connecting to MCP servers...", capTools: "tools", capVision: "vision", capImage: "image", keyPresent: "key present", keyMissing: "no key", pmDetected: "Detected", pmNotDetected: "No lockfile detected — defaulting to npm", mcpConnected: "Connected", mcpFailed: "Failed", mcpSkipped: "Skipped / blocked", mcpNone: "No MCP servers configured", mcpToolCount: "tools",
           permPreviewTitle: "Permission preview", permPreviewHint: "Check how the permission policy would judge a file edit or command before an agent runs it.", permTool: "Tool", permPath: "Target path", permCommand: "Command", permEvaluate: "Preview decision", permAction: "Decision", permReviewRequired: "review required", permReviewNot: "no review required", permNoMatch: "No rule matched — falls back to tool default approval.", permActionAllow: "allow", permActionAsk: "ask", permActionDeny: "deny", permActionNone: "no match",
 
@@ -550,6 +559,7 @@ export const configWebHtml = `<!doctype html>
           toolsAuthTitle: "工具与认证", tools: "工具", toolsHint: "启用的工具默认允许执行；只有极高危险操作才需要确认。", authStatus: "认证状态", authHint: "这里不会展示密钥。密钥应放在 ~/.braincode/auth.json 或未来的安全存储中。", tavilyQuickConfig: "Tavily 网页搜索", tavilyQuickConfigHint: "为 web_search 配置 Tavily MCP。API key 会保存到 ~/.braincode/auth.json；~/.braincode/mcp.json 只保存 Braincode 认证引用。", tavilyApiKey: "Tavily API key", configureTavily: "配置 Tavily", tavilyGetApiKey: "获取 API key", tavilyConfigured: "Tavily MCP 已配置", tavilyNotConfigured: "Tavily MCP 尚未配置", tavilyNeedsApiKey: "添加 Tavily API key 才能完成配置", tavilyServerReady: "MCP server 已就绪", tavilyAuthReady: "API key 已保存", tavilyApiKeyRequired: "需要 Tavily API key", tavilyRestartHint: "开始新的 agent run，或用 /mcp 重新检查 server。", subscriptionAuth: "订阅 OAuth", subscriptionAuthHint: "通过 Pi OAuth 连接 Claude Pro/Max、ChatGPT Plus/Pro Codex 和 GitHub Copilot。不推荐用 ChatGPT 订阅 OAuth 做稳定调用；如果要使用订阅模型，请尝试 ClIProxy API 或其他兼容代理。", oauthProvider: "OAuth Provider", useGithubEnterprise: "使用 GitHub Enterprise", githubCopilotDefaultHint: "GitHub Copilot 默认使用 github.com，不需要填写域名。", githubEnterpriseDomain: "GitHub Enterprise 域名", githubEnterpriseDomainRequired: "启用 GitHub Enterprise 时必须填写域名。", startOAuthLogin: "开始登录", cancelOAuthLogin: "取消", authorizationCode: "授权码或回调 URL", submitOAuthCode: "提交授权码", oauthState: "OAuth", openAuthPage: "打开授权页面", oauthPending: "等待浏览器或设备授权", oauthCompleted: "OAuth 登录已保存", oauthFailed: "OAuth 登录失败",
           loading: "加载中...", loaded: "已加载", loadingCatalog: "正在加载模型目录...", catalogFailed: "模型目录加载失败", saving: "正在保存", saved: "已保存", failed: "失败", none: "暂无配置", edit: "编辑", save: "保存", cancel: "取消", duplicateModel: "已存在相同 ID 的已配置模型。", remove: "移除", testConnection: "连通测试", testing: "测试中", testOk: "连通正常", testFailure_missingApiKey: "这个 Provider 缺少 API key。", testFailure_unsupportedLocation: "Provider 拒绝了这次请求：当前账号或请求位置不支持 API 使用。请换用当前地区可用的 Provider / Base URL，或通过可用的 OpenAI-compatible 代理转发。", testFailure_unsupportedClient: "Provider 拒绝了这次请求：这个模型端点只接受特定 coding-agent 客户端。请为 Braincode 换用其他模型 / Provider，或从 Brain 角色的 fallback 中移除这个模型。", testFailure_subscriptionBlocked: "ChatGPT 订阅端点被浏览器或 Cloudflare 校验拦截。OAuth 已保存，但不推荐用 ChatGPT 订阅 OAuth 做稳定本地调用；请尝试 ClIProxy API、OpenAI API key 或其他兼容代理 / Provider。", testFailure_auth: "Provider 拒绝了这次请求。请检查 API key、账号权限和模型访问权限。", testFailure_rateLimit: "Provider 因限流或额度不足拒绝了这次请求。稍后重试，或换用其他 key / 模型。", testFailure_invalidResponse: "Provider 有响应，但测试返回为空或格式不符合预期。", testFailure_network: "无法连到 Provider。请检查 Base URL、网络和本地代理设置。", enabled: "已启用", disabled: "已禁用", allowedByDefault: "默认允许", confirmDangerous: "极高危险操作需确认", allowWithoutPrompt: "允许且不再提示", askForDangerous: "危险操作时询问",
           thinking: "思考", fallbackModel: "备用模型",
+          rolePromptEdit: "编辑 Prompt", rolePromptHide: "收起 Prompt", rolePromptCustomBadge: "自定义 Prompt", rolePromptDefaultBadge: "默认 Prompt", rolePromptReset: "恢复默认", rolePromptHint: "发送给该角色模型的 system prompt。保持不变则跟随 Braincode 内置默认（随版本更新）；修改后会保存到当前 Brain 并固定，直到恢复默认。",
           healthTitle: "健康检查", healthHint: "在一个地方看清 provider、模型、包管理器、MCP server 和权限规则是否真的可用。", healthRefresh: "刷新健康状态", healthProviders: "Provider key 状态", healthProvidersHint: "哪些 provider 已保存凭证。没有 key 的 provider 下的模型无法运行。", healthModels: "模型能力", healthModelsHint: "每个已配置模型的 tools / 视觉 / 图片生成能力。image prompt 需要带图片生成能力的模型；截图类 prompt 需要视觉能力。", healthPackageManager: "包管理器", healthPackageManagerHint: "根据当前项目的 lockfile 检测，checks 和 run_script 会用到。", healthMcp: "MCP 连接状态", healthMcpHint: "对已配置的 MCP server 发起实时连接，显示哪些已连接、哪些失败、哪些被跳过（blocked）。", healthRunMcp: "运行 MCP 检查", healthMcpRunning: "正在连接 MCP server...", capTools: "工具", capVision: "视觉", capImage: "图片", keyPresent: "已有 key", keyMissing: "无 key", pmDetected: "已检测", pmNotDetected: "未检测到 lockfile —— 默认用 npm", mcpConnected: "已连接", mcpFailed: "失败", mcpSkipped: "跳过 / blocked", mcpNone: "未配置 MCP server", mcpToolCount: "个工具",
           permPreviewTitle: "权限预览", permPreviewHint: "在 agent 真正执行之前，先看看权限策略会怎么判定一次文件编辑或命令。", permTool: "工具", permPath: "目标路径", permCommand: "命令", permEvaluate: "预览判定", permAction: "判定", permReviewRequired: "需要 review", permReviewNot: "无需 review", permNoMatch: "没有规则命中——回退到工具默认的审批策略。", permActionAllow: "允许", permActionAsk: "询问", permActionDeny: "拒绝", permActionNone: "未命中",
 
@@ -574,7 +584,9 @@ export const configWebHtml = `<!doctype html>
       }
 
       const roles = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"]
-      const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"]
+      // Interpolated at module load from @braincode/brain's modelThinkingLevels
+      // — the one source of truth for the level list.
+      const thinkingLevels = ${JSON.stringify(modelThinkingLevels)}
       const apiTypes = ["openai", "anthropic", "openai-images"]
       function roleLabel(role) { return t("roleLabel_" + role) }
       function roleDescription(role) { return t("roleDesc_" + role) }
@@ -616,6 +628,10 @@ export const configWebHtml = `<!doctype html>
       const manualApiInput = document.querySelector("#manual-api")
       const manualContextWindowInput = document.querySelector("#manual-context-window")
       const manualThinkingInput = document.querySelector("#manual-thinking")
+      // One source of truth for the level list: generate the manual-model
+      // options from the same array that drives the role-card selects.
+      manualThinkingInput.replaceChildren(...thinkingLevels.map((level) => option(level, level)))
+      manualThinkingInput.value = "medium"
       const manualVisionInput = document.querySelector("#manual-vision")
       const testManualModelButton = document.querySelector("#test-manual-model")
       const manualTestResult = document.querySelector("#manual-test-result")
@@ -669,6 +685,9 @@ export const configWebHtml = `<!doctype html>
       let currentUserMcp = { path: "", config: { mcpServers: {} }, serverNames: [] }
       let currentUsageStats = { generatedAt: Date.now(), sessions: 0, totals: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byModel: [], byRole: [], byPhase: [], recent: [] }
       let currentUsageFilter = null
+      // Built-in default system prompt per role (GET /api/role-prompts).
+      // Used to show the effective prompt, detect divergence, and reset.
+      let defaultRolePrompts = {}
       const activeTabStorageKey = "braincode-config-tab-v2"
       let activeTab = localStorage.getItem(activeTabStorageKey) || "models"
       let chartRuntimePromise = null
@@ -1704,10 +1723,95 @@ export const configWebHtml = `<!doctype html>
           result.textContent = t("noImageModels")
         }
         card.append(row, note, actions, result)
+        appendRolePromptEditor(card, actions, "imageMaker", policy)
         roleModels.append(card)
         enhanceSelect(select)
         enhanceSelect(fallback)
         enhanceSelect(thinking)
+      }
+
+      // Collapsible per-role system-prompt editor. The textarea always shows the
+      // effective prompt (custom if present, else the built-in default). On save,
+      // brainForm only persists a systemPrompt that differs from the default, so
+      // untouched roles keep following default prompt updates across releases.
+      // Compare prompts ignoring trailing/leading whitespace so a stray
+      // newline never silently pins a role to a frozen copy of the default.
+      function promptEqualsDefault(value, defaultPrompt) {
+        return (value || "").trim() === (defaultPrompt || "").trim()
+      }
+
+      // Single classification used by the badge, the editor, and the save
+      // path, so what the user sees as "custom" is exactly what persists.
+      // Without a known default (older server / failed /api/role-prompts
+      // fetch), a prompt cannot be classified — never "custom".
+      function isCustomRolePrompt(value, defaultPrompt) {
+        return Boolean(defaultPrompt && (value || "").trim() && !promptEqualsDefault(value, defaultPrompt))
+      }
+
+      function appendRolePromptEditor(card, actions, role, policy) {
+        const defaultPrompt = defaultRolePrompts[role] || ""
+        const storedPrompt = typeof policy?.systemPrompt === "string" && policy.systemPrompt.trim() ? policy.systemPrompt : ""
+        const section = document.createElement("div")
+        section.className = "role-prompt"
+        const badge = document.createElement("span")
+        const textarea = document.createElement("textarea")
+        textarea.dataset.rolePrompt = role
+        textarea.value = storedPrompt || defaultPrompt
+        const hint = document.createElement("div")
+        hint.className = "role-prompt-hint"
+        hint.textContent = t("rolePromptHint")
+        const syncBadge = () => {
+          const isCustom = isCustomRolePrompt(textarea.value, defaultPrompt)
+          badge.className = "role-prompt-badge" + (isCustom ? " custom" : "")
+          badge.textContent = isCustom ? t("rolePromptCustomBadge") : t("rolePromptDefaultBadge")
+        }
+        textarea.addEventListener("input", syncBadge)
+        const resetButton = document.createElement("button")
+        resetButton.type = "button"
+        resetButton.textContent = t("rolePromptReset")
+        resetButton.addEventListener("click", (event) => { event.preventDefault(); textarea.value = defaultPrompt; syncBadge() })
+        const promptActions = document.createElement("div")
+        promptActions.className = "role-actions"
+        promptActions.append(resetButton)
+        syncBadge()
+        section.append(badge, textarea, promptActions, hint)
+        const toggleButton = document.createElement("button")
+        toggleButton.type = "button"
+        toggleButton.textContent = t("rolePromptEdit")
+        toggleButton.addEventListener("click", (event) => {
+          event.preventDefault()
+          const open = section.classList.toggle("open")
+          toggleButton.textContent = open ? t("rolePromptHide") : t("rolePromptEdit")
+        })
+        actions.prepend(toggleButton)
+        card.append(section)
+      }
+
+      // Read the effective systemPrompt for a role from its card editor:
+      // undefined = untouched/equal-to-default (do not persist), string = custom.
+      function rolePromptFromForm(role) {
+        const textarea = roleModels.querySelector('textarea[data-role-prompt="' + role + '"]')
+        if (!textarea) return undefined
+        return isCustomRolePrompt(textarea.value, defaultRolePrompts[role] || "") ? textarea.value : undefined
+      }
+
+      // Rebuild a role policy for persistence: preserve unrelated fields from
+      // the previous policy, apply form-owned fields, and apply the
+      // prompt-persistence contract (store only custom prompts). Pure over
+      // its inputs — callers read the form (rolePromptFromForm) so the DOM
+      // dependency stays at the save loop, which already iterates the
+      // rendered cards. One shared path so no save branch drifts.
+      //
+      // IMPORTANT: when customPrompt is undefined, we cannot distinguish
+      // "user reset to default" from "no default known (offline
+      // /api/role-prompts)". In the latter case dropping systemPrompt would
+      // destroy a stored custom prompt on an unrelated save — so keep the
+      // previous stored prompt whenever the role has no known default.
+      function mergeRolePolicy(previous, role, customPrompt, formFields) {
+        const { systemPrompt: previousPrompt, ...rest } = previous || {}
+        const keepStoredPrompt = !customPrompt && !defaultRolePrompts[role] && typeof previousPrompt === "string" && previousPrompt.trim()
+        const systemPrompt = customPrompt || (keepStoredPrompt ? previousPrompt : undefined)
+        return { ...rest, ...(formFields || {}), ...(systemPrompt ? { systemPrompt } : {}) }
       }
 
       function renderBrainRouting() {
@@ -1769,6 +1873,7 @@ export const configWebHtml = `<!doctype html>
           actions.append(testButton)
           testButton.addEventListener("click", (event) => { event.preventDefault(); testRoleModel(role, select, thinking, testButton, testResult) })
           card.append(row, note, actions, testResult)
+          appendRolePromptEditor(card, actions, role, policy)
           roleModels.append(card)
           enhanceSelect(select)
           enhanceSelect(fallback)
@@ -1988,9 +2093,10 @@ export const configWebHtml = `<!doctype html>
 
       async function loadAll() {
         status.textContent = t("loading")
-        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData, usageStatsData, userMcpData] = await Promise.all([
-          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers"), getJson("/api/usage-stats"), getJson("/api/mcp/user")
+        const [settingsData, brainsData, modelsData, toolsData, authStatusData, oauthProvidersData, usageStatsData, userMcpData, rolePromptsData] = await Promise.all([
+          getJson("/api/settings"), getJson("/api/brains"), getJson("/api/models"), getJson("/api/tools"), getJson("/api/auth/status"), getJson("/api/oauth/providers"), getJson("/api/usage-stats"), getJson("/api/mcp/user"), getJson("/api/role-prompts").catch(() => ({ prompts: {} }))
         ])
+        defaultRolePrompts = rolePromptsData.prompts || {}
         currentSettings = settingsData
         currentBrains = brainsData
         currentModels = modelsData
@@ -2315,17 +2421,28 @@ export const configWebHtml = `<!doctype html>
         nextBrain.roles = nextBrain.roles || {}
         for (const select of roleModels.querySelectorAll("select[data-role]")) {
           const role = select.dataset.role
-          if (role === "imageMaker" && !select.value) continue
+          const customPrompt = rolePromptFromForm(role)
+          if (role === "imageMaker" && !select.value) {
+            // No image model selected: keep the existing policy untouched but
+            // still honor a prompt edit — otherwise text typed into the
+            // imageMaker prompt editor is silently discarded on save. Merge
+            // even when no previous policy exists (the prompt edit alone is
+            // worth persisting).
+            const merged = mergeRolePolicy(nextBrain.roles.imageMaker, "imageMaker", customPrompt)
+            if (Object.keys(merged).length > 0) nextBrain.roles.imageMaker = merged
+            continue
+          }
           const thinking = roleModels.querySelector('select[data-role-thinking="' + role + '"]')
           const fallback = roleModels.querySelector('select[data-role-fallback="' + role + '"]')
           const previous = nextBrain.roles[role] || { thinkingLevel: role === "routeBrain" || role === "oracle" ? "xhigh" : "medium" }
           const thinkingLevel = role === "imageMaker" ? "off" : thinking?.value || previous.thinkingLevel || "medium"
           const fallbackModelIds = fallback?.value ? [fallback.value] : []
-          const { systemPrompt: _roleSystemPrompt, imageModel: _imageModel, ...previousWithoutPrompt } = previous
-          nextBrain.roles[role] = { ...previousWithoutPrompt, modelId: select.value, fallbackModelIds, thinkingLevel }
+          // Drop the legacy imageModel field once a configured model id is
+          // chosen; mergeRolePolicy handles the systemPrompt contract.
+          const { imageModel: _imageModel, ...previousWithoutImageModel } = previous
+          nextBrain.roles[role] = mergeRolePolicy(previousWithoutImageModel, role, customPrompt, { modelId: select.value, fallbackModelIds, thinkingLevel })
           if (role === "routeBrain") {
-            const { systemPrompt: _plannerSystemPrompt, ...plannerWithoutPrompt } = nextBrain.planner || previous
-            nextBrain.planner = { ...plannerWithoutPrompt, modelId: select.value, fallbackModelIds, thinkingLevel }
+            nextBrain.planner = mergeRolePolicy(nextBrain.planner || previous, role, customPrompt, { modelId: select.value, fallbackModelIds, thinkingLevel })
           }
         }
         const nextBrains = currentBrains.brains.map((candidate) => candidate.id === nextBrain.id ? nextBrain : candidate)

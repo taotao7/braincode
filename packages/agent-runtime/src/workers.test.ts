@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { applyWorkerMcpToolContext, buildPrimaryPrompt, createWorkerHandoff, formatMcpUsageGuidance, formatProjectSupportPromptSection, runWorkerPool, type ExecutedWorkerResult } from "./workers"
-import type { AgentTool } from "@earendil-works/pi-agent-core"
+import type { AgentTool } from "./pi-agent"
 import type { RuntimeWorkerPlan } from "./router"
 
 function executedResult(index: number, status: ExecutedWorkerResult["status"] = "completed"): ExecutedWorkerResult {

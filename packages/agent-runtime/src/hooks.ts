@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { appendSessionRecord, readHookSources, readSettings, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource } from "@braincode/config"
+import { appendSessionRecord, readHookSources, readSettings, type HookEventName, type HookHandler, type HookMatcherGroup, type HookSource, type SessionHookRecordType } from "@braincode/config"
 
 export type HookPermissionMode = "default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions"
 
@@ -273,7 +273,7 @@ export async function runAndRecordHooks(
   context: HookRuntimeContext,
   matcherValue: string | undefined,
   home: string | undefined,
-  recordType: string,
+  recordType: SessionHookRecordType,
 ): Promise<HookRunResult> {
   const result = await runConfiguredHooks(eventName, eventInput, context, matcherValue)
   if (result.records.length > 0 || result.additionalContext.length > 0 || result.blockedReason) {

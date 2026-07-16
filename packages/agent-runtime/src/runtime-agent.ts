@@ -1,5 +1,5 @@
-import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core"
-import type { AgentRole, BraincodeMode, ModelPolicy } from "@braincode/brain"
+import { Agent, type AgentEvent, type AgentTool } from "./pi-agent"
+import { clampExtendedThinkingLevel, type AgentRole, type BraincodeMode, type ModelPolicy } from "@braincode/brain"
 import { appendSessionRecord, appendTokenUsageRecord, normalizeTokenUsage, type TokenUsagePhase } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
 import { resolveBuiltInPiModel } from "@braincode/llm"
@@ -528,11 +528,12 @@ function normalizeRuntimeThinkingLevel(model: BraincodeModel, policy: ModelPolic
 }
 
 // pi-ai's ThinkingLevel excludes "off"; the summarizer expects undefined when
-// thinking is disabled. Keep summary cost low by never inheriting "xhigh".
-function normalizeSummarizerThinkingLevel(model: BraincodeModel, policy: ModelPolicy): Exclude<ModelPolicy["thinkingLevel"], "off"> | undefined {
+// thinking is disabled. Keep summary cost low by never inheriting the top
+// tiers ("xhigh", GPT-5.6-era "max").
+function normalizeSummarizerThinkingLevel(model: BraincodeModel, policy: ModelPolicy): Exclude<ModelPolicy["thinkingLevel"], "off" | "xhigh" | "max"> | undefined {
   const level = normalizeRuntimeThinkingLevel(model, policy)
   if (!level || level === "off") return undefined
-  return level === "xhigh" ? "high" : level
+  return clampExtendedThinkingLevel(level)
 }
 
 function formatDebugModelLabel(debugContext: Record<string, unknown>): string {

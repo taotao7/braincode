@@ -3,8 +3,9 @@ import { join } from "node:path"
 import type { ModelPolicy, RoutedAgentRole } from "@braincode/brain"
 import { getBraincodeHome, type ProjectSupport, type UserSupport } from "@braincode/config"
 import { agentToBrainContextTransfer, type HandoffPacket, type WorkerResult } from "@braincode/context"
-import type { BraincodeModel, ImageGenerationResult } from "@braincode/llm"
+import { generateImage, type BraincodeModel, type ImageGenerationResult } from "@braincode/llm"
 import { selectRuntimeModelCandidatesWithApiKey, type RuntimeModelCandidate } from "./model-selection"
+import { throwIfRunAborted } from "./runtime-agent"
 import type { PromptWorkerResult } from "./review"
 import { formatWorkerResults } from "./review"
 
@@ -47,6 +48,42 @@ export async function saveGeneratedImageArtifact(sessionId: string, result: Imag
   return path
 }
 
+export type GeneratedImageArtifact = {
+  artifactPath: string
+  generation: ImageGenerationResult
+  summary: string
+}
+
+/**
+ * The single generate → save → summarize step shared by the imageMaker worker
+ * path and the imageMaker primary path. Callers own retry/fallback across model
+ * candidates and all lifecycle recording; this owns the artifact itself.
+ */
+export async function generateImageArtifact(input: {
+  model: BraincodeModel
+  apiKey: string
+  prompt: string
+  sessionId: string
+  home?: string
+  signal?: AbortSignal
+}): Promise<GeneratedImageArtifact> {
+  throwIfRunAborted(input.signal)
+  const generation = await generateImage(input.model, input.apiKey, { prompt: input.prompt, signal: input.signal })
+  throwIfRunAborted(input.signal)
+  const artifactPath = await saveGeneratedImageArtifact(input.sessionId, generation, input.home)
+  return { artifactPath, generation, summary: imageArtifactSummary(artifactPath, generation, input.prompt) }
+}
+
+function imageArtifactSummary(artifactPath: string, generation: ImageGenerationResult, prompt: string): string {
+  return [
+    `Generated image artifact: ${artifactPath}`,
+    `Model: ${generation.provider}/${generation.modelId}`,
+    `Bytes: ${generation.bytes}`,
+    "Prompt:",
+    prompt,
+  ].join("\n")
+}
+
 export function buildImageMakerPrompt(input: {
   request: string
   workerResults?: PromptWorkerResult[]
@@ -75,13 +112,7 @@ export function imageMakerWorkerResult(
   generation: ImageGenerationResult,
   prompt: string,
 ): ImageMakerWorkerResult {
-  const summary = [
-    `Generated image artifact: ${artifactPath}`,
-    `Model: ${generation.provider}/${generation.modelId}`,
-    `Bytes: ${generation.bytes}`,
-    "Prompt:",
-    prompt,
-  ].join("\n")
+  const summary = imageArtifactSummary(artifactPath, generation, prompt)
   return {
     ...agentToBrainContextTransfer,
     handoffId: handoff.id,

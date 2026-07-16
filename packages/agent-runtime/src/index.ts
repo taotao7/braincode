@@ -1,5 +1,5 @@
-import type { AgentEvent } from "@earendil-works/pi-agent-core"
-export type { AgentEvent } from "@earendil-works/pi-agent-core"
+import type { AgentEvent } from "./pi-agent"
+export type { AgentEvent } from "./pi-agent"
 import { collectMcpToolServers, McpToolHub, type McpHubConnectReport, type McpLoadingStrategy } from "./mcp"
 export { collectMcpToolServers, McpToolHub } from "./mcp"
 export type { McpHubConnectReport, McpLoadingStrategy, McpToolServerInput } from "./mcp"
@@ -18,7 +18,6 @@ export type { RuntimeModelRequirements, RuntimeModelSelection, RuntimePiModelSum
 import { getAgentRoleSystemPrompt, getModePolicy, normalizeAgentTodos, selectBrain, selectModelPolicy, type AgentIntentClarification, type AgentTodoItem, type AgentTodoStatus, type AgentWorkerPlan, type BrainModel, type BrainPreset, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, defaultModels, readAuth, readBrains, readModels, readProjectChecks, readProjectSupport, readSessionContext, readSessionTokenUsageSummary, readSettings, readTools, readUserSupport, type SessionContext } from "@braincode/config"
 import type { BraincodeModel } from "@braincode/llm"
-import { generateImage } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
 import { createLocalCodingTools, defaultCheckRunnerConfiguration, mergeCheckRunnerConfiguration, ExecSessionManager, type BackgroundExitListener, type CheckRunnerConfiguration, type LocalToolMode, type PermissionPolicyEvaluation } from "@braincode/tools"
 export type { PermissionPolicyDocument, PermissionPolicyEvaluation, PermissionPolicyMatch } from "@braincode/tools"
@@ -38,7 +37,7 @@ export { applyCheckGateToReviewDecision, applyReviewGatesToReviewDecision, build
 export type { MissingReviewArtifactsPolicy, PatchReviewArtifacts, ReviewCoverageEntry, ReviewCoverageStatus, ReviewDecision, ReviewDecisionStatus, ReviewFinding, ReviewFindingSeverity, ReviewGateOptions, ReviewIndependence, ReviewIndependenceLevel, ReviewIndependenceParticipant, ReviewMode } from "./review"
 import { expandPromptReferences as expandPromptReferencesBase, formatSessionContext, type ExpandedPromptResult, type ExpandPromptReferencesOptions } from "./prompt-references"
 export type { ExpandedPromptResult, ExpandPromptReferencesOptions, PromptReference } from "./prompt-references"
-import { buildImageMakerPrompt, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
+import { buildImageMakerPrompt, generateImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
 import { createGenerateImageTool } from "./generate-image-tool"
 export { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
 export type { ImageMakerWorkerPlan, ImageMakerWorkerResult } from "./image-maker"
@@ -58,6 +57,7 @@ import { createRuntimeMcpLoader, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS, DEFA
 import { createDispatchSpecialistTool, formatDispatchToolGuidance, type DispatchSpecialistTool } from "./dynamic-dispatch"
 export { createDispatchSpecialistTool, dispatchableRoles, dispatchSpecialistMaxForMode, formatDispatchToolGuidance } from "./dynamic-dispatch"
 import { gatherEnvironmentContext, formatEnvironmentSection } from "./environment"
+import { createPhaseTimer } from "./phase-timing"
 export { gatherEnvironmentContext, formatEnvironmentSection, type EnvironmentContext } from "./environment"
 export type { DispatchSpecialistTool, DispatchSpecialistToolOptions } from "./dynamic-dispatch"
 import { buildRuntimeMetricsSummary, createRuntimeToolCallMetricsTracker, type RuntimeMetricsPhase, type RuntimeMetricsSummary } from "./metrics"
@@ -89,6 +89,14 @@ export type AgentRunRequest = {
   onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
   /** Reuse a session manager across prompts so background processes survive between turns (TUI passes a session-scoped instance). */
   execSessions?: ExecSessionManager
+  /**
+   * Reuse an MCP hub across prompts so servers stay connected between turns
+   * instead of being re-spawned and re-listed on every prompt (TUI passes a
+   * session-scoped instance). Callers that pass a hub own its lifecycle and
+   * must call hub.shutdown() when the session ends; the runtime only shuts
+   * down hubs it created itself.
+   */
+  mcpHub?: McpToolHub
   /** Notified when a background process started via exec_command exits. */
   onBackgroundExit?: BackgroundExitListener
 }
@@ -242,10 +250,10 @@ export async function resolvePetRuntime(home?: string): Promise<ResolvedPetRunti
     const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
     const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
     const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
-    const brain = selectBrain(brains as BrainPreset[], settings.defaultBrainId)
+    const brain = selectBrain(brains, settings.defaultBrainId)
     const policy = brain.roles.pet
     if (!policy?.modelId) return null
-    const { selection, apiKey } = await selectRuntimeModelWithApiKey(policy, models as BraincodeModel[], home)
+    const { selection, apiKey } = await selectRuntimeModelWithApiKey(policy, models, home)
     return {
       model: selection.configured,
       apiKey,
@@ -347,6 +355,45 @@ async function updateTodoStatus(
   }
 }
 
+// Owns the primary phase's lifecycle chorus (todo transitions + worker_start /
+// worker_end envelopes), which otherwise repeats at every primary attempt,
+// fix iteration, and failure branch with only status/summary varying.
+function createPrimaryLifecycle(input: {
+  plan: RuntimePlan
+  primaryWorker?: RuntimeWorkerPlan
+  requestPrompt: string
+  sessionId: string
+  home?: string
+  onTodoEvent: AgentRunRequest["onTodoEvent"]
+  emitWorkerEvent: (event: WorkerLifecycleEvent) => Promise<void>
+}) {
+  const { plan, primaryWorker, sessionId, home, onTodoEvent, emitWorkerEvent } = input
+  // plan.todos can be replaced mid-run (ensureReviewWorker renormalizes), so
+  // todo ids are resolved at emission time, matching the previous inline code.
+  const todoIds = () => todoIdsForRole(plan, plan.role)
+  const taskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
+  const handoffId = `primary:${taskId}`
+  const goal = primaryWorker?.goal ?? input.requestPrompt
+  const envelope = () => ({ role: plan.role, phase: "primary" as const, handoffId, taskId, parentId: plan.context.id, todoIds: todoIds() })
+  return {
+    taskId,
+    handoffId,
+    goal,
+    async start(modelId: string, options: { goal?: string; progressSummary?: string } = {}) {
+      const startGoal = options.goal ?? goal
+      await updateTodoStatus(plan, todoIds(), "running", "primary", sessionId, home, onTodoEvent, { role: plan.role })
+      await emitWorkerEvent({ type: "worker_start", ...envelope(), goal: startGoal, modelId, progress: { status: "running", summary: options.progressSummary ?? startGoal } })
+    },
+    async completed(summary: string) {
+      await updateTodoStatus(plan, todoIds(), "completed", "primary", sessionId, home, onTodoEvent, { role: plan.role, summary })
+      await emitWorkerEvent({ type: "worker_end", ...envelope(), status: "completed", progress: { status: "completed", summary }, summary })
+    },
+    async failed(message: string) {
+      await emitWorkerEvent({ type: "worker_end", ...envelope(), status: "failed", progress: { status: "failed", summary: message }, error: message })
+    },
+  }
+}
+
 async function ensureReviewWorker(
   plan: RuntimePlan,
   models: BraincodeModel[],
@@ -365,7 +412,7 @@ async function ensureReviewWorker(
   }
   const brainDocument = await readBrains(home)
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
-  const brain = selectBrain(brains as BrainPreset[], plan.brain.id) as BrainModel
+  const brain = selectBrain(brains, plan.brain.id)
   const normalized = normalizeAgentTodos([...plan.agentPlan.workers, reviewWorkerInput], plan.agentPlan.todos)
   const normalizedReviewWorker = normalized.workers.find((worker) => worker.role === "review") ?? reviewWorkerInput
   const reviewWorker = createRuntimeWorkerPlan(normalizedReviewWorker, brain, models)
@@ -415,31 +462,32 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   throwIfRunAborted(request.signal)
   const sessionId = request.sessionId ?? crypto.randomUUID()
   const cwd = request.projectRoot ?? process.cwd()
+  const timing = createPhaseTimer("executePromptFromConfig")
   const promptHookContext = createHookContext(sessionId, cwd, home)
-  const sessionStartHooks = await runAndRecordHooks(
+  const sessionStartHooks = await timing.measure("hooks:session_start", () => runAndRecordHooks(
     "SessionStart",
     { source: "startup" },
     promptHookContext,
     "startup",
     home,
     "hook_session_start",
-  )
+  ))
   if (sessionStartHooks.blockedReason) {
     throw new Error(`SessionStart hook blocked the run: ${sessionStartHooks.blockedReason}`)
   }
-  const promptHooks = await runAndRecordHooks(
+  const promptHooks = await timing.measure("hooks:user_prompt_submit", () => runAndRecordHooks(
     "UserPromptSubmit",
     { prompt: request.prompt },
     promptHookContext,
     undefined,
     home,
     "hook_user_prompt_submit",
-  )
+  ))
   if (promptHooks.blockedReason) {
     throw new Error(`UserPromptSubmit hook blocked the prompt: ${promptHooks.blockedReason}`)
   }
   throwIfRunAborted(request.signal)
-  const expanded = await expandPromptReferences(request.prompt, cwd, home)
+  const expanded = await timing.measure("prompt_references", () => expandPromptReferences(request.prompt, cwd, home))
   throwIfRunAborted(request.signal)
   const promptImages = expanded.images
   const hookPrompt = addHookAdditionalContext(expanded.prompt, [...sessionStartHooks.additionalContext, ...promptHooks.additionalContext])
@@ -449,9 +497,78 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
   // blue". Skip when the user already referenced this session with @@<id> (the
   // expansion above already injected it) to avoid duplication.
   const alreadyReferencedThisSession = expanded.references.some((ref) => ref.kind === "session" && ref.sessionId === sessionId)
-  const priorContext = alreadyReferencedThisSession ? undefined : await readSessionContext(sessionId, home)
+  const priorContext = alreadyReferencedThisSession ? undefined : await timing.measure("session_context", () => readSessionContext(sessionId, home))
   const effectivePrompt = applySessionContinuity(hookPrompt, priorContext)
-  const plan = await buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId, sessionId)
+  // Config documents (needed by the router below and this run), prep reads,
+  // and the router LLM round-trip all overlap: nothing in prep depends on
+  // config docs, and the router only needs the docs, so its latency hides
+  // behind disk/git latency instead of following it serially.
+  const configDocumentsPromise = timing.measure("config:documents", () =>
+    Promise.all([readModels(home), readSettings(home), readBrains(home)]),
+  )
+  const planPromise = timing.measure("runtime_plan:router", () =>
+    configDocumentsPromise.then(([models, settings, brains]) =>
+      buildRuntimePlan(effectivePrompt, home, true, request.forceRoles, promptImages, sessionId, sessionId, { settings, brains, models }),
+    ),
+  )
+  const prepPromise = timing.measure("prep:parallel", () =>
+    Promise.all([
+      readProjectSupport(cwd),
+      gatherEnvironmentContext({ cwd }),
+      readUserSupport(home),
+      readAuth(home),
+      readTools(home),
+      readProjectChecks(cwd),
+      // Safe to capture alongside the other reads: nothing on the prep path
+      // mutates the worktree (hooks already ran above; workers run later).
+      collectPatchBaseline(cwd),
+    ]).then(([projectSupport, environmentContext, userSupport, auth, toolConfig, projectChecks, patchBaseline]) => ({
+      // Named so every consumer destructures by key — a reordered read above
+      // can no longer silently shift a value into the wrong slot.
+      projectSupport,
+      environmentContext,
+      userSupport,
+      auth,
+      toolConfig,
+      projectChecks,
+      patchBaseline,
+    })),
+  )
+  // The configured MCP server set derives purely from prep data. Computed once
+  // and shared by the early connect and the loader below, so both always see
+  // the identical server list. The .catch keeps a prep failure from becoming
+  // an unhandled rejection on the clarification early-return path (prep itself
+  // is handled through this chain; the real error surfaces at `await` below).
+  const mcpToolServersPromise = prepPromise.then(({ projectSupport, userSupport, auth }) =>
+    collectMcpToolServers({ userMcp: userSupport.mcp, projectMcp: projectSupport.mcp, auth }),
+  )
+  mcpToolServersPromise.catch(() => {})
+  // Session-scoped hub reuse (see AgentRunRequest.mcpHub): connected servers
+  // survive across prompts, so turn 2+ skips the spawn + initialize +
+  // tools/list handshake entirely.
+  const ownsMcpHub = !request.mcpHub
+  const mcpHub = request.mcpHub ?? new McpToolHub()
+  const mcpPerServerConnectTimeoutMs = normalizeRuntimeInteger(request.mcpPerServerConnectTimeoutMs, 250, 120_000, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS)
+  const mcpLoadingStrategy = request.mcpLoadingStrategy ?? "eager"
+  // For session-scoped hubs with the eager strategy, MCP connect depends only
+  // on prep data (auth + MCP configs) — start it as soon as prep resolves so
+  // server spawn + handshake overlaps the router LLM round-trip. lazy and
+  // background strategies exist to defer exactly this work, so they never
+  // connect early. Owned per-run hubs keep the serial path: an early
+  // clarification return or a prep-stage throw must not leak spawned server
+  // processes that only the later try/finally cleans up. This promise is
+  // deliberately never awaited on the run path — the loader's initialize()
+  // joins the same in-flight handshakes (see McpToolHub.ensureServer) under
+  // its own startup budget, which stays the single settle point.
+  if (request.mcpHub && mcpLoadingStrategy === "eager") {
+    void mcpToolServersPromise
+      .then(({ servers }) => {
+        if (servers.length === 0) return
+        return timing.measure("mcp:early_connect", () => mcpHub.connect(servers, { perServerConnectTimeoutMs: mcpPerServerConnectTimeoutMs }))
+      })
+      .catch(() => undefined)
+  }
+  const plan = await planPromise
   throwIfRunAborted(request.signal)
   await appendSessionRecord(sessionId, { type: "context_plan", context: plan.context }, home)
   await appendSessionRecord(sessionId, { type: "todo_plan", todos: plan.todos, dependencies: plan.dependencies }, home)
@@ -495,24 +612,23 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     await appendSessionRecord(sessionId, { type: "run_end", summary, workerResults: [], finalReport, attempt: 1 }, home)
     return { sessionId, summary, finalReport, plan, workerResults: [] }
   }
-  const modelDocument = await readModels(home)
-  const models = (modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models) as BraincodeModel[]
-  const runtimeSettings = await readSettings(home)
+  const [modelDocument, runtimeSettings, brainDocument] = await configDocumentsPromise
+  const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   // Full brain (the plan only carries an id/name/description pick) so we can
   // resolve the imageMaker model policy for the mid-run generate_image tool.
-  const brainDocument = await readBrains(home)
-  const brain = selectBrain((brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains) as BrainPreset[], plan.brain.id) as BrainModel
+  const brain = selectBrain(brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains, plan.brain.id)
   const requirements = runtimeModelRequirementsForRole(plan.role, promptImages)
-  const candidates = plan.role === "imageMaker"
-    ? await selectImageMakerModelCandidates(plan.policy, models, home)
-    : await selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements)
-
-  const projectSupport = await readProjectSupport(cwd)
-  const environmentContext = await gatherEnvironmentContext({ cwd, modelId: plan.model.id })
-  const environmentSection = formatEnvironmentSection(environmentContext)
-  const userSupport = await readUserSupport(home)
+  const { projectSupport, environmentContext, userSupport, auth, toolConfig, projectChecks, patchBaseline } = await prepPromise
+  // Model candidate selection needs the routed role, so it runs after the plan
+  // resolves; the auth document from prep is threaded through so no candidate
+  // re-reads auth.json from disk.
+  const candidates = await timing.measure("model_candidates", () =>
+    plan.role === "imageMaker"
+      ? selectImageMakerModelCandidates(plan.policy, models, home)
+      : selectRuntimeModelCandidatesWithApiKey(plan.policy, models, home, requirements, auth),
+  )
+  const environmentSection = formatEnvironmentSection({ ...environmentContext, modelId: plan.model.id })
   const runtimeSupport = mergeProjectAndUserSupport(projectSupport, userSupport)
-  const auth = await readAuth(home)
   const hookContext = createHookContext(sessionId, cwd, home, plan.model.id)
   const supportingWorkers = plan.workers.filter((worker) => worker.role !== plan.role && worker.role !== "review")
   const primaryWorker = plan.workers.find((worker) => worker.role === plan.role)
@@ -528,14 +644,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     }
   }
 
-  const mcpHub = new McpToolHub()
-  const { servers: mcpServers, skipped: mcpSkipped } = collectMcpToolServers({
-    userMcp: userSupport.mcp,
-    projectMcp: projectSupport.mcp,
-    auth,
-  })
-  const toolConfig = await readTools(home)
-  const projectChecks = await readProjectChecks(cwd)
+  const { servers: mcpServers, skipped: mcpSkipped } = await mcpToolServersPromise
   const checkOptions: CheckRunnerConfiguration = mergeCheckRunnerConfiguration(toolConfig.checks ?? defaultCheckRunnerConfiguration, projectChecks?.config)
   const localToolMode = request.localToolMode ?? (request.onToolApproval ? "all" : "read-only")
   // Share one session manager across both tool sets (and, via request.execSessions,
@@ -597,14 +706,16 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
       plan.agentPlan.requiresReview = true
     }
   }
-  const mcpLoadingStrategy = request.mcpLoadingStrategy ?? "eager"
+  // The early connect (started alongside the router call above) is not
+  // awaited: initialize()'s hub.connect joins the same in-flight handshakes
+  // via ensureServer under the loader's own startup budget.
   const mcpLoader = createRuntimeMcpLoader({
     hub: mcpHub,
     servers: mcpServers,
     skipped: mcpSkipped,
     strategy: mcpLoadingStrategy,
     startupBudgetMs: normalizeRuntimeInteger(request.mcpStartupBudgetMs, 0, 120_000, DEFAULT_MCP_STARTUP_BUDGET_MS),
-    perServerConnectTimeoutMs: normalizeRuntimeInteger(request.mcpPerServerConnectTimeoutMs, 250, 120_000, DEFAULT_MCP_PER_SERVER_CONNECT_TIMEOUT_MS),
+    perServerConnectTimeoutMs: mcpPerServerConnectTimeoutMs,
     runtimeTools,
     localToolCount: primaryLocalTools.length,
     toolEvidenceCache,
@@ -626,60 +737,51 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     checkOptions,
     mcpServers: mcpServers.map((server) => ({ scope: server.scope, name: server.name })),
   })
-  await mcpLoader.initialize()
+  await timing.measure("mcp:initialize", () => mcpLoader.initialize())
 
   try {
-    const patchBaseline = await collectPatchBaseline(cwd)
-    const workerResults = await runSupportWorkers(supportingWorkers, effectivePrompt, sessionId, home, models, plan.mode, plan.toolExecution, plan.dependencies, runtimeSupport, hookContext, request.onWorkerEvent, plan.routing.maxParallelAgents, onWorkerTodoStatus, promptImages, readOnlyTools, toolEvidenceCache, createPhaseEventHandler("support", toolCallMetrics, request.onEvent), request.signal, () => mcpHub.getTools(), environmentSection)
+    const workerResults = await timing.measure("support_workers", () => runSupportWorkers({
+      workers: supportingWorkers,
+      originalPrompt: effectivePrompt,
+      sessionId,
+      home,
+      models,
+      mode: plan.mode,
+      toolExecution: plan.toolExecution,
+      dependencies: plan.dependencies,
+      projectSupport: runtimeSupport,
+      hookContext,
+      onWorkerEvent: request.onWorkerEvent,
+      concurrencyCap: plan.routing.maxParallelAgents,
+      onTodoStatus: onWorkerTodoStatus,
+      promptImages,
+      readOnlyTools,
+      toolEvidenceCache,
+      onEvent: createPhaseEventHandler("support", toolCallMetrics, request.onEvent),
+      signal: request.signal,
+      getMcpTools: () => mcpHub.getTools(),
+      environmentSection,
+    }))
+    const primaryLifecycle = createPrimaryLifecycle({
+      plan,
+      primaryWorker,
+      requestPrompt: request.prompt,
+      sessionId,
+      home,
+      onTodoEvent: request.onTodoEvent,
+      emitWorkerEvent,
+    })
     if (plan.role === "imageMaker") {
-      const primaryTodoIds = todoIdsForRole(plan, plan.role)
-      const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
-      const primaryHandoffId = `primary:${primaryTaskId}`
-      const primaryGoal = primaryWorker?.goal ?? request.prompt
       const imagePrompt = buildImageMakerPrompt({ request: effectivePrompt, workerResults, projectSupport: runtimeSupport })
       let lastError: unknown
       for (const [attempt, { selection, apiKey }] of candidates.entries()) {
         plan.model = selection.configured
         plan.piModel = toPiModelSummary(selection)
         await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(runtimeSupport), attempt: attempt + 1 }, home)
-        await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
-        await emitWorkerEvent({
-          type: "worker_start",
-          role: plan.role,
-          goal: primaryGoal,
-          phase: "primary",
-          modelId: selection.configured.id,
-          handoffId: primaryHandoffId,
-          taskId: primaryTaskId,
-          parentId: plan.context.id,
-          progress: { status: "running", summary: primaryGoal },
-          todoIds: primaryTodoIds,
-        })
+        await primaryLifecycle.start(selection.configured.id)
         try {
-          throwIfRunAborted(request.signal)
-          const generation = await generateImage(selection.configured, apiKey, { prompt: imagePrompt, signal: request.signal })
-          throwIfRunAborted(request.signal)
-          const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
-          const primarySummary = [
-            `Generated image artifact: ${artifactPath}`,
-            `Model: ${generation.provider}/${generation.modelId}`,
-            `Bytes: ${generation.bytes}`,
-            "Prompt:",
-            imagePrompt,
-          ].join("\n")
-          await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary })
-          await emitWorkerEvent({
-            type: "worker_end",
-            role: plan.role,
-            phase: "primary",
-            status: "completed",
-            handoffId: primaryHandoffId,
-            taskId: primaryTaskId,
-            parentId: plan.context.id,
-            progress: { status: "completed", summary: primarySummary },
-            summary: primarySummary,
-            todoIds: primaryTodoIds,
-          })
+          const { summary: primarySummary } = await generateImageArtifact({ model: selection.configured, apiKey, prompt: imagePrompt, sessionId, home, signal: request.signal })
+          await primaryLifecycle.completed(primarySummary)
           const stopHooks = await runAndRecordHooks(
             "Stop",
             {
@@ -712,18 +814,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         } catch (error) {
           lastError = error
           const message = error instanceof Error ? error.message : String(error)
-          await emitWorkerEvent({
-            type: "worker_end",
-            role: plan.role,
-            phase: "primary",
-            status: "failed",
-            handoffId: primaryHandoffId,
-            taskId: primaryTaskId,
-            parentId: plan.context.id,
-            progress: { status: "failed", summary: message },
-            error: message,
-            todoIds: primaryTodoIds,
-          })
+          await primaryLifecycle.failed(message)
           await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
           if (request.signal?.aborted) throw createRunAbortedError()
         }
@@ -735,6 +826,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     const primaryPromptBase = buildPrimaryPrompt(effectivePrompt, workerResults, plan.role, runtimeSupport, runtimeTools.map((tool) => tool.name), environmentSection)
     const dispatchGuidance = dispatchTool ? formatDispatchToolGuidance(plan.mode) : ""
     const primaryPrompt = dispatchGuidance ? `${dispatchGuidance}\n${primaryPromptBase}` : primaryPromptBase
+    timing.report({ sessionId, role: plan.role, workerCount: supportingWorkers.length, mcpServerCount: mcpServers.length })
     let lastError: unknown
     for (const [attempt, { selection, apiKey }] of candidates.entries()) {
       plan.model = selection.configured
@@ -749,23 +841,8 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
         toolCount: runtimeTools.length,
       })
       await appendSessionRecord(sessionId, { type: "run_start", prompt: request.prompt, plan, projectSupport: summarizeProjectSupport(runtimeSupport), attempt: attempt + 1 }, home)
-      const primaryTodoIds = todoIdsForRole(plan, plan.role)
-      await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
-      const primaryTaskId = primaryWorker?.contextId ?? `${plan.context.id}:primary`
-      const primaryHandoffId = `primary:${primaryTaskId}`
-      const primaryGoal = primaryWorker?.goal ?? request.prompt
-      await emitWorkerEvent({
-        type: "worker_start",
-        role: plan.role,
-        goal: primaryGoal,
-        phase: "primary",
-        modelId: selection.configured.id,
-        handoffId: primaryHandoffId,
-        taskId: primaryTaskId,
-        parentId: plan.context.id,
-        progress: { status: "running", summary: primaryGoal },
-        todoIds: primaryTodoIds,
-      })
+      await primaryLifecycle.start(selection.configured.id)
+      const primaryTaskId = primaryLifecycle.taskId
 
       const runtime = createBraincodeAgentRuntime({
         mode: plan.mode,
@@ -828,19 +905,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           provider: selection.piModel.provider,
           api: selection.configured.api,
         })
-        await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
-        await emitWorkerEvent({
-          type: "worker_end",
-          role: plan.role,
-          phase: "primary",
-          status: "completed",
-          handoffId: primaryHandoffId,
-          taskId: primaryTaskId,
-          parentId: plan.context.id,
-          progress: { status: "completed", summary: primarySummary.trim() },
-          summary: primarySummary.trim(),
-          todoIds: primaryTodoIds,
-        })
+        await primaryLifecycle.completed(primarySummary.trim())
 
         const maxFixIterations = getModePolicy(plan.mode).routing.maxFixIterations
         const fixLoopEligible = plan.role !== "review" && !(request.forceRoles && request.forceRoles.length > 0)
@@ -923,9 +988,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           const reviewChangedFiles = patchAfterPrimary?.changedFiles.map((change) => change.path) ?? []
           reviewResult =
             plan.agentPlan.requiresReview && reviewWorker && plan.role !== "review"
-              ? await runWorkerFromPlan(
-                  reviewWorker,
-                  (handoff, reviewer) => buildReviewPrompt(
+              ? await runWorkerFromPlan({
+                  worker: reviewWorker,
+                  buildPrompt: (handoff, reviewer) => buildReviewPrompt(
                     effectivePrompt,
                     primarySummary,
                     workerResults,
@@ -942,18 +1007,18 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
                   sessionId,
                   home,
                   models,
-                  plan.mode,
-                  "review",
-                  runtimeSupport,
+                  mode: plan.mode,
+                  phase: "review",
+                  projectSupport: runtimeSupport,
                   hookContext,
-                  request.onWorkerEvent,
-                  onWorkerTodoStatus,
+                  onWorkerEvent: request.onWorkerEvent,
+                  onTodoStatus: onWorkerTodoStatus,
                   promptImages,
-                  [...readOnlyTools, ...mcpHub.getTools()],
+                  tools: [...readOnlyTools, ...mcpHub.getTools()],
                   toolEvidenceCache,
-                  createPhaseEventHandler("review", toolCallMetrics, request.onEvent),
-                  request.signal,
-                )
+                  onEvent: createPhaseEventHandler("review", toolCallMetrics, request.onEvent),
+                  signal: request.signal,
+                })
               : undefined
           const actualReviewer = reviewResult?.modelId
             ? { modelId: reviewResult.modelId, provider: reviewResult.provider }
@@ -1006,18 +1071,9 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
 
           fixIterations += 1
           await appendSessionRecord(sessionId, { type: "fix_iteration", iteration: fixIterations, trigger, attempt: attempt + 1 }, home)
-          await updateTodoStatus(plan, primaryTodoIds, "running", "primary", sessionId, home, request.onTodoEvent, { role: plan.role })
-          await emitWorkerEvent({
-            type: "worker_start",
-            role: plan.role,
+          await primaryLifecycle.start(selection.configured.id, {
             goal: `Apply check/review fixes (iteration ${fixIterations})`,
-            phase: "primary",
-            modelId: selection.configured.id,
-            handoffId: primaryHandoffId,
-            taskId: primaryTaskId,
-            parentId: plan.context.id,
-            progress: { status: "running", summary: `fix iteration ${fixIterations}` },
-            todoIds: primaryTodoIds,
+            progressSummary: `fix iteration ${fixIterations}`,
           })
           const fixPrompt = buildPrimaryFixPrompt({ checks, reviewDecision }, fixIterations)
           const unlinkFixAbort = linkRuntimeAbort(runtime, request.signal)
@@ -1053,19 +1109,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
             provider: selection.piModel.provider,
             api: selection.configured.api,
           })
-          await updateTodoStatus(plan, primaryTodoIds, "completed", "primary", sessionId, home, request.onTodoEvent, { role: plan.role, summary: primarySummary.trim() })
-          await emitWorkerEvent({
-            type: "worker_end",
-            role: plan.role,
-            phase: "primary",
-            status: "completed",
-            handoffId: primaryHandoffId,
-            taskId: primaryTaskId,
-            parentId: plan.context.id,
-            progress: { status: "completed", summary: primarySummary.trim() },
-            summary: primarySummary.trim(),
-            todoIds: primaryTodoIds,
-          })
+          await primaryLifecycle.completed(primarySummary.trim())
         }
         // Push only the final review result so the merger/report reflect the
         // last decision (the loop recomputes review each iteration).
@@ -1119,18 +1163,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
           error: message,
           willFallback: attempt < candidates.length - 1,
         })
-        await emitWorkerEvent({
-          type: "worker_end",
-          role: plan.role,
-          phase: "primary",
-          status: "failed",
-          handoffId: primaryHandoffId,
-          taskId: primaryTaskId,
-          parentId: plan.context.id,
-          progress: { status: "failed", summary: message },
-          error: message,
-          todoIds: primaryTodoIds,
-        })
+        await primaryLifecycle.failed(message)
         await appendSessionRecord(sessionId, { type: "run_error", error: message, attempt: attempt + 1, willFallback: attempt < candidates.length - 1 }, home)
         if (request.signal?.aborted) throw createRunAbortedError()
         if (isHandoffRequiredError(error) || isProviderMessageSizeLimitError(error)) {
@@ -1147,7 +1180,7 @@ export async function executePromptFromConfig(request: AgentRunRequest, home?: s
     throw lastError instanceof Error ? lastError : new Error(String(lastError))
   } finally {
     mcpLoader.stop()
-    mcpHub.shutdown()
+    if (ownsMcpHub) mcpHub.shutdown()
   }
 }
 

@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access, mkdir, open, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve, dirname } from "node:path"
 import { Type } from "typebox"
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentTool, AgentToolResult } from "./pi-agent"
 import type { ToolConfiguration, ToolPermission } from "./index"
 import {
   createDefaultPermissionPolicy,

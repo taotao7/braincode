@@ -9,8 +9,9 @@
     "check": "bunx tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@braincode/brain": "workspace:*",
     "@braincode/config": "workspace:*",
     "@braincode/shared": "workspace:*",
-    "@earendil-works/pi-ai": "^0.77.0"
+    "@earendil-works/pi-ai": "^0.80.7"
   }
 }

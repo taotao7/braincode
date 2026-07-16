@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentTool, AgentToolResult } from "./pi-agent"
 import { Type } from "typebox"
 import { debugLog } from "@braincode/shared"
 import type { ToolEvidenceCache } from "./evidence-cache"
@@ -114,7 +114,21 @@ export function createRuntimeMcpLoader(options: {
       callbacksActive = false
     },
     initialize: async () => {
+      // A reused session hub may still hold servers connected on an earlier
+      // prompt but since removed from config. Reconcile against the configured
+      // set on every prompt regardless of strategy: connect() prunes too, but
+      // the lazy and zero-server paths below never reach it, and their stale
+      // tools must leave the runtime tool list now.
+      const pruned = options.hub.pruneRemovedServers(options.servers)
+      if (pruned > 0) syncMcpTools()
       if (options.servers.length === 0) {
+        if (pruned > 0) {
+          // Settle through the one owned connect path (a connect over an
+          // empty set is a no-op) so the UI gets a fresh empty report and
+          // stops showing the removed servers as connected.
+          await startConnect()
+          return
+        }
         if (options.skipped.length > 0) await publish(report)
         return
       }

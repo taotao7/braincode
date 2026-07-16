@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { Type } from "typebox"
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentTool, AgentToolResult } from "./pi-agent"
 import { extractMcpServerEntries, resolveMcpServerEnv, type BraincodeAuth, type McpServerEntry, type ProjectMcpConfig } from "@braincode/config"
 import { debugLog } from "@braincode/shared"
 
@@ -148,6 +148,14 @@ class McpConnection {
     return this.request("tools/call", { name, arguments: args })
   }
 
+  // Whether the transport can still serve requests. False once the child
+  // closed/errored (abortPending) or shutdown() ran. Used by a reused hub to
+  // detect servers that died between prompts instead of reporting them from
+  // cache as connected.
+  isAlive(): boolean {
+    return !this.closed && this.child.exitCode === null && this.child.signalCode === null
+  }
+
   shutdown() {
     if (this.closed) return
     this.closed = true
@@ -196,47 +204,160 @@ function stringifyJsonRpcError(value: unknown): string {
   return parts.join(" · ") || JSON.stringify(value)
 }
 
+// Identity of a server within the hub (config name + scope).
+function serverKey(server: { scope: "user" | "project"; name: string }): string {
+  return `${server.scope}:${server.name}`
+}
+
+// Identity of a server's launch configuration. A reused hub compares this to
+// detect config edits (changed command/args/env under the same name) that
+// must force a reconnect instead of serving the stale cached connection.
+// Env entries are sorted so key insertion order (config file ordering, auth
+// injection order) never fingerprints as a config change.
+function serverConfigKey(server: McpToolServerInput): string {
+  return JSON.stringify({
+    command: server.command,
+    args: server.args ?? [],
+    env: Object.entries(server.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  })
+}
+
+// Per-server bookkeeping. `pending` is the whole connect attempt (spawn +
+// initialize + tools/list), created atomically with the record so at most one
+// live attempt exists per key by construction; concurrent and cross-turn
+// callers (e.g. a previous prompt that returned early) all await the same
+// promise. It never rejects — the outcome is read back from the record.
+// `toolNames` is only trustworthy once `established` is true. scope/name/
+// configKey are derived from `connection.info` rather than stored separately.
+type ServerRecord = {
+  connection: McpConnection
+  toolNames: string[]
+  established: boolean
+  error?: string
+  pending?: Promise<void>
+}
+
 export class McpToolHub {
-  private connections: McpConnection[] = []
+  private servers = new Map<string, ServerRecord>()
   private agentTools: AgentTool[] = []
   private agentToolNames = new Set<string>()
-  private serverKeys = new Set<string>()
 
   async connect(servers: McpToolServerInput[], options: McpHubConnectOptions = {}): Promise<McpHubConnectReport> {
     const report: McpHubConnectReport = { connected: [], failed: [], skipped: [], toolCount: 0 }
     const connectTimeoutMs = normalizeConnectTimeoutMs(options.perServerConnectTimeoutMs)
+    this.pruneRemovedServers(servers)
     await Promise.all(
       servers.map(async (server) => {
-        const serverKey = `${server.scope}:${server.name}`
-        if (this.serverKeys.has(serverKey)) {
-          report.skipped.push({ scope: server.scope, name: server.name, reason: "already connected or connecting" })
-          return
-        }
-        this.serverKeys.add(serverKey)
-        const connection = new McpConnection(server)
-        this.connections.push(connection)
-        try {
-          await connection.initialize(connectTimeoutMs)
-          const tools = await connection.listTools(connectTimeoutMs)
-          let addedToolCount = 0
-          for (const tool of tools) {
-            if (this.addAgentTool(toAgentTool(connection, server, tool))) addedToolCount += 1
-            const alias = toWebSearchAlias(connection, server, tool)
-            if (alias && this.addAgentTool(alias)) addedToolCount += 1
-          }
-          report.connected.push({ scope: server.scope, name: server.name, toolCount: addedToolCount })
-          report.toolCount += addedToolCount
-        } catch (error) {
-          connection.shutdown()
-          this.connections = this.connections.filter((candidate) => candidate !== connection)
-          this.serverKeys.delete(serverKey)
-          const message = error instanceof Error ? error.message : String(error)
-          report.failed.push({ scope: server.scope, name: server.name, error: message })
-          debugLog("mcp", "connect failed", { server: server.name, error: message })
+        const record = await this.ensureServer(server, connectTimeoutMs)
+        if (record.established) {
+          report.connected.push({ scope: server.scope, name: server.name, toolCount: record.toolNames.length })
+          report.toolCount += record.toolNames.length
+        } else {
+          report.failed.push({ scope: server.scope, name: server.name, error: record.error ?? "MCP connect failed" })
         }
       }),
     )
     return report
+  }
+
+  // Get-or-create the server's record and await its settled state. All
+  // concurrency lives here: the record and its `pending` attempt are created
+  // in the same synchronous step, so two callers (same turn or cross-turn)
+  // can never spawn the same server twice; a failed prior attempt is retried
+  // by replacing the record. Stale-but-established records (dead process,
+  // edited config) are dropped and reconnected.
+  private async ensureServer(server: McpToolServerInput, connectTimeoutMs: number): Promise<ServerRecord> {
+    const key = serverKey(server)
+    for (;;) {
+      const existing = this.servers.get(key)
+      if (existing?.pending) {
+        // A handshake from this or an earlier prompt is in flight (an early
+        // return — clarification, abort — can leave one). Wait it out and
+        // re-check rather than skipping the server or racing a second spawn.
+        await existing.pending
+        continue
+      }
+      if (existing?.established) {
+        // Reused hub: serve from cache only if the process is still alive and
+        // its launch config is unchanged; otherwise reconnect so a crashed or
+        // reconfigured server never reports as connected with dead tools. (A
+        // live unchanged server keeps its turn-1 tool catalog; dynamic
+        // tool-list changes require an edit or restart to pick up.)
+        if (existing.connection.isAlive() && serverConfigKey(existing.connection.info) === serverConfigKey(server)) {
+          return existing
+        }
+        debugLog("mcp", "reconnecting cached server", { server: server.name, reason: existing.connection.isAlive() ? "config changed" : "connection dead" })
+        this.dropServer(key)
+      } else if (existing) {
+        // Prior attempt failed (record kept for its error). Retry fresh.
+        this.servers.delete(key)
+      }
+      const connection = new McpConnection(server)
+      const record: ServerRecord = { connection, toolNames: [], established: false }
+      record.pending = this.establishServer(record, server, connectTimeoutMs)
+      this.servers.set(key, record)
+      await record.pending
+      return record
+    }
+  }
+
+  // Initialize + list tools for a freshly spawned connection. Never rejects:
+  // failure shuts the connection down and records the error on the record
+  // (ensureServer replaces failed records on the next attempt).
+  private async establishServer(record: ServerRecord, server: McpToolServerInput, connectTimeoutMs: number): Promise<void> {
+    const { connection } = record
+    try {
+      await connection.initialize(connectTimeoutMs)
+      const tools = await connection.listTools(connectTimeoutMs)
+      for (const tool of tools) {
+        const agentTool = toAgentTool(connection, server, tool)
+        if (this.addAgentTool(agentTool)) record.toolNames.push(agentTool.name)
+        const alias = toWebSearchAlias(connection, server, tool)
+        if (alias && this.addAgentTool(alias)) record.toolNames.push(alias.name)
+      }
+      record.established = true
+    } catch (error) {
+      connection.shutdown()
+      record.error = error instanceof Error ? error.message : String(error)
+      debugLog("mcp", "connect failed", { server: server.name, error: record.error })
+    } finally {
+      record.pending = undefined
+    }
+  }
+
+  // Remove one server: shut down its connection and drop its tools and
+  // bookkeeping so it can be pruned or freshly reconnected.
+  private dropServer(key: string): void {
+    const record = this.servers.get(key)
+    if (!record) return
+    record.connection.shutdown()
+    this.servers.delete(key)
+    const removed = new Set(record.toolNames)
+    if (removed.size > 0) {
+      this.agentTools = this.agentTools.filter((tool) => !removed.has(tool.name))
+      for (const name of removed) this.agentToolNames.delete(name)
+    }
+  }
+
+  // Shut down servers that were connected on a previous prompt but are no
+  // longer in the configured set (user removed/renamed them between turns).
+  // Public so the runtime loader can prune a reused hub even on prompts where
+  // connect() is never called (lazy strategy, empty configured set). Returns
+  // the number of servers removed so callers know to re-sync tool lists.
+  pruneRemovedServers(servers: McpToolServerInput[]): number {
+    const desired = new Set(servers.map(serverKey))
+    let pruned = 0
+    for (const [key, record] of [...this.servers]) {
+      if (desired.has(key)) continue
+      // Leave in-flight connects alone: they belong to a concurrent connect()
+      // call for a server that IS configured (or will settle and be pruned on
+      // the next reconcile).
+      if (record.pending) continue
+      this.dropServer(key)
+      pruned += 1
+      debugLog("mcp", "pruned removed server", { server: record.connection.info.name, toolCount: record.toolNames.length })
+    }
+    return pruned
   }
 
   getTools(): AgentTool[] {
@@ -251,11 +372,10 @@ export class McpToolHub {
   }
 
   shutdown() {
-    for (const connection of this.connections) connection.shutdown()
-    this.connections = []
+    for (const record of this.servers.values()) record.connection.shutdown()
+    this.servers.clear()
     this.agentTools = []
     this.agentToolNames.clear()
-    this.serverKeys.clear()
   }
 }
 

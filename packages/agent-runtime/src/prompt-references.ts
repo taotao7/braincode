@@ -1,5 +1,5 @@
 import { isAbsolute, relative as relativePath, resolve as resolvePath } from "node:path"
-import type { ImageContent } from "@earendil-works/pi-ai"
+import type { ImageContent } from "@braincode/llm"
 import { readSessionContext, type SessionContext } from "@braincode/config"
 import { debugLog } from "@braincode/shared"
 

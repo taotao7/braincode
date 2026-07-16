@@ -1,5 +1,6 @@
-import type { ImageContent, Model } from "@earendil-works/pi-ai"
+import type { ImageContent, Model } from "@braincode/llm"
 import type { AgentRole, ImageModelPolicy, ModelPolicy, RoutedAgentRole } from "@braincode/brain"
+import type { BraincodeAuth } from "@braincode/config"
 import { isImageGenerationModel, readProviderRuntimeApiKey, resolveBuiltInPiModel, type BraincodeModel } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
 
@@ -150,13 +151,15 @@ export function toPiModelSummary(selection: RuntimeModelSelection): RuntimePiMod
   }
 }
 
-export async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements): Promise<RuntimeModelCandidate> {
-  const candidates = await selectRuntimeModelCandidatesWithApiKey(policy, models, home, requirements)
+export async function selectRuntimeModelWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements, auth?: BraincodeAuth): Promise<RuntimeModelCandidate> {
+  const candidates = await selectRuntimeModelCandidatesWithApiKey(policy, models, home, requirements, auth)
   if (candidates[0]) return candidates[0]
   throw new Error("No usable model with API key for policy")
 }
 
-export async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements): Promise<RuntimeModelCandidate[]> {
+// `auth` (optional) is an already-loaded auth document; passing it avoids one
+// auth.json disk read per candidate model.
+export async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy, models: BraincodeModel[], home?: string, requirements?: RuntimeModelRequirements, auth?: BraincodeAuth): Promise<RuntimeModelCandidate[]> {
   const explicitIds = [policy.modelId, ...(policy.fallbackModelIds ?? [])].filter((modelId, index, values) => modelId && values.indexOf(modelId) === index)
   const errors: string[] = []
   const candidates: RuntimeModelCandidate[] = []
@@ -168,7 +171,7 @@ export async function selectRuntimeModelCandidatesWithApiKey(policy: ModelPolicy
         models,
         requirements,
       )
-      const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home)
+      const apiKey = await readProviderRuntimeApiKey(selection.piModel.provider, home, auth)
       if (!apiKey) {
         errors.push(`${modelId}: missing API key for provider '${selection.piModel.provider}'`)
         continue

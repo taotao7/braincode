@@ -1,14 +1,14 @@
-import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core"
-import type { ImageContent } from "@earendil-works/pi-ai"
+import type { AgentEvent, AgentTool } from "./pi-agent"
+import type { ImageContent } from "@braincode/llm"
 import { getAgentRoleSystemPrompt, type AgentTodoDependency, type AgentTodoStatus, type BraincodeMode, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, type ProjectSupport, type UserSupport } from "@braincode/config"
 import { agentToBrainContextTransfer, brainToAgentContextTransfer, createHandoffAgentMessage, createWorkerResultAgentMessage, type HandoffPacket, type TaskProgress, type WorkerResult } from "@braincode/context"
-import { generateImage, type BraincodeModel } from "@braincode/llm"
+import type { BraincodeModel } from "@braincode/llm"
 import type { ContextRef } from "@braincode/protocol"
 import { debugLog } from "@braincode/shared"
 import { isHandoffRequiredError } from "./context-budget"
 import { addHookAdditionalContext, createHookContext, runAndRecordHooks, type HookRuntimeContext } from "./hooks"
-import { buildImageMakerPrompt, imageMakerWorkerResult, saveGeneratedImageArtifact, selectImageMakerModelCandidates } from "./image-maker"
+import { buildImageMakerPrompt, generateImageArtifact, imageMakerWorkerResult, selectImageMakerModelCandidates } from "./image-maker"
 import { runtimeModelRequirementsForRole, selectRuntimeModelCandidatesWithApiKey, type RuntimeModelCandidate } from "./model-selection"
 import { normalizeReviewDecisionText, formatWorkerResults, type ReviewDecision } from "./review"
 import { createBraincodeAgentRuntime, createRunAbortedError, linkRuntimeAbort, recordAgentTokenUsage, recordAutomaticHandoffIfNeeded, requireAssistantText, throwIfRunAborted } from "./runtime-agent"
@@ -169,24 +169,44 @@ ${formatWorkerResults(workerResults)}
 Complete the request as the primary ${primaryRole} agent. Treat worker results as advisory context, resolve conflicts explicitly, and produce the final user-facing result.`
 }
 
-export async function runWorkerFromPlan(
-  worker: RuntimeWorkerPlan,
-  buildPrompt: (handoff: HandoffPacket, model: WorkerExecutionModel) => string,
-  sessionId: string,
-  home: string | undefined,
-  models: BraincodeModel[],
-  mode: BraincodeMode,
-  phase: "support" | "review",
-  projectSupport?: RuntimeSupportContext,
-  hookContext?: HookRuntimeContext,
-  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
-  onTodoStatus?: WorkerTodoStatusHandler,
-  promptImages: ImageContent[] = [],
-  tools: AgentTool[] = [],
-  toolEvidenceCache?: ToolEvidenceCache,
-  onEvent?: (event: AgentEvent) => void | Promise<void>,
-  signal?: AbortSignal,
-): Promise<ExecutedWorkerResult> {
+export type RunWorkerOptions = {
+  worker: RuntimeWorkerPlan
+  buildPrompt: (handoff: HandoffPacket, model: WorkerExecutionModel) => string
+  sessionId: string
+  home?: string
+  models: BraincodeModel[]
+  mode: BraincodeMode
+  phase: "support" | "review"
+  projectSupport?: RuntimeSupportContext
+  hookContext?: HookRuntimeContext
+  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
+  onTodoStatus?: WorkerTodoStatusHandler
+  promptImages?: ImageContent[]
+  tools?: AgentTool[]
+  toolEvidenceCache?: ToolEvidenceCache
+  onEvent?: (event: AgentEvent) => void | Promise<void>
+  signal?: AbortSignal
+}
+
+export async function runWorkerFromPlan(options: RunWorkerOptions): Promise<ExecutedWorkerResult> {
+  const {
+    worker,
+    buildPrompt,
+    sessionId,
+    home,
+    models,
+    mode,
+    phase,
+    projectSupport,
+    hookContext,
+    onWorkerEvent,
+    onTodoStatus,
+    promptImages = [],
+    tools = [],
+    toolEvidenceCache,
+    onEvent,
+    signal,
+  } = options
   throwIfRunAborted(signal)
   const emit = async (event: WorkerLifecycleEvent) => {
     if (!onWorkerEvent) return
@@ -218,10 +238,7 @@ export async function runWorkerFromPlan(
       await emit({ type: "worker_start", role: worker.role, goal: worker.goal, phase, modelId: selection.configured.id, handoffId: handoff.id, taskId: handoff.task.id, parentId: handoff.task.parentId, progress: { ...handoff.task.progress, status: "running" }, todoIds: worker.todoIds })
       await appendSessionRecord(sessionId, { type: "worker_start", phase, worker: worker.role, goal: worker.goal, handoff, model: selection.configured.id, agentSessionId, attempt: attempt + 1 }, home)
       try {
-        throwIfRunAborted(signal)
-        const generation = await generateImage(selection.configured, apiKey, { prompt, signal })
-        throwIfRunAborted(signal)
-        const artifactPath = await saveGeneratedImageArtifact(sessionId, generation, home)
+        const { artifactPath, generation } = await generateImageArtifact({ model: selection.configured, apiKey, prompt, sessionId, home, signal })
         const result = imageMakerWorkerResult(worker, handoff, artifactPath, generation, prompt)
         await appendSessionRecord(sessionId, { type: "agent_message", phase, worker: worker.role, message: createWorkerResultAgentMessage(result, { from: worker.role }), attempt: attempt + 1 }, home)
         await appendSessionRecord(sessionId, { type: "worker_end", phase, worker: worker.role, result, attempt: attempt + 1 }, home)
@@ -460,28 +477,52 @@ export async function runWorkerPool(options: {
   return results.filter((result): result is ExecutedWorkerResult => Boolean(result))
 }
 
-export async function runSupportWorkers(
-  workers: RuntimeWorkerPlan[],
-  originalPrompt: string,
-  sessionId: string,
-  home: string | undefined,
-  models: BraincodeModel[],
-  mode: BraincodeMode,
-  toolExecution: RuntimePlan["toolExecution"],
-  dependencies: AgentTodoDependency[] = [],
-  projectSupport?: RuntimeSupportContext,
-  hookContext?: HookRuntimeContext,
-  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>,
-  concurrencyCap?: number,
-  onTodoStatus?: WorkerTodoStatusHandler,
-  promptImages: ImageContent[] = [],
-  readOnlyTools: AgentTool[] = [],
-  toolEvidenceCache?: ToolEvidenceCache,
-  onEvent?: (event: AgentEvent) => void | Promise<void>,
-  signal?: AbortSignal,
-  getMcpTools: () => AgentTool[] = () => [],
-  environmentSection = "",
-): Promise<ExecutedWorkerResult[]> {
+export type RunSupportWorkersOptions = {
+  workers: RuntimeWorkerPlan[]
+  originalPrompt: string
+  sessionId: string
+  home?: string
+  models: BraincodeModel[]
+  mode: BraincodeMode
+  toolExecution: RuntimePlan["toolExecution"]
+  dependencies?: AgentTodoDependency[]
+  projectSupport?: RuntimeSupportContext
+  hookContext?: HookRuntimeContext
+  onWorkerEvent?: (event: WorkerLifecycleEvent) => void | Promise<void>
+  concurrencyCap?: number
+  onTodoStatus?: WorkerTodoStatusHandler
+  promptImages?: ImageContent[]
+  readOnlyTools?: AgentTool[]
+  toolEvidenceCache?: ToolEvidenceCache
+  onEvent?: (event: AgentEvent) => void | Promise<void>
+  signal?: AbortSignal
+  getMcpTools?: () => AgentTool[]
+  environmentSection?: string
+}
+
+export async function runSupportWorkers(options: RunSupportWorkersOptions): Promise<ExecutedWorkerResult[]> {
+  const {
+    workers,
+    originalPrompt,
+    sessionId,
+    home,
+    models,
+    mode,
+    toolExecution,
+    dependencies = [],
+    projectSupport,
+    hookContext,
+    onWorkerEvent,
+    concurrencyCap,
+    onTodoStatus,
+    promptImages = [],
+    readOnlyTools = [],
+    toolEvidenceCache,
+    onEvent,
+    signal,
+    getMcpTools = () => [],
+    environmentSection = "",
+  } = options
   throwIfRunAborted(signal)
   if (workers.length === 0) return []
   void toolExecution // tool execution governs intra-agent tool calls; worker dependency scheduling is Brain-mediated.
@@ -522,24 +563,24 @@ export async function runSupportWorkers(
     const localSet = readOnlyToolWorkerRoles.has(worker.role) ? readOnlyTools : []
     const workerTools = [...localSet, ...getMcpTools()]
     const dependencyResults = priorResults.filter((result) => upstreamContextIds[index]!.has(result.taskId))
-    return runWorkerFromPlan(
+    return runWorkerFromPlan({
       worker,
-      (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, dependencyResults, environmentSection),
+      buildPrompt: (handoff) => buildSupportWorkerPrompt(originalPrompt, handoff, projectSupport, dependencyResults, environmentSection),
       sessionId,
       home,
       models,
       mode,
-      "support",
+      phase: "support",
       projectSupport,
       hookContext,
       onWorkerEvent,
       onTodoStatus,
       promptImages,
-      workerTools,
-      workerTools.length > 0 ? toolEvidenceCache : undefined,
-      workerTools.length > 0 ? onEvent : undefined,
+      tools: workerTools,
+      toolEvidenceCache: workerTools.length > 0 ? toolEvidenceCache : undefined,
+      onEvent: workerTools.length > 0 ? onEvent : undefined,
       signal,
-    )
+    })
   }
 
   const onBlocked = async (index: number): Promise<ExecutedWorkerResult> => {

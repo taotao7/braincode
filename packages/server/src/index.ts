@@ -24,6 +24,7 @@ import {
   type BraincodeSettings,
   type BraincodeTools,
 } from "@braincode/config"
+import { agentRoleSystemPrompts } from "@braincode/brain"
 import { configWebHtml } from "@braincode/config-web"
 import { getBraincodeOAuthProvider, isImageGenerationModel, listBuiltInModelCatalog, listOAuthProviderSummaries, listProviderModels, readProviderRuntimeApiKey, testModelConnection, type BraincodeModel } from "@braincode/llm"
 import { collectMcpToolServers, McpToolHub } from "@braincode/agent-runtime"
@@ -37,6 +38,11 @@ import logoPath from "../../../resources/logo.png" with { type: "file" }
 export type ConfigServerOptions = {
   host?: string
   port?: number
+  // Braincode home directory for all config stores. Defaults to the real
+  // user home; tests inject a temp dir so requests never touch ~/.braincode.
+  home?: string
+  // Project root used for package-manager detection and project support.
+  projectRoot?: string
 }
 
 export type ConfigServerHandle = {
@@ -154,7 +160,7 @@ function isGitHubCopilotEnterprisePrompt(oauthProviderId: string, prompt: { mess
   return /github enterprise|github\.com|url\/domain|enterprise.*domain|domain/i.test(prompt.message ?? "")
 }
 
-async function startOAuthLoginSession(input: { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }): Promise<OAuthLoginSession> {
+async function startOAuthLoginSession(input: { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }, home?: string): Promise<OAuthLoginSession> {
   const oauthProviderId = input.oauthProviderId?.trim() ?? ""
   if (!oauthProviderId) throw new Error("oauthProviderId is required")
   const oauthProvider = getBraincodeOAuthProvider(oauthProviderId)
@@ -200,7 +206,7 @@ async function startOAuthLoginSession(input: { provider?: string; oauthProviderI
         onSelect: async (prompt) => prompt.options[0]?.id,
         signal: session.abortController.signal,
       })
-      await writeProviderOAuthCredentials(provider, oauthProviderId, toBraincodeOAuthCredentials(credentials))
+      await writeProviderOAuthCredentials(provider, oauthProviderId, toBraincodeOAuthCredentials(credentials), home)
       session.expires = credentials.expires
       markOAuthLoginSession(session, "completed")
     } catch (error) {
@@ -261,14 +267,14 @@ type ProviderKeyStatus = {
   hasCredential: boolean
 }
 
-async function buildHealthCheck(projectRoot: string): Promise<{
+async function buildHealthCheck(projectRoot: string, home?: string): Promise<{
   providers: ProviderKeyStatus[]
   models: Array<{ id: string; provider: string; name: string; supportsTools: boolean; supportsVision: boolean; supportsImageGeneration: boolean; hasCredential: boolean }>
   packageManager: { name: string; lockfile: string | null; detected: boolean }
 }> {
-  const [models, authStatus] = await Promise.all([readModels(), readAuthStatus()])
+  const [models, authStatus] = await Promise.all([readModels(home), readAuthStatus(home)])
   const authByProvider = new Map(authStatus.providerAuth.map((entry) => [entry.provider, entry]))
-  const modelList = (models.models as BraincodeModel[]) ?? []
+  const modelList = models.models ?? []
   const providerSet = new Set<string>()
   for (const model of modelList) providerSet.add(model.provider)
   for (const entry of authStatus.providerAuth) providerSet.add(entry.provider)
@@ -296,15 +302,15 @@ async function buildHealthCheck(projectRoot: string): Promise<{
   return { providers, models: modelRows, packageManager: detectProjectPackageManager(projectRoot) }
 }
 
-async function runMcpHealthCheck(): Promise<{
+async function runMcpHealthCheck(home?: string, projectRoot?: string): Promise<{
   connected: Array<{ scope: "user" | "project"; name: string; toolCount: number }>
   failed: Array<{ scope: "user" | "project"; name: string; error: string }>
   skipped: Array<{ scope: "user" | "project"; name: string; reason: string }>
 }> {
   const [userMcp, projectSupport, auth] = await Promise.all([
-    readUserMcpConfig(),
-    readProjectSupport(),
-    readAuth(),
+    readUserMcpConfig(home),
+    readProjectSupport(projectRoot),
+    readAuth(home),
   ])
   const { servers, skipped } = collectMcpToolServers({
     userMcp,
@@ -320,7 +326,21 @@ async function runMcpHealthCheck(): Promise<{
   }
 }
 
-async function handleRequest(request: Request): Promise<Response> {
+// The request environment: which braincode home the stores read from and
+// which project root health checks inspect. Kept explicit (instead of ambient
+// process state) so tests can serve requests against a temp home.
+export type ConfigServerEnvironment = {
+  home?: string
+  projectRoot?: string
+}
+
+export function createConfigRequestHandler(environment: ConfigServerEnvironment = {}): (request: Request) => Promise<Response> {
+  return (request) => handleRequest(request, environment)
+}
+
+async function handleRequest(request: Request, environment: ConfigServerEnvironment = {}): Promise<Response> {
+  const { home } = environment
+  const projectRoot = environment.projectRoot ?? process.cwd()
   const url = new URL(request.url)
   debugLog("server", "request", { method: request.method, path: url.pathname })
 
@@ -344,20 +364,20 @@ async function handleRequest(request: Request): Promise<Response> {
     }
 
     if (request.method === "GET" && url.pathname === "/api/settings") {
-      const settings = await readSettings()
+      const settings = await readSettings(home)
       return json(ok(settings))
     }
 
     if (request.method === "PUT" && url.pathname === "/api/settings") {
       const settings = (await request.json()) as BraincodeSettings
-      await writeSettings(settings)
+      await writeSettings(settings, home)
       return json(ok(settings))
     }
 
     if (request.method === "GET" && url.pathname === "/api/brains") {
-      const brains = await readBrains()
+      const brains = await readBrains(home)
       if (brains.brains.length === 0) {
-        await writeBrains(defaultBrains)
+        await writeBrains(defaultBrains, home)
         return json(ok(defaultBrains))
       }
       return json(ok(brains))
@@ -365,14 +385,21 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "PUT" && url.pathname === "/api/brains") {
       const brains = (await request.json()) as BraincodeBrains
-      await writeBrains(brains)
+      await writeBrains(brains, home)
       return json(ok(brains))
     }
 
+    // Built-in default system prompt per role, so the config UI can show the
+    // effective prompt, offer "reset to default", and only persist a custom
+    // systemPrompt when the user actually diverged from the default.
+    if (request.method === "GET" && url.pathname === "/api/role-prompts") {
+      return json(ok({ prompts: agentRoleSystemPrompts }))
+    }
+
     if (request.method === "GET" && url.pathname === "/api/models") {
-      const models = await readModels()
+      const models = await readModels(home)
       if (models.models.length === 0) {
-        await writeModels(defaultModels)
+        await writeModels(defaultModels, home)
         return json(ok(defaultModels))
       }
       return json(ok(models))
@@ -388,7 +415,7 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "POST" && url.pathname === "/api/oauth/login") {
       const body = (await request.json()) as { provider?: string; oauthProviderId?: string; enterpriseDomain?: string }
-      const session = await startOAuthLoginSession(body)
+      const session = await startOAuthLoginSession(body, home)
       return json(ok(publicOAuthLoginSession(session)))
     }
 
@@ -418,17 +445,17 @@ async function handleRequest(request: Request): Promise<Response> {
     if (request.method === "POST" && url.pathname === "/api/provider-models") {
       const body = (await request.json()) as { provider?: string; baseUrl?: string; apiKey?: string; api?: string }
       const provider = body.provider?.trim() ?? ""
-      const apiKey = body.apiKey?.trim() || (provider ? await readProviderRuntimeApiKey(provider) : undefined)
+      const apiKey = body.apiKey?.trim() || (provider ? await readProviderRuntimeApiKey(provider, home) : undefined)
       const api = body.api === "anthropic" || body.api === "anthropic-messages" ? "anthropic" : body.api === "openai-images" ? "openai-images" : "openai"
       debugLog("server", "loading provider models", { provider, baseUrl: body.baseUrl, api, hasApiKey: Boolean(apiKey) })
       const models = await listProviderModels({ provider, baseUrl: body.baseUrl ?? "", apiKey, api })
-      const savedModels = await readModels()
+      const savedModels = await readModels(home)
       const providers = [
         { provider, baseUrl: models[0]?.baseUrl ?? body.baseUrl, api },
-        ...((savedModels.providers ?? []) as Array<{ provider?: unknown }>).filter((entry) => entry.provider !== provider),
+        ...(savedModels.providers ?? []).filter((entry) => entry.provider !== provider),
       ]
-      await writeModels({ ...savedModels, providers })
-      if (body.apiKey?.trim()) await writeProviderApiKey(provider, body.apiKey)
+      await writeModels({ ...savedModels, providers }, home)
+      if (body.apiKey?.trim()) await writeProviderApiKey(provider, body.apiKey, home)
       return json(ok({ models, providers }))
     }
 
@@ -438,17 +465,17 @@ async function handleRequest(request: Request): Promise<Response> {
       const apiKey = body.apiKey?.trim() ?? ""
       if (!provider) throw new Error("provider is required")
       if (!apiKey) throw new Error("apiKey is required")
-      await writeProviderApiKey(provider, apiKey)
-      return json(ok(await readAuthStatus()))
+      await writeProviderApiKey(provider, apiKey, home)
+      return json(ok(await readAuthStatus(home)))
     }
 
     if (request.method === "POST" && url.pathname === "/api/models/test") {
       const body = (await request.json()) as { modelId?: string; thinkingLevel?: string }
       const modelId = body.modelId?.trim() ?? ""
-      const savedModels = await readModels()
-      const model = (savedModels.models as BraincodeModel[]).find((candidate) => candidate.id === modelId)
+      const savedModels = await readModels(home)
+      const model = savedModels.models.find((candidate) => candidate.id === modelId)
       if (!model) throw new Error(`Unknown configured model id: ${modelId}`)
-      const apiKey = await readProviderRuntimeApiKey(model.provider)
+      const apiKey = await readProviderRuntimeApiKey(model.provider, home)
       const thinkingLevel = body.thinkingLevel?.trim() || undefined
       debugLog("server", "testing model connection", { modelId: model.id, provider: model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
       return json(ok(await testModelConnection(model, apiKey, thinkingLevel as never)))
@@ -457,7 +484,7 @@ async function handleRequest(request: Request): Promise<Response> {
     if (request.method === "POST" && url.pathname === "/api/models/test-config") {
       const body = (await request.json()) as { model?: BraincodeModel; apiKey?: string; thinkingLevel?: string }
       if (!body.model) throw new Error("model is required")
-      const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderRuntimeApiKey(body.model.provider) : undefined)
+      const apiKey = body.apiKey?.trim() || (body.model.provider ? await readProviderRuntimeApiKey(body.model.provider, home) : undefined)
       const thinkingLevel = body.thinkingLevel?.trim() || undefined
       debugLog("server", "testing model config", { modelId: body.model.id, provider: body.model.provider, hasApiKey: Boolean(apiKey), thinkingLevel })
       return json(ok(await testModelConnection(body.model, apiKey, thinkingLevel as never)))
@@ -465,46 +492,46 @@ async function handleRequest(request: Request): Promise<Response> {
 
     if (request.method === "PUT" && url.pathname === "/api/models") {
       const models = (await request.json()) as BraincodeModels
-      await writeModels(models)
+      await writeModels(models, home)
       return json(ok(models))
     }
 
     if (request.method === "GET" && url.pathname === "/api/tools") {
-      const tools = await readTools()
+      const tools = await readTools(home)
       return json(ok(tools))
     }
 
     if (request.method === "PUT" && url.pathname === "/api/tools") {
       const tools = (await request.json()) as BraincodeTools
-      await writeTools(tools)
+      await writeTools(tools, home)
       return json(ok(tools))
     }
 
     if (request.method === "GET" && url.pathname === "/api/auth/status") {
-      const authStatus = await readAuthStatus()
+      const authStatus = await readAuthStatus(home)
       return json(ok(authStatus))
     }
 
     if (request.method === "GET" && url.pathname === "/api/mcp/user") {
-      return json(ok({ mcp: await readUserMcpConfig() }))
+      return json(ok({ mcp: await readUserMcpConfig(home) }))
     }
 
     if (request.method === "POST" && url.pathname === "/api/mcp/tavily") {
       const body = (await request.json()) as { apiKey?: string }
-      const mcp = await configureTavilyMcpServer({ apiKey: body.apiKey })
-      return json(ok({ mcp, authStatus: await readAuthStatus() }))
+      const mcp = await configureTavilyMcpServer({ apiKey: body.apiKey }, home)
+      return json(ok({ mcp, authStatus: await readAuthStatus(home) }))
     }
 
     if (request.method === "GET" && url.pathname === "/api/usage-stats") {
-      return json(ok(await readUsageStats(undefined, { detailLimit: 1000, sessionLimit: 500 })))
+      return json(ok(await readUsageStats(home, { detailLimit: 1000, sessionLimit: 500 })))
     }
 
     if (request.method === "GET" && url.pathname === "/api/health-check") {
-      return json(ok(await buildHealthCheck(process.cwd())))
+      return json(ok(await buildHealthCheck(projectRoot, home)))
     }
 
     if (request.method === "POST" && url.pathname === "/api/mcp/health") {
-      return json(ok(await runMcpHealthCheck()))
+      return json(ok(await runMcpHealthCheck(home, projectRoot)))
     }
 
     if (request.method === "POST" && url.pathname === "/api/permission-preview") {
@@ -513,7 +540,7 @@ async function handleRequest(request: Request): Promise<Response> {
       const args: Record<string, unknown> = {}
       if (body.path?.trim()) args.path = body.path.trim()
       if (body.command?.trim()) args.cmd = body.command.trim()
-      const tools = await readTools()
+      const tools = await readTools(home)
       const policy = normalizePermissionPolicy((tools as { permissions?: unknown }).permissions)
       const evaluation = evaluateToolPermissionPolicy(toolName, args, policy)
       return json(ok(summarizePermissionPolicyEvaluation(evaluation)))
@@ -526,8 +553,8 @@ async function handleRequest(request: Request): Promise<Response> {
 }
 
 export async function startConfigServer(options: ConfigServerOptions = {}): Promise<ConfigServerHandle> {
-  const settings = await readSettings()
-  await ensureBraincodeHome()
+  const settings = await readSettings(options.home)
+  await ensureBraincodeHome(options.home)
 
   const host = options.host ?? settings.configServer.host ?? DEFAULT_CONFIG_HOST
   const port = options.port ?? settings.configServer.port ?? DEFAULT_CONFIG_PORT
@@ -536,7 +563,7 @@ export async function startConfigServer(options: ConfigServerOptions = {}): Prom
   const server = Bun.serve({
     hostname: host,
     port,
-    fetch: handleRequest,
+    fetch: createConfigRequestHandler({ home: options.home, projectRoot: options.projectRoot }),
   })
 
   return {

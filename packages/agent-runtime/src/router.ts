@@ -1,6 +1,6 @@
-import type { ImageContent } from "@earendil-works/pi-ai"
-import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, normalizeAgentIntentClarification, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
-import { defaultBrains, defaultModels, readBrains, readModels, readSettings } from "@braincode/config"
+import type { ImageContent } from "@braincode/llm"
+import { createAgentTodoId, formatRoutedAgentRoleCatalog, getAgentRoleSystemPrompt, getModePolicy, getModeRoutingLimits, hasInjectedContinuityContext, normalizeAgentIntentClarification, normalizeAgentRoutingPlan, planAgentRouting, routedAgentRoles, selectBrain, selectModelPolicy, type AgentRole, type AgentRoutingPlan, type AgentTodoDependency, type AgentTodoItem, type AgentWorkerPlan, type BrainModel, type BrainPreset, type BraincodeMode, type ModePolicy, type ModeRoutingLimits, type ModelPolicy, type RoutedAgentRole } from "@braincode/brain"
+import { defaultBrains, defaultModels, readBrains, readModels, readSettings, type BraincodeBrains, type BraincodeModels, type BraincodeSettings } from "@braincode/config"
 import { createBrainTaskContext, type BrainTaskContext } from "@braincode/context"
 import type { BraincodeModel } from "@braincode/llm"
 import { isImageGenerationModel } from "@braincode/llm"
@@ -8,6 +8,7 @@ import { debugLog } from "@braincode/shared"
 import { runtimeModelRequirementsForImages, runtimeModelRequirementsForRole, selectRuntimeModel, selectRuntimeModelWithApiKey, toPiModelSummary, type RuntimeModelRequirements, type RuntimePiModelSummary } from "./model-selection"
 import { createBraincodeAgentRuntime, recordAgentTokenUsage, requireAssistantText } from "./runtime-agent"
 import { deriveCompactionPolicy, type RuntimeCompactionPolicy } from "./compaction"
+import { measureTimingSpan } from "./phase-timing"
 
 export type RuntimeWorkerPlan = AgentWorkerPlan & {
   contextId: string
@@ -253,7 +254,10 @@ export async function routePromptWithBrain(prompt: string, brain: BrainModel, mo
     const roleEnum = routedAgentRoles.map((role) => `"${role}"`).join("|")
 
     try {
-      await runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
+      await measureTimingSpan(
+        "router brain LLM round-trip",
+        { modelId: routerSelection.configured.id, provider: routerSelection.piModel.provider },
+        () => runtime.agent.prompt(`You are Braincode's routeBrain. Choose the best primary role, useful worker agents, and a concise todo list for this user prompt.
 
 ${formatModeRoutingDirective(mode, modePolicy, routingLimits)}
 
@@ -302,7 +306,7 @@ Output constraints:
 - "confidence" is a number in [0,1] reflecting how confident you are in the routing decision.
 
 User prompt:
-${prompt}`, images.length > 0 ? images : undefined)
+${prompt}`, images.length > 0 ? images : undefined))
     } finally {
       await recordAgentTokenUsage(
         runtime.agent.state.messages,
@@ -350,20 +354,71 @@ ${prompt}`, images.length > 0 ? images : undefined)
   }
 }
 
-export async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId: string = crypto.randomUUID(), usageSessionId?: string): Promise<RuntimePlan> {
-  const [settings, brainDocument, modelDocument] = await Promise.all([readSettings(home), readBrains(home), readModels(home)])
+// Conversational fast path: skip the router brain's full LLM round-trip when
+// the prompt is a short, tool-free conversational turn that the deterministic
+// heuristic already routes to rush with no support workers. Anything that
+// smells like real work (file edits, workspace commands, specialist domains,
+// images, injected continuity context) still goes through the router brain —
+// so a wrong fast-path match costs one rush turn, never a lost specialist.
+const ROUTER_FAST_PATH_MAX_PROMPT_LENGTH = 240
+
+// Workspace-artifact smell: file paths ("src/utils.ts"), backticked code
+// tokens, known source-file extensions, or snake_case identifiers. The
+// heuristic verb patterns can't enumerate every way of asking for an edit,
+// but an edit request almost always names the thing to edit — so an artifact
+// reference disqualifies the conversational fast path. Only high-precision
+// cues: camelCase ("iPhone") and bare decimals ("python 3.12") are common in
+// ordinary chat and deliberately NOT matched — verb-shaped edit requests are
+// caught by the brain's fileEditRiskPattern via requiresReview instead.
+const workspaceArtifactPattern = /(^|[\s"'`(])[\w.-]+\/[\w./-]+|`[^`]+`|\.(?:tsx?|jsx?|mjs|cjs|py|rs|go|java|kt|rb|php|cs|cpp|hpp|css|scss|html|vue|svelte|jsonc?|ya?ml|toml|sql|sh|bash|zsh|lock|env|csv|md)\b|\b\w+_\w+\b/
+
+export function isRouterFastPathEligible(prompt: string, heuristicPlan: AgentRoutingPlan, images: ImageContent[]): boolean {
+  if (images.length > 0) return false
+  const trimmed = prompt.trim()
+  if (!trimmed || trimmed.length > ROUTER_FAST_PATH_MAX_PROMPT_LENGTH) return false
+  // Follow-up turns carry injected session context; let the router brain see it.
+  if (hasInjectedContinuityContext(trimmed)) return false
+  // Prompts that reference concrete workspace artifacts are likely real work
+  // even when no heuristic verb matched (e.g. "rename X to Y in src/a.ts").
+  if (workspaceArtifactPattern.test(trimmed)) return false
+  if (heuristicPlan.primaryRole !== "rush") return false
+  if (heuristicPlan.workers.some((worker) => worker.role !== "rush")) return false
+  if (heuristicPlan.requiresReview) return false
+  if (heuristicPlan.clarification?.required) return false
+  return true
+}
+
+// Pre-read config documents a caller already holds, so buildRuntimePlan does
+// not re-read settings/brains/models from disk on every prompt.
+export type RuntimePlanDocuments = {
+  settings: BraincodeSettings
+  brains: BraincodeBrains
+  models: BraincodeModels
+}
+
+export async function buildRuntimePlan(prompt: string, home: string | undefined, useRouterBrain: boolean, forceRoles?: RoutedAgentRole[], images: ImageContent[] = [], brainContextId: string = crypto.randomUUID(), usageSessionId?: string, documents?: RuntimePlanDocuments): Promise<RuntimePlan> {
+  const [settings, brainDocument, modelDocument] = documents
+    ? [documents.settings, documents.brains, documents.models]
+    : await Promise.all([readSettings(home), readBrains(home), readModels(home)])
   const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   const models = modelDocument.models.length > 0 ? modelDocument.models : defaultModels.models
   const requirements = runtimeModelRequirementsForImages(images)
-  const brain = selectBrain(brains as BrainPreset[], settings.defaultBrainId)
+  const brain = selectBrain(brains, settings.defaultBrainId)
   const modePolicy = getModePolicy(settings.mode)
   const routingLimits = getModeRoutingLimits(settings.mode, brain.routing?.maxParallelAgents)
   const heuristicPlan = planAgentRouting(prompt, brain)
   // Every non-/team prompt goes through the router brain; the heuristic plan is
-  // only a fallback for when the router brain is unavailable, fails, or is not
-  // requested (useRouterBrain=false diagnostics / `braincode run --heuristic`).
-  const routerDecision = useRouterBrain && (!forceRoles || forceRoles.length === 0)
-    ? await routePromptWithBrain(prompt, brain, models as BraincodeModel[], settings.mode, modePolicy, routingLimits, heuristicPlan, images, home, usageSessionId)
+  // only a fallback for when the router brain is unavailable, fails, is not
+  // requested (useRouterBrain=false diagnostics / `braincode run --heuristic`),
+  // or the prompt qualifies for the conversational fast path below.
+  // Only evaluate the fast path when the router would otherwise actually run,
+  // so routing.reason and the timing log never claim "fast path" on /team or
+  // heuristic-diagnostic runs where the router was bypassed for other reasons.
+  const routerWouldRun = useRouterBrain && (!forceRoles || forceRoles.length === 0)
+  const fastPath = routerWouldRun && isRouterFastPathEligible(prompt, heuristicPlan, images)
+  if (fastPath) debugLog("timing", "router fast path: skipping router brain LLM call", { promptLength: prompt.trim().length })
+  const routerDecision = routerWouldRun && !fastPath
+    ? await routePromptWithBrain(prompt, brain, models, settings.mode, modePolicy, routingLimits, heuristicPlan, images, home, usageSessionId)
     : undefined
   const baseAgentPlan = routerDecision ?? heuristicPlan
   const agentPlan = normalizeAgentRoutingPlan(forceRoles && forceRoles.length > 0
@@ -386,7 +441,7 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
   const policy = routerDecision?.modelId && role !== "imageMaker" && roleModelIds.has(routerDecision.modelId)
     ? { ...rolePolicy, modelId: routerDecision.modelId, fallbackModelIds: [], imageModel: undefined }
     : rolePolicy
-  const selection = selectRuntimeModel(policy, models as BraincodeModel[], runtimeModelRequirementsForRole(role, images))
+  const selection = selectRuntimeModel(policy, models, runtimeModelRequirementsForRole(role, images))
   const runtimeWorkerInputs = [...agentPlan.workers]
   if (agentPlan.requiresReview && role !== "review" && !runtimeWorkerInputs.some((worker) => worker.role === "review")) {
     runtimeWorkerInputs.push({
@@ -406,7 +461,7 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
       : undefined
   }
   const workers = runtimeTodoPlan.workers.map((worker) =>
-    createRuntimeWorkerPlan(worker, brain, models as BraincodeModel[], requirements, policyForRuntimeWorker(worker)),
+    createRuntimeWorkerPlan(worker, brain, models, requirements, policyForRuntimeWorker(worker)),
   )
   const context = createBrainTaskContext({
     id: brainContextId,
@@ -423,9 +478,11 @@ export async function buildRuntimePlan(prompt: string, home: string | undefined,
     maxWorkerAgents: routingLimits.maxWorkerAgents,
     maxTodos: routingLimits.maxTodos,
   }
-  const heuristicReason = useRouterBrain
-    ? "router brain unavailable or failed"
-    : "heuristic diagnostic; router brain not requested"
+  const heuristicReason = fastPath
+    ? "conversational fast path; router brain skipped"
+    : useRouterBrain
+      ? "router brain unavailable or failed"
+      : "heuristic diagnostic; router brain not requested"
   const routing = routerDecision
     ? { source: "router-brain" as const, confidence: routerDecision.confidence, reason: routerDecision.reason, ...routingBudget }
     : { source: "heuristic" as const, reason: heuristicReason, ...routingBudget }

@@ -1,23 +1,30 @@
-import { completeSimple, getModel, getModels, getProviders, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai"
+import { createProvider, envApiKeyAuth, type Api, type Context, type Model, type ModelThinkingLevel, type Models, type MutableModels, type ProviderStreams, type SimpleStreamOptions } from "@earendil-works/pi-ai"
+import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy"
+import { azureOpenAIResponsesApi } from "@earendil-works/pi-ai/api/azure-openai-responses.lazy"
+import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy"
+import { googleVertexApi } from "@earendil-works/pi-ai/api/google-vertex.lazy"
+import { mistralConversationsApi } from "@earendil-works/pi-ai/api/mistral-conversations.lazy"
+import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy"
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy"
+import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy"
+import { piMessagesApi } from "@earendil-works/pi-ai/api/pi-messages.lazy"
+import { builtinModels } from "@earendil-works/pi-ai/providers/all"
 import { getOAuthProvider, getOAuthProviders, type OAuthCredentials, type OAuthProviderInterface } from "@earendil-works/pi-ai/oauth"
-import { getProviderApiKey, getProviderOAuthCredentials, readAuth, writeProviderOAuthCredentials, type BraincodeOAuthCredentials } from "@braincode/config"
+import { getProviderApiKey, getProviderOAuthCredentials, readAuth, writeProviderOAuthCredentials, type BraincodeAuth, type BraincodeModel, type BraincodeOAuthCredentials } from "@braincode/config"
+import { clampExtendedThinkingLevel } from "@braincode/brain"
 import { debugLog, normalizeModelApi } from "@braincode/shared"
 
-export type BraincodeModel = {
-  id: string
-  provider: string
-  modelId: string
-  name: string
-  api?: Api | "openai-images"
-  baseUrl?: string
-  headers?: Record<string, string>
-  builtIn?: boolean
-  contextWindow: number
-  supportsTools: boolean
-  supportsVision?: boolean
-  supportsImageGeneration?: boolean
-  defaultThinkingLevel?: ModelThinkingLevel
-}
+// The stored-model schema lives with the models.json store in @braincode/config;
+// this package narrows `api` semantics (pi Api union + "openai-images") at the
+// provider boundary via normalizeModelApi and keeps re-exporting the type so
+// existing importers keep working.
+export type { BraincodeModel } from "@braincode/config"
+
+// This package is the only seam onto pi-ai. Downstream packages that need the
+// provider-level vocabulary (message content, model descriptors, thinking
+// levels, the registry type) import it from here, never from pi-ai directly —
+// so swapping or wrapping the provider layer stays a one-package change.
+export type { Api, ImageContent, Model, Models, ModelThinkingLevel, ThinkingLevel } from "@earendil-works/pi-ai"
 
 export type OpenAICompatibleModelListRequest = {
   provider: string
@@ -85,8 +92,74 @@ export function isImageGenerationModel(model: BraincodeModel): boolean {
   return model.supportsImageGeneration === true || model.api === "openai-images"
 }
 
+// pi-ai ≥0.80 replaced the free getProviders/getModels/getModel/completeSimple
+// functions with a Models registry. Braincode passes auth per call (apiKey in
+// stream options) and keeps no registry state. builtinModels() rebuilds all
+// ~35 providers (and walks their full model catalogs) per call, so memoize —
+// but lazily and through the live import binding, so test-time mock.module
+// substitution still lands before the first real call caches anything.
+let cachedRegistry: Models | undefined
+
+function piModels(): Models {
+  cachedRegistry ??= builtinModels()
+  return cachedRegistry
+}
+
+// Shared registry accessor for other Braincode packages (compaction summaries
+// in agent-runtime), so the whole app resolves models through one registry
+// and one mock point in tests.
+export function piModelRegistry(): Models {
+  return piModels()
+}
+
+// pi-ai ≥0.80 dispatches by provider id and throws "Unknown provider" for ids
+// it does not know — which is every user-added OpenAI/Anthropic-compatible
+// proxy. Pre-0.80 the free completeSimple dispatched by `model.api` alone, so
+// custom providers worked. Recover that at the registry layer: register a
+// provider for each custom id (dispatching on model.api across every built-in
+// API implementation), so registry.completeSimple works uniformly for builtin
+// and custom models — for this package AND for other registry consumers
+// (compaction summaries in agent-runtime).
+let cachedCustomApiMap: Partial<Record<Api, ProviderStreams>> | undefined
+
+function customProviderApiMap(): Partial<Record<Api, ProviderStreams>> {
+  cachedCustomApiMap ??= {
+    "openai-completions": openAICompletionsApi(),
+    "openai-responses": openAIResponsesApi(),
+    "openai-codex-responses": openAICodexResponsesApi(),
+    "azure-openai-responses": azureOpenAIResponsesApi(),
+    "anthropic-messages": anthropicMessagesApi(),
+    "google-generative-ai": googleGenerativeAIApi(),
+    "google-vertex": googleVertexApi(),
+    "mistral-conversations": mistralConversationsApi(),
+    "pi-messages": piMessagesApi(),
+  }
+  return cachedCustomApiMap
+}
+
+function ensureCustomProviderRegistered(providerId: string): void {
+  const registry = piModels()
+  if (registry.getProvider(providerId)) return
+  const mutable = registry as MutableModels
+  if (typeof mutable.setProvider !== "function") return
+  mutable.setProvider(createProvider({
+    id: providerId,
+    // Braincode passes the API key per call (stream options); ambient env
+    // fallback is intentionally empty for custom providers.
+    auth: { apiKey: envApiKeyAuth(`${providerId} API key`, []) },
+    models: [],
+    api: customProviderApiMap(),
+  }))
+  debugLog("llm", "registered custom provider", { provider: providerId })
+}
+
+function completeSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions) {
+  ensureCustomProviderRegistered(model.provider)
+  return piModels().completeSimple(model, context, options)
+}
+
 export function listBuiltInProviders(): string[] {
-  return getProviders()
+  return piModels().getProviders().map((provider) => provider.id)
 }
 
 export function listOAuthProviderSummaries(): OAuthProviderSummary[] {
@@ -101,8 +174,11 @@ export function getBraincodeOAuthProvider(providerId: string): OAuthProviderInte
   return getOAuthProvider(providerId)
 }
 
-export async function readProviderRuntimeApiKey(provider: string, home?: string): Promise<string | undefined> {
-  const auth = await readAuth(home)
+// `auth` lets callers that already hold the auth document in memory (e.g. the
+// runtime's parallel prep read) skip the per-call disk read; omit it to read
+// fresh from disk.
+export async function readProviderRuntimeApiKey(provider: string, home?: string, auth?: BraincodeAuth): Promise<string | undefined> {
+  auth ??= await readAuth(home)
   const apiKey = getProviderApiKey(auth, provider)
   if (apiKey) return apiKey
 
@@ -124,15 +200,20 @@ export async function readProviderRuntimeApiKey(provider: string, home?: string)
 }
 
 export function listBuiltInModelCatalog(): ModelCatalogProvider[] {
-  return getProviders().map((provider) => ({
-    provider,
-    models: getModels(provider).map((model) => toBraincodeModel(model as Model<Api>)),
+  const registry = piModels()
+  return registry.getProviders().map((provider) => ({
+    provider: provider.id,
+    models: registry.getModels(provider.id).map((model) => toBraincodeModel(model as Model<Api>)),
   }))
 }
 
 export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
   if (model.baseUrl && model.builtIn !== true) {
     const piModel = toOpenAICompatiblePiModel(model)
+    // Register at resolution time so every registry consumer (this package's
+    // completeSimple, agent-core streaming, compaction summaries) can
+    // dispatch this custom provider without special-casing.
+    ensureCustomProviderRegistered(piModel.provider)
     debugLog("llm", "resolving custom model", {
       provider: model.provider,
       modelId: model.modelId,
@@ -148,7 +229,7 @@ export function resolvePiModel(model: BraincodeModel): ModelResolutionResult {
 
   try {
     debugLog("llm", "resolving built-in Pi model", { provider: model.provider, modelId: model.modelId })
-    const piModel = getModel(model.provider as never, model.modelId as never) as Model<Api> | undefined
+    const piModel = piModels().getModel(model.provider, model.modelId) as Model<Api> | undefined
     if (!piModel) throw new Error("model is not in the built-in Pi model catalog")
     return {
       braincodeModel: model,
@@ -458,8 +539,8 @@ const TEST_IMAGE_PNG_BASE64 =
 
 function mapThinkingLevelToReasoningEffort(thinkingLevel: ModelThinkingLevel | undefined): string | undefined {
   if (!thinkingLevel || thinkingLevel === "off") return undefined
-  if (thinkingLevel === "xhigh") return "high"
-  return thinkingLevel
+  // Generic OpenAI-compatible proxies only understand low/medium/high.
+  return clampExtendedThinkingLevel(thinkingLevel)
 }
 
 function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {

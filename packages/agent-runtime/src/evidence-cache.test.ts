@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import type { AgentTool } from "@earendil-works/pi-agent-core"
+import type { AgentTool } from "./pi-agent"
 import { Type } from "typebox"
 import { createToolEvidenceCache, wrapToolsWithEvidenceCache } from "./evidence-cache"
 

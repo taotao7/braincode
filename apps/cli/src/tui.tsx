@@ -7,6 +7,7 @@ import {
   ensureSessionHandoff,
   executePromptFromConfig,
   ExecSessionManager,
+  McpToolHub,
   isHandoffRequiredError,
   isProviderMessageSizeLimitError,
   planRuntimeFromConfig,
@@ -43,20 +44,13 @@ import {
   type SessionSummary,
   type UserSupport,
 } from "@braincode/config";
-import type { BrainModel } from "@braincode/brain";
+import { selectBrain, type BrainModel } from "@braincode/brain";
 import { readClipboardImageOrText } from "./clipboard";
 import { checkMcpHealth } from "./mcp-health";
 import { fuzzyFilter, listProjectFiles } from "./project-files";
 import type { PetWatcherSnapshotItem } from "./pet-watcher";
-import {
-  buildEditPreview,
-  displayEditPath,
-  extractEditArgs,
-  resolveEditPath,
-  snapshotFileContent,
-  type EditArgs,
-} from "./tool-edit-preview";
 import { moveDraftCursorVertically } from "./input-cursor";
+import { applyTranscriptOp, createRunProjection } from "./tui-run-projection";
 import { buildImagePreview } from "./image-preview";
 import { isExistingImageFile, resolveImagePromptPath } from "./image-path";
 import type {
@@ -81,12 +75,10 @@ import type {
   ToastState,
   ToastTone,
   TokenUsageSnapshot,
-  ToolCategory,
   TranscriptItem,
 } from "./tui-types";
 import {
   COMMANDS,
-  DEFAULT_STREAM_FLUSH_MS,
   INPUT_MAX_LINES,
   INPUT_MIN_LINES,
   INPUT_PROMPT_PREFIX,
@@ -96,8 +88,6 @@ import {
   PET_PANEL_MIN_WIDTH,
   PET_SNAPSHOT_FLUSH_MS,
   SESSION_PANEL_VISIBLE_ROWS,
-  STREAM_FLUSH_MAX_WAIT_MS,
-  STREAM_FLUSH_MIN_CHARS,
   TRANSCRIPT_MOUSE_WHEEL_ROWS,
   TUI_MOUSE_ENABLED,
 } from "./tui-constants";
@@ -121,23 +111,10 @@ import {
 } from "./tui-text";
 import {
   classifyToolCall,
-  deriveToolIntent,
-  formatBlockedToolDetail,
-  formatBlockedToolText,
   formatPermissionPolicySummary,
-  formatRepeatedReadToolDetail,
-  formatRepeatedReadToolText,
-  formatToolEndText,
-  formatToolResultDetail,
-  formatToolStartText,
-  getToolEvidenceCacheInfo,
-  intentIsWholeMessage,
   requiresToolDecision,
   summarizeToolArgs,
   toolApprovalAllowedByConfig,
-  toolArgsCount,
-  toolArgsObject,
-  toolCallDisplayKey,
   toolCategoryColor,
   toolCategoryTitle,
 } from "./tui-tools";
@@ -154,7 +131,6 @@ import {
   formatRunTokenSummary,
   formatTimestamp,
   formatTuiFinalReportCompact,
-  formatWorkerPhase,
   healthGlyph,
   humanizeRuntimeError,
   isAbortLikeError,
@@ -167,7 +143,6 @@ import {
 } from "./tui-format";
 import {
   displayImagePath,
-  extractGeneratedImagePath,
   filterSessions,
   imageCaption,
   isTranscriptItemCollapsible,
@@ -261,11 +236,16 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   // SIGHUP from `kill` or a closed terminal) that would otherwise orphan a
   // backgrounded `npm run dev`.
   const execSessions = new ExecSessionManager();
+  // Session-scoped MCP hub: servers connect once and stay alive across turns
+  // (turn 2+ skips the spawn/initialize/tools-list handshake entirely). Owned
+  // here, like execSessions, so signal handlers can tear the servers down.
+  const mcpHub = new McpToolHub();
   let reaped = false;
   const reap = () => {
     if (reaped) return;
     reaped = true;
     execSessions.killAllSync();
+    mcpHub.shutdown();
   };
   const onSignal = (signal: NodeJS.Signals) => {
     reap();
@@ -282,7 +262,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   // exit. The alt-screen has no native scrollback, so the transcript provides
   // its own in-app scrolling (PageUp/PageDown/Ctrl+↑↓/Home/End + mouse wheel).
   const instance = render(
-    <BraincodeTui initialPrompt={initialPrompt} execSessions={execSessions} />,
+    <BraincodeTui initialPrompt={initialPrompt} execSessions={execSessions} mcpHub={mcpHub} />,
     {
       alternateScreen: true,
     },
@@ -299,7 +279,7 @@ export async function runTui(initialPrompt?: string): Promise<void> {
   }
 }
 
-function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
+function BraincodeTui({ initialPrompt, execSessions, mcpHub }: BraincodeTuiProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [terminalCols, setTerminalCols] = useState<number>(
@@ -1665,7 +1645,19 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
       });
       return;
     }
-    const brains = (document.brains ?? []) as BrainModel[];
+    // brains.json stores presets (possibly partial, via `extends`); resolve each
+    // through selectBrain so the panel always renders complete Brain Models.
+    const presets = document.brains ?? [];
+    let brains: BrainModel[];
+    try {
+      brains = presets.map((preset) => selectBrain(presets, preset.id));
+    } catch (error) {
+      appendItem({
+        kind: "error",
+        text: `Brain config invalid: ${formatError(error)}`,
+      });
+      return;
+    }
     if (brains.length === 0) {
       appendItem({
         kind: "panel",
@@ -2178,25 +2170,6 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     activeRunAbort.current = runAbort;
 
     let approvalMode: BraincodeMode = mode;
-    const currentAssistant = { id: null as string | null, text: "" };
-    const currentThinking = { id: null as string | null, text: "" };
-    let thinkingShown = false;
-    let activeStreamPhase: "primary" | "support" | "review" | null = null;
-    const toolItems = new Map<
-      string,
-      {
-        itemId: string;
-        toolName: string;
-        toolCategory: ToolCategory;
-        startedAt: number;
-        argsObject: Record<string, unknown> | undefined;
-        argsCount: number;
-        argsKey: string;
-        editArgs?: EditArgs;
-        editBeforePromise?: Promise<string | null>;
-      }
-    >();
-    const repeatedReadToolItems = new Map<string, { itemId: string }>();
 
     const updateItem = (itemId: string, patch: Partial<TranscriptItem>) => {
       setItems((previous) => {
@@ -2217,423 +2190,24 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
       updateItem(statusId, { text: next });
       updateRunStatus(next);
     };
-    // Coalesce high-frequency text_delta updates so Ink is not asked to
-    // repaint the full frame for every token.
-    const parsedStreamFlushMs = Number.parseInt(
-      process.env.BRAINCODE_STREAM_FLUSH_MS ?? "",
-      10,
-    );
-    const STREAM_FLUSH_MS =
-      Number.isFinite(parsedStreamFlushMs) && parsedStreamFlushMs > 0
-        ? parsedStreamFlushMs
-        : DEFAULT_STREAM_FLUSH_MS;
-    let streamFlushHandle: ReturnType<typeof setTimeout> | null = null;
-    let streamPendingId: string | null = null;
-    let streamRenderedLength = 0;
-    let streamLastFlushAt = Date.now();
-    const shouldFlushStream = (force: boolean) => {
-      if (force) return true;
-      const pendingChars = currentAssistant.text.length - streamRenderedLength;
-      if (pendingChars <= 0) return false;
-      if (pendingChars >= STREAM_FLUSH_MIN_CHARS) return true;
-      return Date.now() - streamLastFlushAt >= STREAM_FLUSH_MAX_WAIT_MS;
-    };
-    const flushStream = (force = true): boolean => {
-      if (streamFlushHandle) {
-        clearTimeout(streamFlushHandle);
-        streamFlushHandle = null;
-      }
-      if (!streamPendingId) return false;
-      if (!shouldFlushStream(force)) return false;
-      const id = streamPendingId;
-      const text = currentAssistant.text;
-      streamPendingId = null;
-      streamRenderedLength = text.length;
-      streamLastFlushAt = Date.now();
-      updateItem(id, { text, streaming: true });
-      return true;
-    };
-    const scheduleStreamFlush = (id: string) => {
-      streamPendingId = id;
-      if (streamFlushHandle) return;
-      streamFlushHandle = setTimeout(() => {
-        streamFlushHandle = null;
-        if (!streamPendingId) return;
-        const pendingId = streamPendingId;
-        if (!flushStream(false) && streamPendingId === pendingId) {
-          scheduleStreamFlush(pendingId);
-        }
-      }, STREAM_FLUSH_MS);
-    };
-    const finalizeStreamingBuffers = () => {
-      flushStream();
-      flushThinking();
-      if (currentAssistant.id && currentAssistant.text.length === 0) {
-        const id = currentAssistant.id;
-        setItems((previous) => previous.filter((item) => item.id !== id));
-      }
-      if (currentAssistant.id && currentAssistant.text.length > 0) {
-        const id = currentAssistant.id;
-        setItems((previous) =>
-          previous.map((item) =>
-            item.id === id
-              ? normalizeTranscriptItem({ ...item, streaming: false })
-              : item,
-          ),
-        );
-      }
-      // Finalize the reasoning block: drop it if empty, otherwise mark it
-      // non-streaming so it auto-collapses through the normal transcript path.
-      if (currentThinking.id && currentThinking.text.trim().length === 0) {
-        const id = currentThinking.id;
-        setItems((previous) => previous.filter((item) => item.id !== id));
-      } else if (currentThinking.id) {
-        const id = currentThinking.id;
-        setItems((previous) =>
-          previous.map((item) =>
-            item.id === id
-              ? normalizeTranscriptItem({ ...item, streaming: false })
-              : item,
-          ),
-        );
-      }
-      currentAssistant.id = null;
-      currentAssistant.text = "";
-      currentThinking.id = null;
-      currentThinking.text = "";
-      thinkingRenderedLength = 0;
-      streamRenderedLength = 0;
-      streamLastFlushAt = Date.now();
-      thinkingShown = false;
-    };
-    const ensureAssistantItem = () => {
-      if (currentAssistant.id) return currentAssistant.id;
-      const id = crypto.randomUUID();
-      currentAssistant.id = id;
-      currentAssistant.text = "";
-      appendItemRaw({ id, kind: "assistant", text: "", streaming: true });
-      return id;
-    };
-    const ensureThinkingItem = () => {
-      if (currentThinking.id) return currentThinking.id;
-      const id = crypto.randomUUID();
-      currentThinking.id = id;
-      currentThinking.text = "";
-      appendItemRaw({ id, kind: "thinking", text: "", streaming: true });
-      return id;
-    };
-    // Reasoning streams less densely than text, so a single timer-coalesced
-    // flush (mirroring the assistant stream) keeps Ink repaints bounded.
-    let thinkingFlushHandle: ReturnType<typeof setTimeout> | null = null;
-    let thinkingPendingId: string | null = null;
-    let thinkingRenderedLength = 0;
-    const flushThinking = (): boolean => {
-      if (thinkingFlushHandle) {
-        clearTimeout(thinkingFlushHandle);
-        thinkingFlushHandle = null;
-      }
-      if (!thinkingPendingId) return false;
-      if (currentThinking.text.length === thinkingRenderedLength) return false;
-      const id = thinkingPendingId;
-      const text = currentThinking.text;
-      thinkingPendingId = null;
-      thinkingRenderedLength = text.length;
-      updateItem(id, { text, streaming: true });
-      return true;
-    };
-    const scheduleThinkingFlush = (id: string) => {
-      thinkingPendingId = id;
-      if (thinkingFlushHandle) return;
-      thinkingFlushHandle = setTimeout(() => {
-        thinkingFlushHandle = null;
-        flushThinking();
-      }, STREAM_FLUSH_MS);
-    };
-    const showThinkingStatus = () => {
-      if (thinkingShown) return;
-      thinkingShown = true;
-      updateStatus("Thinking…");
-    };
+    // Runtime-event → transcript translation lives in the run projection
+    // module; the TUI only applies its ops to React state and supplies the
+    // side channels (status line, usage accounting, image previews).
+    const projection = createRunProjection({
+      apply: (ops) => {
+        setItems((previous) => ops.reduce(applyTranscriptOp, previous));
+      },
+      updateStatus,
+      registerTokenUsage,
+      beginUsageTurn,
+      hasActiveUsageTurn: () => activeUsageKey.current !== null,
+      appendImagePreview,
+      projectRoot,
+    });
+    const finalizeStreamingBuffers = projection.finalizeStreamingBuffers;
+    const onEvent = projection.onEvent;
+    const onWorkerEvent = projection.onWorkerEvent;
 
-    const onEvent = (event: AgentEvent) => {
-      switch (event.type) {
-        case "agent_start":
-          updateStatus("Agent starting…");
-          return;
-        case "turn_start":
-          beginUsageTurn();
-          finalizeStreamingBuffers();
-          updateStatus("Turn in progress…");
-          return;
-        case "message_start":
-          if (!activeUsageKey.current) beginUsageTurn();
-          registerTokenUsage(event.message);
-          return;
-        case "message_update": {
-          const update = event.assistantMessageEvent;
-          registerTokenUsage("partial" in update ? update.partial : undefined);
-          if (update.type === "done") registerTokenUsage(update.message);
-          if (update.type === "error") registerTokenUsage(update.error);
-          if (update.type === "text_delta") {
-            if (activeStreamPhase !== "primary") return;
-            const id = ensureAssistantItem();
-            currentAssistant.text += update.delta;
-            scheduleStreamFlush(id);
-          } else if (update.type === "thinking_delta") {
-            showThinkingStatus();
-            // Surface the model's reasoning inline as a collapsible block, but
-            // only for the primary stream (workers return JSON, not prose).
-            if (activeStreamPhase === "primary") {
-              const id = ensureThinkingItem();
-              currentThinking.text += update.delta;
-              scheduleThinkingFlush(id);
-            }
-          } else if (update.type === "toolcall_start") {
-            updateStatus("Tool Call · preparing arguments…");
-          } else if (update.type === "toolcall_end") {
-            const callName = update.toolCall?.name ?? "";
-            if (callName) {
-              const category = classifyToolCall(
-                callName,
-                update.toolCall?.arguments,
-              );
-              updateStatus(
-                `Tool Call · ${toolCategoryTitle(category)} · ${callName}`,
-              );
-            }
-          }
-          return;
-        }
-        case "message_end":
-          registerTokenUsage(event.message);
-          return;
-        case "tool_execution_start": {
-          // Capture the model's lead-in prose (its stated intent) before the
-          // streaming buffers are finalized, so the tool row carries the reason
-          // it was called instead of appearing context-free.
-          const intent = deriveToolIntent(currentAssistant.text);
-          const intentAssistantId =
-            intent !== undefined &&
-            currentAssistant.id !== null &&
-            intentIsWholeMessage(currentAssistant.text, intent)
-              ? currentAssistant.id
-              : null;
-          finalizeStreamingBuffers();
-          // When the entire assistant message was just that short lead-in, fold
-          // it into the tool row rather than leaving a duplicate prose block.
-          if (intentAssistantId) {
-            setItems((previous) =>
-              previous.filter((item) => item.id !== intentAssistantId),
-            );
-          }
-          const itemId = crypto.randomUUID();
-          const argsObject = toolArgsObject(event.args);
-          const argsCount = toolArgsCount(argsObject);
-          const argsKey = toolCallDisplayKey(event.toolName, argsObject);
-          const toolCategory = classifyToolCall(event.toolName, event.args);
-          if (toolCategory !== "read") repeatedReadToolItems.clear();
-          const editArgs =
-            toolCategory === "write"
-              ? (extractEditArgs(event.toolName, event.args) ?? undefined)
-              : undefined;
-          const editBeforePromise = editArgs
-            ? snapshotFileContent(
-                resolveEditPath(editArgs.filePath, projectRoot),
-              )
-            : undefined;
-          const entry = {
-            itemId,
-            toolName: event.toolName,
-            toolCategory,
-            startedAt: Date.now(),
-            argsObject,
-            argsCount,
-            argsKey,
-            editArgs,
-            editBeforePromise,
-          };
-          toolItems.set(event.toolCallId, entry);
-          appendItemRaw({
-            id: itemId,
-            kind: "tool",
-            toolStatus: "running",
-            toolName: event.toolName,
-            toolCategory,
-            startedAt: Date.now(),
-            text: formatToolStartText(event.toolName),
-            toolArgs: argsObject,
-            toolDetail: intent ? `intent: ${intent}` : undefined,
-            collapsed: true,
-          });
-          updateStatus(
-            `Tool Call · ${toolCategoryTitle(toolCategory)} · running ${event.toolName}`,
-          );
-          return;
-        }
-        case "tool_execution_update": {
-          const tracked = toolItems.get(event.toolCallId);
-          if (!tracked) return;
-          updateStatus(
-            `Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · streaming ${event.toolName}`,
-          );
-          return;
-        }
-        case "tool_execution_end": {
-          const tracked = toolItems.get(event.toolCallId);
-          if (!tracked) return;
-          toolItems.delete(event.toolCallId);
-          const elapsed = Date.now() - tracked.startedAt;
-          const evidence = getToolEvidenceCacheInfo(event.result);
-          // A hard-blocked repeat call: the runtime intercepted the loop and
-          // returned cached evidence flagged as an error. Surface it as a
-          // distinct state so the user sees the agent was redirected.
-          if (evidence?.blocked) {
-            const consecutiveCount = evidence.consecutiveCount ?? 2;
-            updateItem(tracked.itemId, {
-              toolStatus: "failed",
-              toolCategory: tracked.toolCategory,
-              finishedAt: Date.now(),
-              text: formatBlockedToolText(event.toolName, consecutiveCount),
-              toolDetail: formatBlockedToolDetail(consecutiveCount, evidence),
-              collapsed: true,
-            });
-            updateStatus(
-              `Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · blocked repeated ${event.toolName} (${consecutiveCount}x) · forcing new direction`,
-            );
-            return;
-          }
-          if (
-            tracked.toolCategory === "read" &&
-            evidence?.reused &&
-            (evidence.callCount ?? 0) > 1
-          ) {
-            const existing = repeatedReadToolItems.get(tracked.argsKey);
-            const duplicateCount = Math.max(1, (evidence.callCount ?? 2) - 1);
-            const text = formatRepeatedReadToolText(
-              event.toolName,
-              duplicateCount,
-            );
-            const toolDetail = formatRepeatedReadToolDetail(
-              duplicateCount,
-              evidence,
-            );
-            if (existing && existing.itemId !== tracked.itemId) {
-              setItems((previous) =>
-                previous.filter((item) => item.id !== tracked.itemId),
-              );
-              updateItem(existing.itemId, {
-                toolStatus: event.isError ? "failed" : "ok",
-                toolCategory: tracked.toolCategory,
-                finishedAt: Date.now(),
-                text,
-                toolDetail,
-                collapsed: true,
-              });
-            } else {
-              repeatedReadToolItems.set(tracked.argsKey, {
-                itemId: tracked.itemId,
-              });
-              updateItem(tracked.itemId, {
-                toolStatus: event.isError ? "failed" : "ok",
-                toolCategory: tracked.toolCategory,
-                finishedAt: Date.now(),
-                text,
-                toolDetail,
-                collapsed: true,
-              });
-            }
-            updateStatus(
-              `Tool Call · Read · reused cached ${event.toolName} (${duplicateCount} duplicate${duplicateCount === 1 ? "" : "s"})`,
-            );
-            return;
-          }
-          updateItem(tracked.itemId, {
-            toolStatus: event.isError ? "failed" : "ok",
-            toolCategory: tracked.toolCategory,
-            finishedAt: Date.now(),
-            text: formatToolEndText(event.toolName, event.isError, elapsed),
-            toolDetail: formatToolResultDetail(event.result),
-            collapsed: true,
-          });
-          if (tracked.editArgs) {
-            const editArgs = tracked.editArgs;
-            const beforePromise =
-              tracked.editBeforePromise ?? Promise.resolve(null);
-            const itemId = tracked.itemId;
-            const isError = event.isError;
-            void (async () => {
-              const [before, after] = await Promise.all([
-                beforePromise,
-                snapshotFileContent(
-                  resolveEditPath(editArgs.filePath, projectRoot),
-                ),
-              ]);
-              const editPreview = buildEditPreview({
-                filePath: displayEditPath(editArgs.filePath, projectRoot),
-                before,
-                after,
-                success: !isError,
-              });
-              updateItem(itemId, { editPreview });
-            })();
-          }
-          updateStatus(
-            `Tool Call · ${toolCategoryTitle(tracked.toolCategory)} · ${event.isError ? "failed" : "done"} ${event.toolName}`,
-          );
-          return;
-        }
-        case "turn_end":
-          registerTokenUsage(event.message);
-          activeUsageKey.current = null;
-          finalizeStreamingBuffers();
-          updateStatus("Turn complete · waiting for next step…");
-          return;
-        case "agent_end":
-          finalizeStreamingBuffers();
-          updateStatus("Agent finished.");
-          return;
-      }
-    };
-
-    const workerItems = new Map<
-      string,
-      { itemId: string; startedAt: number }
-    >();
-    const todoItems = new Map<string, string>();
-    const upsertTodoItem = (event: TodoLifecycleEvent) => {
-      const itemId = todoItems.get(event.todo.id);
-      const summary = event.summary || event.error;
-      const text = `${event.todo.role} · ${event.todo.title}${summary ? ` · ${truncate(summary.replace(/\s+/g, " ").trim(), 120)}` : ""}`;
-      if (itemId) {
-        updateItem(itemId, {
-          todoStatus: event.status,
-          finishedAt:
-            event.status === "completed" ||
-            event.status === "failed" ||
-            event.status === "blocked"
-              ? Date.now()
-              : undefined,
-          text,
-        });
-        return;
-      }
-      const nextItemId = crypto.randomUUID();
-      todoItems.set(event.todo.id, nextItemId);
-      appendItemRaw({
-        id: nextItemId,
-        kind: "todo",
-        todoId: event.todo.id,
-        todoStatus: event.status,
-        startedAt: event.status === "running" ? Date.now() : undefined,
-        finishedAt:
-          event.status === "completed" ||
-          event.status === "failed" ||
-          event.status === "blocked"
-            ? Date.now()
-            : undefined,
-        text,
-      });
-    };
     const onPlan = (plan: RuntimePlan) => {
       approvalMode = plan.mode;
       rememberIntentPlan(plan);
@@ -2645,7 +2219,7 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
         text: `Todo · ${plan.todos.length} planned task${plan.todos.length === 1 ? "" : "s"}`,
       });
       for (const todo of plan.todos) {
-        upsertTodoItem({
+        projection.upsertTodoItem({
           type: "todo_update",
           todo,
           status: todo.status,
@@ -2657,64 +2231,9 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
     const onTodoEvent = (event: TodoLifecycleEvent) => {
       finalizeStreamingBuffers();
       patchIntentTodo(event);
-      upsertTodoItem(event);
+      projection.upsertTodoItem(event);
     };
-    const workerKey = (event: WorkerLifecycleEvent) =>
-      `${event.phase}:${event.role}`;
-    const onWorkerEvent = (event: WorkerLifecycleEvent) => {
-      finalizeStreamingBuffers();
-      const key = workerKey(event);
-      const phaseLabel = formatWorkerPhase(event.phase);
-      if (event.type === "worker_start") {
-        activeStreamPhase = event.phase;
-        const itemId = crypto.randomUUID();
-        workerItems.set(key, { itemId, startedAt: Date.now() });
-        appendItemRaw({
-          id: itemId,
-          kind: "worker",
-          workerStatus: "running",
-          startedAt: Date.now(),
-          text: `${phaseLabel} · ${event.role}  →  ${event.modelId}  ${event.goal ? `· goal: ${truncate(event.goal, 80)}` : ""}`,
-        });
-        updateStatus(`${phaseLabel} ${event.role} running…`);
-        return;
-      }
-      // worker_end
-      if (activeStreamPhase === event.phase) activeStreamPhase = null;
-      const tracked = workerItems.get(key);
-      const itemId = tracked?.itemId;
-      const elapsed = tracked ? Date.now() - tracked.startedAt : undefined;
-      if (itemId) workerItems.delete(key);
-      const text =
-        event.status === "completed"
-          ? `${phaseLabel} · ${event.role}  →  done${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
-          : event.status === "blocked"
-            ? `${phaseLabel} · ${event.role}  →  blocked${elapsed ? ` (${elapsed}ms)` : ""}  ${event.summary ? truncate(event.summary, 160) : ""}`
-            : `${phaseLabel} · ${event.role}  →  failed${elapsed ? ` (${elapsed}ms)` : ""}  ${event.error ? truncate(event.error, 160) : ""}`;
-      if (itemId) {
-        updateItem(itemId, {
-          workerStatus: event.status,
-          finishedAt: Date.now(),
-          text,
-        });
-      } else {
-        appendItemRaw({
-          id: crypto.randomUUID(),
-          kind: "worker",
-          workerStatus: event.status,
-          finishedAt: Date.now(),
-          text,
-        });
-      }
-      updateStatus(`${phaseLabel} ${event.role} ${event.status}.`);
-      // When an image was generated, surface a scaled preview inline so the
-      // user sees the result without opening the file. The artifact path is
-      // embedded in the worker summary as "Generated image artifact: <path>".
-      if (event.status === "completed" && event.summary) {
-        const artifactPath = extractGeneratedImagePath(event.summary);
-        if (artifactPath) appendImagePreview(artifactPath);
-      }
-    };
+
 
     const onMcpReport = (
       report: import("@braincode/agent-runtime").McpHubConnectReport,
@@ -2899,6 +2418,9 @@ function BraincodeTui({ initialPrompt, execSessions }: BraincodeTuiProps) {
         forceRoles: options.forceRoles as never,
         ignoreDisabledLocalTools: approvalMode === "radical",
         execSessions,
+        // Session-scoped hub: servers connected on a previous turn are reused,
+        // so eager loading above only pays the connect cost on the first turn.
+        mcpHub,
         signal: runAbort.signal,
       });
       rememberIntentPlan(result.plan);

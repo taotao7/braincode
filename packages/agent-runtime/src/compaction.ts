@@ -1,7 +1,21 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import { estimateContextTokens, generateSummary } from "@earendil-works/pi-agent-core"
-import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai"
+import type { AgentMessage } from "./pi-agent"
+import { estimateContextTokens, generateSummary } from "./pi-agent"
+import type { Api, Model, Models, ThinkingLevel } from "@braincode/llm"
 import { debugLog } from "@braincode/shared"
+import { piModelRegistry } from "@braincode/llm"
+
+// pi-agent-core ≥0.80's generateSummary takes a Models registry and resolves
+// auth through it instead of an explicit apiKey parameter. Braincode resolves
+// keys per call from its own auth store, so wrap the registry in a shim that
+// injects the resolved key into the one method generateSummary uses. Plain
+// prototype delegation: every other Models method falls through unchanged.
+function modelsWithApiKey(apiKey: string): Models {
+  const base = piModelRegistry()
+  return Object.assign(Object.create(base) as Models, {
+    completeSimple: (model: Model<Api>, context: Parameters<Models["completeSimple"]>[1], options?: Parameters<Models["completeSimple"]>[2]) =>
+      base.completeSimple(model, context, { ...options, apiKey }),
+  })
+}
 
 // Tokens reserved for the summarization prompt and its output, matching
 // pi-agent-core's DEFAULT_COMPACTION_SETTINGS.reserveTokens.
@@ -91,10 +105,9 @@ export function createRuntimeCompactor(options: RuntimeCompactionOptions): Runti
       }
       const result = await generateSummary(
         head,
+        modelsWithApiKey(apiKey),
         options.model,
         RESERVE_TOKENS,
-        apiKey,
-        undefined,
         signal,
         undefined,
         cachedSummary,

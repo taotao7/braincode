@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@earendil-works/pi-agent-core"
+import type { AgentEvent } from "./pi-agent"
 import type { TokenUsageTotals, UsageStatsBucket, SessionTokenUsageSummary } from "@braincode/config"
 
 export type RuntimeMetricsPhase = "router" | "support" | "primary" | "review" | "pet" | "unknown"

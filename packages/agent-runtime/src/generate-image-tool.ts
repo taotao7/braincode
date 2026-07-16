@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentTool, AgentToolResult } from "./pi-agent"
 import { Type } from "typebox"
 import type { ModelPolicy } from "@braincode/brain"
 import { generateImage, type BraincodeModel } from "@braincode/llm"

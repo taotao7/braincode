@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import type { AgentMessage } from "./pi-agent"
 
 const PROVIDER_MESSAGE_SIZE_LIMIT_BYTES = 2 * 1024 * 1024
 const PROVIDER_MESSAGE_SIZE_GUARD_BYTES = Math.floor(PROVIDER_MESSAGE_SIZE_LIMIT_BYTES * 0.88)

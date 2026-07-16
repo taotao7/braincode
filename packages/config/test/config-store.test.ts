@@ -434,8 +434,16 @@ test("readSettings removes legacy manual theme preference", async () => {
 test("non-secret config documents can be read and written from an explicit home", async () => {
   const home = await makeTempHome()
 
+  const fastModel = {
+    id: "fast",
+    provider: "custom",
+    modelId: "fast",
+    name: "Fast",
+    contextWindow: 128000,
+    supportsTools: true,
+  }
   await writeBrains({ brains: [{ id: "brain" }] }, home)
-  await writeModels({ models: [{ id: "fast" }] }, home)
+  await writeModels({ models: [fastModel] }, home)
   await writeTools(
     {
       tools: [
@@ -455,7 +463,7 @@ test("non-secret config documents can be read and written from an explicit home"
 
   await expect(readBrains(home)).resolves.toEqual({ brains: [{ id: "brain" }] })
   const models = await readModels(home)
-  expect(models.models[0]).toEqual({ id: "fast" })
+  expect(models.models[0]).toEqual(fastModel)
   expect(models.models.some((model) => (model as { id?: string }).id === "openai/gpt-image-2")).toBe(false)
   const tools = await readTools(home)
   expect(tools.tools.find((tool) => tool.name === "read_file")?.enabled).toBe(false)
@@ -558,14 +566,105 @@ test("readBrains migrates obsolete roles and stale default system prompts", asyn
   expect(brain.roles?.coding).toBeUndefined()
   expect(brain.roles?.fastReply).toBeUndefined()
   expect(brain.roles?.research).toBeUndefined()
-  expect(brain.planner?.systemPrompt).toBe(agentRoleSystemPrompts.routeBrain)
-  expect(brain.roles?.routeBrain?.systemPrompt).toBe(agentRoleSystemPrompts.routeBrain)
-  expect(brain.roles?.librarian?.systemPrompt).toBe(agentRoleSystemPrompts.librarian)
-  expect(brain.roles?.rush?.systemPrompt).toBe(agentRoleSystemPrompts.rush)
-  expect(brain.roles?.pet?.systemPrompt).toBe(agentRoleSystemPrompts.pet)
-  expect(brain.roles?.imageMaker?.systemPrompt).toBe(agentRoleSystemPrompts.imageMaker)
+  // Stale legacy prompts are REMOVED (un-pinned): absent systemPrompt means
+  // "follow the built-in default", so these roles now track default updates.
+  expect(brain.planner?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.routeBrain?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.librarian?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.rush?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.pet?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.imageMaker?.systemPrompt).toBeUndefined()
   expect(brain.roles?.imageMaker?.modelId).toBe("openai/gpt-image-2")
   expect(brain.roles?.imageMaker?.imageModel).toBeUndefined()
+})
+
+test("readBrains un-pins stored exact copies of the current default prompts", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(
+    paths.brains,
+    JSON.stringify({
+      brains: [
+        {
+          id: "brain",
+          roles: {
+            // Exact copy of today's default (as older config-web versions
+            // stored on every save): carries no information, so migration
+            // removes it and the role follows future default updates.
+            frontend: { modelId: "frontend", thinkingLevel: "medium", systemPrompt: agentRoleSystemPrompts.frontend },
+          },
+        },
+      ],
+    }),
+  )
+
+  const brains = await readBrains(home)
+  const brain = brains.brains[0] as { roles?: Record<string, { systemPrompt?: string }> }
+
+  expect(brain.roles?.frontend?.systemPrompt).toBeUndefined()
+})
+
+test("readBrains un-pins seeded default prompts for roles without legacy patterns (pet)", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  await Bun.write(
+    paths.brains,
+    JSON.stringify({
+      brains: [
+        {
+          id: "brain",
+          roles: {
+            // A previous release's migration seeded pet's prompt verbatim.
+            // pet has no legacySystemPromptPatterns entry, so the exact-copy
+            // un-pin must not depend on the patterns map.
+            pet: { modelId: "pet-model", thinkingLevel: "minimal", systemPrompt: agentRoleSystemPrompts.pet },
+            // A real customization survives.
+            summarize: { modelId: "sum-model", thinkingLevel: "medium", systemPrompt: "My handoff style: bullet points only." },
+          },
+        },
+      ],
+    }),
+  )
+
+  const brains = await readBrains(home)
+  const brain = brains.brains[0] as { roles?: Record<string, { systemPrompt?: string }> }
+
+  expect(brain.roles?.pet?.systemPrompt).toBeUndefined()
+  expect(brain.roles?.summarize?.systemPrompt).toBe("My handoff style: bullet points only.")
+})
+
+test("readBrains preserves user-customized role system prompts", async () => {
+  const home = await makeTempHome()
+  const paths = await ensureBraincodeHome(home)
+
+  // A user customization derived from a current default: it can still match a
+  // legacy migration pattern (imageMaker's does), but the current-generation
+  // marker must protect it from being overwritten back to the default.
+  const customImageMakerPrompt = `${agentRoleSystemPrompts.imageMaker}\nAlways render in the house style: pastel palette, no text in images.`
+  const customFrontendPrompt = "You are my frontend specialist. Always use Tailwind v4 and never inline styles.\nCore operating directives:\n- Follow project conventions."
+
+  await Bun.write(
+    paths.brains,
+    JSON.stringify({
+      brains: [
+        {
+          id: "brain",
+          roles: {
+            imageMaker: { modelId: "openai/gpt-image-2", thinkingLevel: "off", systemPrompt: customImageMakerPrompt },
+            frontend: { modelId: "frontend", thinkingLevel: "medium", systemPrompt: customFrontendPrompt },
+          },
+        },
+      ],
+    }),
+  )
+
+  const brains = await readBrains(home)
+  const brain = brains.brains[0] as { roles?: Record<string, { systemPrompt?: string }> }
+
+  expect(brain.roles?.imageMaker?.systemPrompt).toBe(customImageMakerPrompt)
+  expect(brain.roles?.frontend?.systemPrompt).toBe(customFrontendPrompt)
 })
 
 test("auth status lists configured provider names without returning secrets", async () => {
@@ -803,6 +902,7 @@ test("readSessionContext returns compact session records", async () => {
     phase: "support",
     role: "librarian",
     status: "completed",
+    todoIds: ["todo-01-librarian"],
     todos: [{ id: "todo-01-librarian", title: "Find prior work", role: "librarian", status: "completed" }],
     summary: "found relevant prior work",
   }, home)

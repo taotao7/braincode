@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@earendil-works/pi-agent-core"
+import type { AgentEvent } from "./pi-agent"
 import type { AgentRole } from "@braincode/brain"
 import { appendSessionRecord } from "@braincode/config"
 import type { RuntimeMetricsPhase } from "./metrics"

@@ -93,10 +93,17 @@ class MockEventStream<TEvent = unknown, TResult = unknown> {
   }
 }
 
-mock.module("@earendil-works/pi-ai", () => ({
-  EventStream: MockEventStream,
-  getProviders: () => Object.keys(fakePiModels),
-  getModels: (provider: keyof typeof fakePiModels) => fakePiModels[provider] ?? [],
+// pi-ai ≥0.80 replaced free getProviders/getModels/getModel/completeSimple
+// functions with a Models registry (builtinModels from providers/all); mock
+// the registry shape instead.
+const fakeRegistry = {
+  getProviders: () => Object.keys(fakePiModels).map((id) => ({ id, name: id })),
+  // Truthy for every id so custom-provider calls stay on the registry path
+  // (and are captured in completeSimpleCalls) instead of hitting the real
+  // api-level dispatch fallback.
+  getProvider: (id: string) => ({ id, name: id }),
+  getModels: (provider?: keyof typeof fakePiModels) =>
+    provider ? (fakePiModels[provider] ?? []) : Object.values(fakePiModels).flat(),
   getModel: (provider: keyof typeof fakePiModels, modelId: string) => fakePiModels[provider]?.find((model) => model.id === modelId),
   completeSimple: async (...args: unknown[]) => {
     completeSimpleCalls.push(args)
@@ -104,8 +111,18 @@ mock.module("@earendil-works/pi-ai", () => ({
     return completeSimpleResult
   },
   streamSimple: () => new MockEventStream(),
+}
+
+mock.module("@earendil-works/pi-ai", () => ({
+  EventStream: MockEventStream,
   parseStreamingJson: () => new MockEventStream(),
   validateToolArguments: (_tool: unknown, toolCall: { arguments?: unknown }) => toolCall.arguments,
+  createProvider: (input: unknown) => input,
+  envApiKeyAuth: () => ({}),
+}))
+
+mock.module("@earendil-works/pi-ai/providers/all", () => ({
+  builtinModels: () => fakeRegistry,
 }))
 
 mock.module("@earendil-works/pi-ai/oauth", () => ({

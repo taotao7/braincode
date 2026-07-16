@@ -4,13 +4,13 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type } from "typebox"
-import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings } from "@braincode/config"
+import { appendSessionRecord, createBraincodeAuthEnvRef, ensureBraincodeHome, writeBrains, writeModels, writeProviderApiKey, writeSettings, type BraincodeBrains } from "@braincode/config"
 import { collectMcpToolServers, collectPatchBaseline, collectPatchSummary, ContextHandoffRequiredError, createBraincodeAgentRuntime, createToolEvidenceCache, demoBenchmarkTasks, estimateProviderContextBytes, evaluateDemoBenchmarkPlan, executePromptFromConfig, expandPromptReferences, formatRoleModelCapabilityDirective, humanizeAgentRuntimeError, McpToolHub, normalizeReviewDecisionText, normalizeRouterDecision, normalizeRouterModelId, planRuntimeFromConfig, runConfiguredHooks, runDemoBenchmarkSuite, runPatchChecks, runPatchChecksWithApproval, selectRuntimeModel, type RuntimePlan, type ToolApprovalRequest } from "../src/index"
 
 const TEST_ROLE_NAMES = ["routeBrain", "frontend", "backend", "designer", "imageMaker", "dba", "devops", "security", "qa", "review", "summarize", "oracle", "librarian", "rush", "pet"] as const
 
-function createTestBrainDocument(modelId: string, fallbackModelIds: string[] = []) {
-  const policy = { modelId, fallbackModelIds, thinkingLevel: "medium" }
+function createTestBrainDocument(modelId: string, fallbackModelIds: string[] = []): BraincodeBrains {
+  const policy = { modelId, fallbackModelIds, thinkingLevel: "medium" as const }
   return {
     brains: [
       {
@@ -248,6 +248,148 @@ test("McpToolHub applies per-server connect timeouts", async () => {
     expect(report.failed[0]?.name).toBe("slow")
     expect(report.failed[0]?.error).toContain("initialize timeout")
     expect(elapsedMs).toBeLessThan(1500)
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+// Minimal well-behaved stdio MCP server used by the hub-reuse tests below.
+function writeEchoMcpServer(path: string, toolName: string): Promise<number> {
+  return Bun.write(
+    path,
+    [
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "function send(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n'); }",
+      "rl.on('line', (line) => {",
+      "  const msg = JSON.parse(line);",
+      "  if (msg.method === 'initialize') send(msg.id, { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'test' } });",
+      `  else if (msg.method === 'tools/list') send(msg.id, { tools: [{ name: '${toolName}', inputSchema: { type: 'object', properties: {} } }] });`,
+      "  else if (msg.method === 'tools/call') send(msg.id, { content: [{ type: 'text', text: 'ok' }] });",
+      "});",
+    ].join("\n"),
+  )
+}
+
+test("McpToolHub reuse: reports live cached servers as connected without re-listing", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-reuse-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await writeEchoMcpServer(serverScript, "echo")
+
+  const hub = new McpToolHub()
+  const server = { name: "test", scope: "user" as const, command: "bun", args: [serverScript] }
+  try {
+    const first = await hub.connect([server])
+    expect(first.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+
+    // Second turn on the same hub: still reported connected, tools intact.
+    const second = await hub.connect([server])
+    expect(second.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+    expect(second.skipped).toEqual([])
+    expect(hub.getTools().some((tool) => tool.name === "mcp__test__echo")).toBe(true)
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("McpToolHub reuse: reconnects when a cached server's config changed", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-reconfig-test-"))
+  const scriptA = join(projectRoot, "server-a.js")
+  const scriptB = join(projectRoot, "server-b.js")
+  await writeEchoMcpServer(scriptA, "tool_a")
+  await writeEchoMcpServer(scriptB, "tool_b")
+
+  const hub = new McpToolHub()
+  try {
+    await hub.connect([{ name: "test", scope: "user", command: "bun", args: [scriptA] }])
+    expect(hub.getTools().some((tool) => tool.name === "mcp__test__tool_a")).toBe(true)
+
+    // Same server name, different command args: the edited config must win.
+    const report = await hub.connect([{ name: "test", scope: "user", command: "bun", args: [scriptB] }])
+    expect(report.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+    expect(hub.getTools().some((tool) => tool.name === "mcp__test__tool_b")).toBe(true)
+    expect(hub.getTools().some((tool) => tool.name === "mcp__test__tool_a")).toBe(false)
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("McpToolHub reuse: prunes servers removed from config and drops their tools", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-prune-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await writeEchoMcpServer(serverScript, "echo")
+
+  const hub = new McpToolHub()
+  try {
+    await hub.connect([{ name: "test", scope: "user", command: "bun", args: [serverScript] }])
+    expect(hub.getTools().length).toBeGreaterThan(0)
+
+    const pruned = hub.pruneRemovedServers([])
+    expect(pruned).toBe(1)
+    expect(hub.getTools()).toEqual([])
+
+    // A later connect with the same config must reconnect from scratch.
+    const report = await hub.connect([{ name: "test", scope: "user", command: "bun", args: [serverScript] }])
+    expect(report.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("McpToolHub reuse: a dead cached server is reconnected, not reported from cache", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-dead-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await writeEchoMcpServer(serverScript, "echo")
+
+  const hub = new McpToolHub()
+  const server = { name: "test", scope: "user" as const, command: "bun", args: [serverScript] }
+  try {
+    await hub.connect([server])
+    // Kill the server child out-of-band (simulates a crash between turns).
+    const records = (hub as unknown as { servers: Map<string, { connection: { child: { kill: () => void; pid?: number }; isAlive: () => boolean } }> }).servers
+    const connection = [...records.values()][0]?.connection
+    if (!connection) throw new Error("missing connection")
+    connection.child.kill()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(connection.isAlive()).toBe(false)
+
+    const report = await hub.connect([server])
+    // Reconnected fresh: reported connected via a live handshake, and the
+    // tool is backed by a working transport again.
+    expect(report.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+    const tool = hub.getTools().find((candidate) => candidate.name === "mcp__test__echo")
+    if (!tool) throw new Error("missing MCP tool after reconnect")
+    const result = await tool.execute("call-1", {} as never) as { content: Array<{ text?: string }> }
+    expect(result.content[0]?.text).toBe("ok")
+  } finally {
+    hub.shutdown()
+    await rm(projectRoot, { recursive: true, force: true })
+  }
+})
+
+test("McpToolHub reuse: a second connect awaits an in-flight handshake instead of skipping", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "braincode-mcp-inflight-test-"))
+  const serverScript = join(projectRoot, "server.js")
+  await writeEchoMcpServer(serverScript, "echo")
+
+  const hub = new McpToolHub()
+  const server = { name: "test", scope: "user" as const, command: "bun", args: [serverScript] }
+  try {
+    // Simulates a turn that started a connect and returned early
+    // (clarification / abort) without awaiting it: the next turn's connect
+    // for the same server must wait out the in-flight handshake and report
+    // it connected — never "skipped: already connecting" with zero tools.
+    const firstTurn = hub.connect([server])
+    const secondTurn = hub.connect([server])
+    const [first, second] = await Promise.all([firstTurn, secondTurn])
+    expect(first.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+    expect(second.skipped).toEqual([])
+    expect(second.connected).toEqual([{ scope: "user", name: "test", toolCount: 1 }])
+    expect(hub.getTools().some((tool) => tool.name === "mcp__test__echo")).toBe(true)
   } finally {
     hub.shutdown()
     await rm(projectRoot, { recursive: true, force: true })
@@ -1580,8 +1722,8 @@ test("planRuntimeFromConfig requires routeBrain instead of heuristic fallback fo
       },
       home,
     )
-    const textPolicy = { modelId: "custom/text", fallbackModelIds: [], thinkingLevel: "low" }
-    const routerPolicy = { modelId: "custom/brain-vision", fallbackModelIds: [], thinkingLevel: "medium" }
+    const textPolicy = { modelId: "custom/text", fallbackModelIds: [], thinkingLevel: "low" as const }
+    const routerPolicy = { modelId: "custom/brain-vision", fallbackModelIds: [], thinkingLevel: "medium" as const }
     await writeBrains(
       {
         brains: [

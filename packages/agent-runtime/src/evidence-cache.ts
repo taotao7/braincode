@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentTool, AgentToolResult } from "./pi-agent"
 
 type ToolEvidenceCacheEntry = {
   result: AgentToolResult<any>

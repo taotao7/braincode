@@ -57,6 +57,7 @@ export type PartialCheckRunnerConfiguration = {
   maxOutputBytes?: number
 }
 
+export type { AgentTool, AgentToolResult } from "./pi-agent"
 export {
   createDefaultPermissionPolicy,
   evaluateToolPermissionPolicy,

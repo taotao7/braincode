@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core"
+import type { AgentEvent, AgentTool, AgentToolResult } from "./pi-agent"
 import { Type } from "typebox"
 import { getModePolicy, routedAgentRoles, selectBrain, type BrainModel, type BrainPreset, type BraincodeMode, type RoutedAgentRole } from "@braincode/brain"
 import { appendSessionRecord, defaultBrains, readBrains } from "@braincode/config"
@@ -173,24 +173,23 @@ async function runDispatchedWorker(
   // or renderer.
   const localSet = readOnlyToolWorkerRoles.has(role) ? options.readOnlyTools : []
   const workerTools = [...localSet, ...(options.getMcpTools?.() ?? [])]
-  const result = await runWorkerFromPlan(
+  const result = await runWorkerFromPlan({
     worker,
-    (handoff) => buildDispatchWorkerPrompt(options.plan.context.goal, goal, handoff, options.projectSupport, options.environmentSection ?? ""),
-    options.sessionId,
-    options.home,
-    options.models,
-    options.plan.mode,
-    "support",
-    options.projectSupport,
-    options.hookContext,
-    options.onWorkerEvent,
-    options.onWorkerTodoStatus,
-    [],
-    workerTools,
-    workerTools.length > 0 ? options.toolEvidenceCache : undefined,
-    workerTools.length > 0 ? options.onEvent : undefined,
-    options.signal,
-  )
+    buildPrompt: (handoff) => buildDispatchWorkerPrompt(options.plan.context.goal, goal, handoff, options.projectSupport, options.environmentSection ?? ""),
+    sessionId: options.sessionId,
+    home: options.home,
+    models: options.models,
+    mode: options.plan.mode,
+    phase: "support",
+    projectSupport: options.projectSupport,
+    hookContext: options.hookContext,
+    onWorkerEvent: options.onWorkerEvent,
+    onTodoStatus: options.onWorkerTodoStatus,
+    tools: workerTools,
+    toolEvidenceCache: workerTools.length > 0 ? options.toolEvidenceCache : undefined,
+    onEvent: workerTools.length > 0 ? options.onEvent : undefined,
+    signal: options.signal,
+  })
 
   await appendSessionRecord(options.sessionId, {
     type: "dynamic_dispatch",
@@ -207,7 +206,7 @@ async function resolveBrain(home: string | undefined, brainId: string): Promise<
   // Read the configured brains so the dispatched worker selects models through
   // the same role-policy chains as planned workers. Falls back to defaults.
   const brainDocument = await readBrains(home)
-  const brains = (brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains) as BrainPreset[]
+  const brains = brainDocument.brains.length > 0 ? brainDocument.brains : defaultBrains.brains
   return selectBrain(brains, brainId)
 }
 

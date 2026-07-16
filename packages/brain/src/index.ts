@@ -6,10 +6,27 @@ export type ImageModelPolicy = {
   api?: "openai-images"
 }
 
+// Single source of truth for thinking levels, in ascending order. "max" is
+// the pro-tier reasoning level introduced with GPT-5.6-generation models
+// (pi-ai ≥0.80); models that don't support a level get it clamped by the
+// provider layer. The ModelPolicy union, the config UI selects, and the
+// extended-tier clamp all derive from this array — a new tier is added here
+// exactly once.
+export const modelThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const
+export type ModelThinkingLevel = (typeof modelThinkingLevels)[number]
+
+// Tiers above "high" for consumers that only understand off..high: generic
+// OpenAI-compatible reasoning_effort and the summarizer clamp both use this.
+// Typed against the union so extending modelThinkingLevels forces a clamp
+// decision here at compile time.
+export function clampExtendedThinkingLevel<T extends ModelThinkingLevel>(level: T): Exclude<T, "xhigh" | "max"> | "high" {
+  return level === "xhigh" || level === "max" ? "high" : (level as Exclude<T, "xhigh" | "max">)
+}
+
 export type ModelPolicy = {
   modelId: string
   fallbackModelIds?: string[]
-  thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+  thinkingLevel: ModelThinkingLevel
   systemPrompt?: string
   imageModel?: ImageModelPolicy
 }
@@ -399,8 +416,15 @@ function buildAgentRoleSystemPrompt(role: AgentRole, directives: string[] = []):
 // no-op for read-only/advisory roles that never change code or run commands.
 // Response-format/conciseness guidance lives in the primary user-prompt instead,
 // because the same role prompt also drives JSON-only support workers.
+// Header line of the shared directives block below. Every current-generation
+// default role prompt contains it (via buildAgentRoleSystemPrompt); the config
+// package uses it as a provenance marker so legacy-prompt migration never
+// overwrites current-generation or user-customized prompts. Keep the constant
+// and the array's first line in sync — they are the same string.
+export const CORE_OPERATING_DIRECTIVES_HEADER = "Core operating directives:"
+
 const coreOperatingDirectives = [
-  "Core operating directives:",
+  CORE_OPERATING_DIRECTIVES_HEADER,
   "- Investigate before asserting: read the relevant code or run the relevant command before making claims about it, and keep what you verified separate from what you assume.",
   "- Match the codebase: when you change code, follow the surrounding file's existing style, naming, and libraries, and solve the task asked without unrequested refactors or scope creep.",
   "- Verify your work: after changing code, run the project's build and the relevant tests before reporting done; if they fail, fix them or report the failure with its output instead of claiming success.",
@@ -709,7 +733,7 @@ export function formatRoutedAgentRoleCatalog(): string {
 // `requiresReview`. The brain's actual routing is LLM-driven (see routeBrain
 // prompt in packages/agent-runtime); the patterns below intentionally do NOT
 // pick a role — they only flag risk.
-const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete)\b|实现|开发|修复|新增|修改|重构|编辑|删除/
+const fileEditRiskPattern = /\b(implement|build|create|add|fix|change|modify|refactor|edit|write|delete|rename|move|extract|inline|rewrite|replace|remove)\b|实现|开发|修复|新增|修改|重构|编辑|删除|重命名|改名|移动|替换|移除|改写/
 const workspaceOperationPattern = /\b(git|commit|commits|stage|staged|staging|status|diff|push|pull|branch|checkout|merge|rebase|tag|release|ci|workflow|shell|terminal|command|execute|run script|package script|npm|bun|pnpm|yarn|test|lint|typecheck)\b|提交|暂存|状态|推送|拉取|分支|合并|变基|标签|发布|命令|终端|测试/
 const imageGenerationPattern = /\b(generate|create|make|draw|produce|render|edit)\b.{0,48}\b(image|images|picture|pictures|illustration|illustrations|poster|avatar|portrait|visual asset|art)\b|\b(generate art)\b|生成.{0,24}(图片|图像|画|海报|头像|插画|角色图)|图片生成|画一张|做图/
 const frontendWorkPattern = /\b(frontend|front-end|ui|ux|browser|client|component|components|react|vue|svelte|css|html|page|form|layout|screen|view)\b|前端|界面|页面|组件|表单|浏览器|客户端|登录页|登陆页/
@@ -833,7 +857,11 @@ export function assessIntentCompleteness(prompt: string): AgentIntentClarificati
   return undefined
 }
 
-function hasInjectedContinuityContext(prompt: string): boolean {
+// Detects the continuity headers the runtime injects into follow-up prompts
+// (applySessionContinuity / session references). Exported so router-side
+// heuristics (e.g. the conversational fast path) share one definition with
+// the clarification gate instead of re-inlining the marker strings.
+export function hasInjectedContinuityContext(prompt: string): boolean {
   return /Conversation so far/i.test(prompt) || /Referenced session context/i.test(prompt)
 }
 
